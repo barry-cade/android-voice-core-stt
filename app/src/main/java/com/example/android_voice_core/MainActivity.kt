@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -49,18 +50,48 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAudioService() {
-        val modelPath = copyModelAssetToCache()
-        val handle = WhisperBridge.init(modelPath)
-        val pcm = ShortArray(1600) { 0 }
-        val text = WhisperBridge.transcribe(handle, pcm)
-        Log.d("WhisperBridge", "text=$text")
+        val outputText = findViewById<TextView>(R.id.outputText)
+        outputText.text = "Running Whisper test..."
 
-        val intent = Intent(this, AudioTestService::class.java)
-        ContextCompat.startForegroundService(this, intent)
+        // Run in a thread to keep UI responsive and see if it helps with "terminating"
+        Thread {
+            try {
+                Log.d("WhisperTest", "Starting copy")
+                val modelPath = copyModelAssetToCache()
+                Log.d("WhisperTest", "Model path: $modelPath")
+
+                Log.d("WhisperTest", "Calling WhisperBridge.init")
+                val handle = WhisperBridge.init(modelPath)
+                if (handle == 0L) {
+                    runOnUiThread { outputText.text = "Error: Whisper init failed" }
+                    return@Thread
+                }
+
+                Log.d("WhisperTest", "Calling WhisperBridge.transcribe")
+                val pcm = ShortArray(1600) { 0 }
+                val text = WhisperBridge.transcribe(handle, pcm)
+                val result = text.ifBlank { "Whisper smoke test passed" }
+
+                runOnUiThread {
+                    outputText.text = result
+                    Log.d("WhisperTest", "Result: $result")
+                }
+            } catch (t: Throwable) {
+                Log.e("WhisperTest", "Error during smoke test", t)
+                val errorMessage = "${t.javaClass.simpleName}: ${t.message}"
+                runOnUiThread {
+                    outputText.text = "Error: $errorMessage"
+                }
+            }
+        }.start()
+
+        // Commented out to isolate Whisper crash
+        // val intent = Intent(this, AudioTestService::class.java)
+        // ContextCompat.startForegroundService(this, intent)
     }
 
     private fun copyModelAssetToCache(): String {
-        val targetFile = File(cacheDir, "models/ggml-tiny.en.bin")
+        val targetFile = File(filesDir, "model.bin")
         if (!targetFile.exists()) {
             targetFile.parentFile?.mkdirs()
             assets.open("models/ggml-tiny.en.bin").use { input ->

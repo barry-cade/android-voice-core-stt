@@ -2,6 +2,12 @@ package com.example.android_voice_core
 
 object WhisperBridge {
     init {
+        System.loadLibrary("c++_shared")
+        System.loadLibrary("omp")
+        System.loadLibrary("ggml-base")
+        System.loadLibrary("ggml-cpu")
+        System.loadLibrary("ggml")
+        System.loadLibrary("whisper")
         System.loadLibrary("whisper_bridge")
     }
 
