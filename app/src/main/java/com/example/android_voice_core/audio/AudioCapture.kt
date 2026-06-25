@@ -31,6 +31,13 @@ class AudioCapture(
             AudioFormat.ENCODING_PCM_16BIT,
             bufferSize
         )
+
+        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            audioRecord?.release()
+            audioRecord = null
+            return
+        }
+
         audioRecord?.startRecording()
 
         isRunning = true
