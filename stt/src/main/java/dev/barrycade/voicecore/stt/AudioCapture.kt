@@ -1,4 +1,4 @@
-package dev.barrycade.voicecore.audio
+package dev.barrycade.voicecore.stt
 
 import android.media.AudioFormat
 import android.media.AudioRecord

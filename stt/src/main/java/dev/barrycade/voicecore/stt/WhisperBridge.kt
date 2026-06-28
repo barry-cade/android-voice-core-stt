@@ -1,4 +1,4 @@
-package dev.barrycade.voicecore
+package dev.barrycade.voicecore.stt
 
 object WhisperBridge {
     init {

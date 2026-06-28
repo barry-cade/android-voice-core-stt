@@ -12,10 +12,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.audio.AudioTestService
+import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.stt.WhisperBridge
 import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
+    private val speechToText = SpeechToText()
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -69,6 +73,7 @@ class MainActivity : ComponentActivity() {
 
                 Log.d("WhisperTest", "Calling WhisperBridge.transcribe")
                 val pcm = ShortArray(1600) { 0 }
+                speechToText.hashCode()
                 val text = WhisperBridge.transcribe(handle, pcm)
                 val result = text.ifBlank { "Whisper smoke test passed" }
 

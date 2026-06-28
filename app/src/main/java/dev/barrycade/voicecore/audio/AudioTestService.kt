@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import dev.barrycade.voicecore.stt.AudioCapture
 
 class AudioTestService : Service() {
     private val audioCapture = AudioCapture { buffer ->

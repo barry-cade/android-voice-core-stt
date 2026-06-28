@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "android-voice-core"
 include(":app")
+include(":stt")
  

@@ -9,7 +9,7 @@
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_dev_barrycade_voicecore_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstring modelPath) {
+Java_dev_barrycade_voicecore_stt_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstring modelPath) {
     LOGD("init called");
     const char *path = env->GetStringUTFChars(modelPath, nullptr);
     if (path == nullptr) {
@@ -31,8 +31,8 @@ Java_dev_barrycade_voicecore_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, j
 }
 
 JNIEXPORT jstring JNICALL
-Java_dev_barrycade_voicecore_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlong handle, jshortArray pcm) {
-    LOGD("transcribe called with handle %lld", handle);
+Java_dev_barrycade_voicecore_stt_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlong handle, jshortArray pcm) {
+    LOGD("transcribe called with handle %ld", static_cast<long>(handle));
     if (handle == 0 || pcm == nullptr) {
         LOGD("Invalid handle or pcm");
         return env->NewStringUTF("");
