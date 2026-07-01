@@ -25,6 +25,7 @@ class SpeechToText(
 
     private var onResult: ((String) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
+    private val debugVad = true
 
     private val isRunning = AtomicBoolean(false)
     private val stateLock = Any()
@@ -91,7 +92,8 @@ class SpeechToText(
                                 }
                             }.start()
                         }
-                    }
+                    },
+                    calibrationLogger = if (debugVad) VadCalibrationLogger() else null
                 ).apply { start() }
 
                 Log.d(TAG, "Single-pass transcription pipeline started")
