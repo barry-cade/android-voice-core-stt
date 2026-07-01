@@ -6,13 +6,15 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Process
 import android.util.Log
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * AudioCapture provides a thread-safe interface for capturing 16-bit PCM mono audio
- * from the device's microphone.
+ * AudioCapture provides a dedicated microphone thread for reading PCM16 mono audio.
+ * It publishes each captured frame as a FloatArray into a shared queue and also keeps
+ * the existing listener callback path for compatibility with the current STT pipeline.
  */
 class AudioCapture(
-    private val sampleRate: Int,
+    private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int
 ) {
     private var listener: ((ShortArray) -> Unit)? = null
@@ -24,24 +26,22 @@ class AudioCapture(
     private var audioRecord: AudioRecord? = null
     private var workerThread: Thread? = null
 
-    /**
-     * Sets the listener that will receive audio frames. 
-     * Note: Callback is executed on the high-priority capture thread.
-     */
+    val frameQueue: ConcurrentLinkedQueue<FloatArray> = ConcurrentLinkedQueue()
+
     fun setOnAudioFrameListener(l: (ShortArray) -> Unit) {
         synchronized(stateLock) {
             listener = l
         }
     }
 
-    /**
-     * Starts the audio capture pipeline.
-     * @throws IllegalStateException if initialization fails or permissions are missing.
-     */
+    fun getQueue(): ConcurrentLinkedQueue<FloatArray> = frameQueue
+
     @SuppressLint("MissingPermission")
     fun start() {
         synchronized(stateLock) {
             if (isRunning) return
+
+            frameQueue.clear()
 
             val minBufferSizeInBytes = AudioRecord.getMinBufferSize(
                 sampleRate,
@@ -53,11 +53,7 @@ class AudioCapture(
                 throw IllegalStateException("Invalid AudioRecord parameters: minBufferSize=$minBufferSizeInBytes")
             }
 
-            // Ensure our capture buffer is at least as large as the hardware minimum
             val finalBufferSizeInBytes = maxOf(requestedBufferSizeInBytes, minBufferSizeInBytes)
-            
-            // Internal buffer for AudioRecord should be large enough to handle multiple reads 
-            // to prevent data loss if the read loop is delayed.
             val internalBufferSizeInBytes = finalBufferSizeInBytes * 4
 
             val ar = try {
@@ -87,29 +83,32 @@ class AudioCapture(
             audioRecord = ar
             isRunning = true
 
-            // ShortArray size (2 bytes per sample for 16-bit PCM)
             val readBufferSamples = finalBufferSizeInBytes / 2
-            
             workerThread = Thread({
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
                 captureLoop(readBufferSamples)
             }, "AudioCaptureThread").apply {
                 start()
             }
-            
+
             Log.d("AudioCapture", "Capture started [Rate: $sampleRate, Buffer: $finalBufferSizeInBytes bytes]")
         }
     }
 
     private fun captureLoop(bufferSizeSamples: Int) {
         val buffer = ShortArray(bufferSizeSamples)
-        
+
         while (isRunning) {
             val ar = audioRecord ?: break
             val readCount = ar.read(buffer, 0, buffer.size)
 
             if (readCount > 0) {
                 val capturedFrame = buffer.copyOf(readCount)
+                val floatFrame = FloatArray(readCount) { index ->
+                    capturedFrame[index].toFloat() / Short.MAX_VALUE
+                }
+                frameQueue.offer(floatFrame)
+
                 synchronized(stateLock) {
                     listener?.invoke(capturedFrame)
                 }
@@ -131,9 +130,6 @@ class AudioCapture(
         Log.e("AudioCapture", "Read error: $message")
     }
 
-    /**
-     * Stops audio capture and releases hardware resources.
-     */
     fun stop() {
         synchronized(stateLock) {
             if (!isRunning) return
