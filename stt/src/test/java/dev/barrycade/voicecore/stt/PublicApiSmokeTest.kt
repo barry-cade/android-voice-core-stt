@@ -10,7 +10,7 @@ class PublicApiSmokeTest {
     fun sttConfigDefaults_areStable() {
         val config = SttConfig()
         assertEquals(16000, config.sampleRate)
-        assertEquals(2048, config.bufferSize)
+        assertEquals(32000, config.bufferSize)
         assertEquals(null, config.modelPath)
     }
 
