@@ -25,6 +25,8 @@ class AudioCapture(
 
     private var audioRecord: AudioRecord? = null
     private var workerThread: Thread? = null
+    private var shortBuffer: ShortArray? = null
+    private var floatBuffer: FloatArray? = null
 
     val frameQueue: ConcurrentLinkedQueue<FloatArray> = ConcurrentLinkedQueue()
 
@@ -96,17 +98,19 @@ class AudioCapture(
     }
 
     private fun captureLoop(bufferSizeSamples: Int) {
-        val buffer = ShortArray(bufferSizeSamples)
+        shortBuffer = ShortArray(bufferSizeSamples)
+        floatBuffer = FloatArray(bufferSizeSamples)
 
         while (isRunning) {
             val ar = audioRecord ?: break
-            val readCount = ar.read(buffer, 0, buffer.size)
+            val readCount = ar.read(shortBuffer!!, 0, shortBuffer!!.size)
 
             if (readCount > 0) {
-                val capturedFrame = buffer.copyOf(readCount)
-                val floatFrame = FloatArray(readCount) { index ->
-                    capturedFrame[index].toFloat() / Short.MAX_VALUE
+                val capturedFrame = shortBuffer!!.copyOf(readCount)
+                for (index in 0 until readCount) {
+                    floatBuffer!![index] = capturedFrame[index].toFloat() / Short.MAX_VALUE
                 }
+                val floatFrame = floatBuffer!!.copyOf(readCount)
                 frameQueue.offer(floatFrame)
 
                 synchronized(stateLock) {
