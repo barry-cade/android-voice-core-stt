@@ -13,7 +13,17 @@ internal class Vad(
     internal var highPassCutoffHz: Int = 200
     internal var zeroCrossingEnabled: Boolean = false
 
+    internal var lastFrameEnergy: Float = 0f
+    internal var lastZeroCrossingRate: Int = 0
+    internal var lastHighPassApplied: Boolean = false
+
     constructor(config: RuntimeSttConfig) : this(config.energyThreshold.toDouble())
+
+    private fun debug(msg: String) {
+        if (debugLogging) {
+            println(msg)
+        }
+    }
 
     private fun applyHighPassFilter(frame: FloatArray, cutoffHz: Int) {
         // Placeholder: no-op for now
@@ -43,7 +53,16 @@ internal class Vad(
         }
 
         val rms = kotlin.math.sqrt(sumSquares / frame.size)
-        val isSpeech = rms >= energyThreshold
+        val energy = rms.toFloat()
+        lastFrameEnergy = energy
+        lastZeroCrossingRate = if (zeroCrossingEnabled) {
+            computeZeroCrossingRate(frame)
+        } else {
+            0
+        }
+        lastHighPassApplied = highPassEnabled
+        debug("VAD metrics: energy=$lastFrameEnergy zcr=$lastZeroCrossingRate hp=$lastHighPassApplied")
+        val isSpeech = energy >= energyThreshold.toFloat()
         return isSpeech
     }
 }
