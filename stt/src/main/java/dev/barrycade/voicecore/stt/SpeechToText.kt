@@ -14,12 +14,38 @@ import java.util.concurrent.atomic.AtomicBoolean
  * when recording stops. This removes the sliding-window streaming pipeline while
  * keeping the Whisper bridge and capture path intact for future replacement.
  */
-class SpeechToText(
+class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
     private val modelPath: String
 ) {
     companion object {
         private const val TAG = "STT_STREAM"
+
+        fun create(
+            energyThreshold: Float,
+            silencePaddingMs: Int,
+            preRollMs: Int,
+            maxUtteranceLengthMs: Int,
+            stableChunkSizeMs: Int,
+            highPassCutoffHz: Int,
+            motionModeEnergyThreshold: Float,
+            motionModeSilencePaddingMs: Int,
+            modelPath: String
+        ): SpeechToText {
+            val config = RuntimeSttConfig(
+                energyThreshold = energyThreshold,
+                silencePaddingMs = silencePaddingMs,
+                preRollMs = preRollMs,
+                maxUtteranceLengthMs = maxUtteranceLengthMs,
+                stableChunkSizeMs = stableChunkSizeMs,
+                highPassCutoffHz = highPassCutoffHz,
+                motionMode = MotionModeConfig(
+                    energyThreshold = motionModeEnergyThreshold,
+                    silencePaddingMs = motionModeSilencePaddingMs
+                )
+            )
+            return SpeechToText(config, modelPath)
+        }
     }
 
     init {
@@ -85,9 +111,11 @@ class SpeechToText(
                     utteranceAccumulator = UtteranceAccumulator(config),
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
+                            if (debugVad) Log.i("STT_PCM", "Final PCM size=${pcm.size}")
                             Thread {
                                 val session = nativeSession
                                 val samples = pcm.toShortArray()
+                                if (debugVad) Log.i("STT_WHISPER", "Calling Whisper with PCM size=${pcm.size}")
                                 val text = session?.transcribe(samples)?.trim().orEmpty()
                                 if (text.isNotBlank()) {
                                     Log.d(TAG, "Whisper utterance transcript: $text")

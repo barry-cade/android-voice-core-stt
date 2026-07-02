@@ -24,6 +24,11 @@ class MainActivity : ComponentActivity() {
     private var stt: SpeechToText? = null
     private var isRecording = false
     private var sttAvailable = true
+    private val debugLogging = true
+
+    private fun logInfo(tag: String, message: String) {
+        if (debugLogging) Log.i(tag, message)
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         RequestPermission()
@@ -44,12 +49,14 @@ class MainActivity : ComponentActivity() {
 
         btnStart.setOnClickListener {
             if (!sttAvailable) return@setOnClickListener
+            logInfo("STT_FLOW", "startRecording() called, sttAvailable=$sttAvailable")
             if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         btnStop.setOnClickListener {
             if (!sttAvailable) return@setOnClickListener
+            logInfo("STT_FLOW", "stopAndTranscribe() called, sttAvailable=$sttAvailable")
             if (isRecording) stopAndTranscribe()
         }
 
@@ -79,8 +86,16 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            stt = SpeechToText(
-                config = runtimeConfig,
+            logInfo("STT_INIT", "Constructing STT with modelPath=$modelPath")
+            stt = SpeechToText.create(
+                energyThreshold = runtimeConfig.energyThreshold,
+                silencePaddingMs = runtimeConfig.silencePaddingMs,
+                preRollMs = runtimeConfig.preRollMs,
+                maxUtteranceLengthMs = runtimeConfig.maxUtteranceLengthMs,
+                stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
+                highPassCutoffHz = runtimeConfig.highPassCutoffHz,
+                motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
+                motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                 modelPath = modelPath
             ).also {
                 it.setOnResultListener { result ->
@@ -92,6 +107,8 @@ class MainActivity : ComponentActivity() {
                 it.start()
             }
 
+            sttAvailable = true
+            logInfo("STT_STATE", "sttAvailable=$sttAvailable")
             isRecording = true
             txtOutput.text = "Recording..."
             updateUi()
@@ -107,6 +124,7 @@ class MainActivity : ComponentActivity() {
             message = "The STT tuning values are invalid:\n${e.message}"
         )
         sttAvailable = false
+        Log.i("STT_STATE", "sttAvailable=$sttAvailable")
         isRecording = false
         stt = null
         txtErrorBanner.visibility = android.view.View.VISIBLE

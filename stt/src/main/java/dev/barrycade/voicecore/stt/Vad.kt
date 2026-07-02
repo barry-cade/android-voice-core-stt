@@ -7,6 +7,7 @@ package dev.barrycade.voicecore.stt
 internal class Vad(
     private val energyThreshold: Double = 0.01
 ) {
+    private val debugLogging = false
     constructor(config: RuntimeSttConfig) : this(config.energyThreshold.toDouble())
     fun isSpeech(frame: FloatArray): Boolean {
         if (frame.isEmpty()) return false
@@ -18,6 +19,7 @@ internal class Vad(
         }
 
         val rms = kotlin.math.sqrt(sumSquares / frame.size)
-        return rms >= energyThreshold
+        val isSpeech = rms >= energyThreshold
+        return isSpeech
     }
 }

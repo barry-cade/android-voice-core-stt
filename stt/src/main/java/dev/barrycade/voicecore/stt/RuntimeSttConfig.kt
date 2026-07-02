@@ -1,6 +1,6 @@
 package dev.barrycade.voicecore.stt
 
-data class RuntimeSttConfig(
+internal data class RuntimeSttConfig(
     val energyThreshold: Float,
     val silencePaddingMs: Int,
     val preRollMs: Int,
@@ -10,7 +10,7 @@ data class RuntimeSttConfig(
     val motionMode: MotionModeConfig
 )
 
-data class MotionModeConfig(
+internal data class MotionModeConfig(
     val energyThreshold: Float,
     val silencePaddingMs: Int
 )
