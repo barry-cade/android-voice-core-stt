@@ -7,7 +7,7 @@ package dev.barrycade.voicecore.stt
 internal class Vad(
     private val energyThreshold: Double = 0.01
 ) {
-    private val debugLogging = false
+    internal var debugLogging: Boolean = false
 
     internal var highPassEnabled: Boolean = false
     internal var highPassCutoffHz: Int = 200

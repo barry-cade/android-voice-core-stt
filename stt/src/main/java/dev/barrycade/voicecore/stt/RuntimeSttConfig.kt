@@ -7,7 +7,8 @@ internal data class RuntimeSttConfig(
     val maxUtteranceLengthMs: Int,
     val stableChunkSizeMs: Int,
     val highPassCutoffHz: Int,
-    val motionMode: MotionModeConfig
+    val motionMode: MotionModeConfig,
+    val debugLoggingEnabled: Boolean = false
 )
 
 internal data class MotionModeConfig(

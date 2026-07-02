@@ -7,7 +7,8 @@ data class AppRuntimeSttConfig(
     val maxUtteranceLengthMs: Int,
     val stableChunkSizeMs: Int,
     val highPassCutoffHz: Int,
-    val motionMode: AppMotionModeConfig
+    val motionMode: AppMotionModeConfig,
+    val debugLoggingEnabled: Boolean = false
 )
 
 data class AppMotionModeConfig(

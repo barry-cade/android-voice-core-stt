@@ -108,7 +108,9 @@ class SpeechToText internal constructor(
 
                 sttProcessor = SttProcessor(
                     audioCapture = capture,
-                    vad = Vad(config),
+                    vad = Vad(config).apply {
+                        debugLogging = config.debugLoggingEnabled
+                    },
                     utteranceAccumulator = UtteranceAccumulator(config),
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
