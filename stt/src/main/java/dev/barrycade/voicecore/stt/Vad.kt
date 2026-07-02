@@ -8,9 +8,33 @@ internal class Vad(
     private val energyThreshold: Double = 0.01
 ) {
     private val debugLogging = false
+
+    internal var highPassEnabled: Boolean = false
+    internal var highPassCutoffHz: Int = 200
+    internal var zeroCrossingEnabled: Boolean = false
+
     constructor(config: RuntimeSttConfig) : this(config.energyThreshold.toDouble())
+
+    private fun applyHighPassFilter(frame: FloatArray, cutoffHz: Int) {
+        // Placeholder: no-op for now
+    }
+
+    private fun computeZeroCrossingRate(frame: FloatArray): Int {
+        // Placeholder: return 0 for now
+        return 0
+    }
+
     fun isSpeech(frame: FloatArray): Boolean {
         if (frame.isEmpty()) return false
+
+        if (highPassEnabled) {
+            applyHighPassFilter(frame, highPassCutoffHz)
+        }
+
+        if (zeroCrossingEnabled) {
+            val zcr = computeZeroCrossingRate(frame)
+            // Step 9 will use this value
+        }
 
         var sumSquares = 0.0
         for (sample in frame) {
