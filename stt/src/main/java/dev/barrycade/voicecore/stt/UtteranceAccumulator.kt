@@ -43,6 +43,9 @@ internal class UtteranceAccumulator(
         return if (speechActive) {
             if (isSpeechFrame) {
                 for (sample in frame) {
+                    if (speechPtr >= speechAccumulator.size) {
+                        return null
+                    }
                     speechAccumulator[speechPtr] = sample
                     speechPtr++
                 }
@@ -54,6 +57,9 @@ internal class UtteranceAccumulator(
                 }
             } else {
                 for (sample in frame) {
+                    if (speechPtr >= speechAccumulator.size) {
+                        return null
+                    }
                     speechAccumulator[speechPtr] = sample
                     speechPtr++
                 }
@@ -70,10 +76,16 @@ internal class UtteranceAccumulator(
                 silenceFrameCount = 0
                 speechPtr = 0
                 for (sample in preRollBuffer) {
+                    if (speechPtr >= speechAccumulator.size) {
+                        return null
+                    }
                     speechAccumulator[speechPtr] = sample
                     speechPtr++
                 }
                 for (sample in frame) {
+                    if (speechPtr >= speechAccumulator.size) {
+                        return null
+                    }
                     speechAccumulator[speechPtr] = sample
                     speechPtr++
                 }
