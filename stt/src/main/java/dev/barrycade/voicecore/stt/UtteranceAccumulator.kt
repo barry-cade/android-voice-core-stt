@@ -26,7 +26,9 @@ internal class UtteranceAccumulator(
     private val maxSilenceFrames = (silenceDurationMs / silenceFrameDurationMs).coerceAtLeast(1)
     private val stableBlockSamples = (sampleRate * stableBlockMs / 1000).coerceAtLeast(1)
 
-    private val speechAccumulator = mutableListOf<Float>()
+    private val maxSamples = (sampleRate * maxUtteranceLengthMs / 1000).coerceAtLeast(1)
+    private val speechAccumulator = FloatArray(maxSamples)
+    private var speechPtr = 0
     private var speechActive = false
     private var silenceFrameCount = 0
     private var totalDurationMs = 0
@@ -40,7 +42,10 @@ internal class UtteranceAccumulator(
 
         return if (speechActive) {
             if (isSpeechFrame) {
-                speechAccumulator.addAll(frame.toList())
+                for (sample in frame) {
+                    speechAccumulator[speechPtr] = sample
+                    speechPtr++
+                }
                 silenceFrameCount = 0
                 if (totalDurationMs > maxUtteranceLengthMs) {
                     finalizeUtterance()
@@ -48,7 +53,10 @@ internal class UtteranceAccumulator(
                     null
                 }
             } else {
-                speechAccumulator.addAll(frame.toList())
+                for (sample in frame) {
+                    speechAccumulator[speechPtr] = sample
+                    speechPtr++
+                }
                 silenceFrameCount += 1
                 if (silenceFrameCount >= maxSilenceFrames) {
                     finalizeUtterance()
@@ -60,9 +68,15 @@ internal class UtteranceAccumulator(
             if (isSpeechFrame) {
                 speechActive = true
                 silenceFrameCount = 0
-                speechAccumulator.clear()
-                speechAccumulator.addAll(preRollBuffer)
-                speechAccumulator.addAll(frame.toList())
+                speechPtr = 0
+                for (sample in preRollBuffer) {
+                    speechAccumulator[speechPtr] = sample
+                    speechPtr++
+                }
+                for (sample in frame) {
+                    speechAccumulator[speechPtr] = sample
+                    speechPtr++
+                }
                 preRollBuffer.clear()
                 totalDurationMs = 0
                 null
@@ -82,7 +96,7 @@ internal class UtteranceAccumulator(
     fun processFrame(frame: FloatArray): FloatArray? = processChunk(frame, vad.isSpeech(frame))
 
     fun reset() {
-        speechAccumulator.clear()
+        speechPtr = 0
         preRollBuffer.clear()
         speechActive = false
         silenceFrameCount = 0
@@ -90,7 +104,7 @@ internal class UtteranceAccumulator(
     }
 
     private fun finalizeUtterance(): FloatArray {
-        val utterance = speechAccumulator.toFloatArray()
+        val utterance = speechAccumulator.copyOf(speechPtr)
         val paddedLength = if (utterance.size % stableBlockSamples == 0) {
             utterance.size
         } else {
@@ -99,7 +113,7 @@ internal class UtteranceAccumulator(
 
         val padded = FloatArray(paddedLength)
         utterance.copyInto(padded, 0)
-        speechAccumulator.clear()
+        speechPtr = 0
         preRollBuffer.clear()
         speechActive = false
         silenceFrameCount = 0
