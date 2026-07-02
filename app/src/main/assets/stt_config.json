@@ -7,6 +7,6 @@
   "highPassCutoffHz": 0,
   "motionMode": {
     "energyThreshold": 0.05,
-    "silencePaddingMs": -300
+    "silencePaddingMs": 300
   }
 }
