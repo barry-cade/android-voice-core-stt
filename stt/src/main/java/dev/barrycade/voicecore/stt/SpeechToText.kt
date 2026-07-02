@@ -66,6 +66,7 @@ class SpeechToText internal constructor(
 
     private val audioQueue: BlockingQueue<ShortArray> = LinkedBlockingQueue()
     private var inferenceWorker: ExecutorService? = null
+    private val inferenceExecutor = Executors.newSingleThreadExecutor()
 
     private val transcriptBuilder = StringBuilder()
     private val transcriptLock = Any()
@@ -112,7 +113,7 @@ class SpeechToText internal constructor(
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
                             if (debugVad) Log.i("STT_PCM", "Final PCM size=${pcm.size}")
-                            Thread {
+                            inferenceExecutor.execute {
                                 val session = nativeSession
                                 val samples = pcm.toShortArray()
                                 if (debugVad) Log.i("STT_WHISPER", "Calling Whisper with PCM size=${pcm.size}")
@@ -121,7 +122,7 @@ class SpeechToText internal constructor(
                                     Log.d(TAG, "Whisper utterance transcript: $text")
                                     onResult?.invoke(text)
                                 }
-                            }.start()
+                            }
                         }
                     },
                     calibrationLogger = if (debugVad) VadCalibrationLogger() else null
@@ -231,6 +232,7 @@ class SpeechToText internal constructor(
         audioCapture = null
         inferenceWorker?.shutdownNow()
         inferenceWorker = null
+        inferenceExecutor.shutdown()
         val session = nativeSession
         nativeSession = null
         Thread { try { session?.close() } catch(_: Exception) {} }.start()
