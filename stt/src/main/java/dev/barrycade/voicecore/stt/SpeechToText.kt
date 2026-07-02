@@ -110,6 +110,11 @@ class SpeechToText internal constructor(
                     audioCapture = capture,
                     vad = Vad(config).apply {
                         debugLogging = config.debugLoggingEnabled
+                        metricsListener = object : MetricsListener {
+                            override fun onMetrics(energy: Float, zcr: Int, highPass: Boolean) {
+                                println("VAD METRICS: energy=$energy zcr=$zcr hp=$highPass")
+                            }
+                        }
                     },
                     utteranceAccumulator = UtteranceAccumulator(config),
                     listener = object : UtteranceListener {
