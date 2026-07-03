@@ -1,19 +1,18 @@
 package dev.barrycade.voicecore.stt
 
 internal data class RuntimeSttConfig(
-    val energyThreshold: Float,
-    val silencePaddingMs: Int,
-    val preRollMs: Int,
-    val maxUtteranceLengthMs: Int,
-    val stableChunkSizeMs: Int,
-    val highPassCutoffHz: Int,
-    val motionMode: MotionModeConfig,
+    val energyThreshold: Float = 0.03f,
+    val silencePaddingMs: Int = 600,
+    val preRollMs: Int = 200,
+    val maxUtteranceLengthMs: Int = 7000,
+    val stableChunkSizeMs: Int = 500,
+    val motionMode: MotionModeConfig = MotionModeConfig(),
     val debugLoggingEnabled: Boolean = false
 )
 
 internal data class MotionModeConfig(
-    val energyThreshold: Float,
-    val silencePaddingMs: Int
+    val energyThreshold: Float = 0.05f,
+    val silencePaddingMs: Int = 300
 )
 
 internal fun RuntimeSttConfig.validate() {
@@ -35,10 +34,6 @@ internal fun RuntimeSttConfig.validate() {
 
     require(stableChunkSizeMs in 50..2000) {
         "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
-    }
-
-    require(highPassCutoffHz in 0..2000) {
-        "highPassCutoffHz=$highPassCutoffHz must be in [0, 2000] Hz"
     }
 
     require(motionMode.energyThreshold in 0.0001f..1f) {

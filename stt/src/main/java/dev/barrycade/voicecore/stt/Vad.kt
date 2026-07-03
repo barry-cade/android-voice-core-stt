@@ -1,26 +1,16 @@
 package dev.barrycade.voicecore.stt
 
 /**
- * Simple RMS-energy voice activity detector for FloatArray audio frames.
+ * Pure RMS-energy voice activity detector for FloatArray audio frames.
+ * VAD is energy-based only — no high-pass filter, no zero-crossing rate.
  * It performs pure math over the frame and does not interact with Whisper or audio capture.
  */
-internal interface MetricsListener {
-    fun onMetrics(energy: Float, zcr: Int, highPass: Boolean)
-}
-
 internal class Vad(
-    private val energyThreshold: Double = 0.01
+    private val energyThreshold: Double = 0.025
 ) {
     internal var debugLogging: Boolean = false
 
-    internal var highPassEnabled: Boolean = false
-    internal var highPassCutoffHz: Int = 200
-    internal var zeroCrossingEnabled: Boolean = false
-
     internal var lastFrameEnergy: Float = 0f
-    internal var lastZeroCrossingRate: Int = 0
-    internal var lastHighPassApplied: Boolean = false
-    internal var metricsListener: MetricsListener? = null
 
     constructor(config: RuntimeSttConfig) : this(config.energyThreshold.toDouble())
 
@@ -30,26 +20,8 @@ internal class Vad(
         }
     }
 
-    private fun applyHighPassFilter(frame: FloatArray, cutoffHz: Int) {
-        // Placeholder: no-op for now
-    }
-
-    private fun computeZeroCrossingRate(frame: FloatArray): Int {
-        // Placeholder: return 0 for now
-        return 0
-    }
-
     fun isSpeech(frame: FloatArray): Boolean {
         if (frame.isEmpty()) return false
-
-        if (highPassEnabled) {
-            applyHighPassFilter(frame, highPassCutoffHz)
-        }
-
-        if (zeroCrossingEnabled) {
-            val zcr = computeZeroCrossingRate(frame)
-            // Step 9 will use this value
-        }
 
         var sumSquares = 0.0
         for (sample in frame) {
@@ -60,17 +32,8 @@ internal class Vad(
         val rms = kotlin.math.sqrt(sumSquares / frame.size)
         val energy = rms.toFloat()
         lastFrameEnergy = energy
-        lastZeroCrossingRate = if (zeroCrossingEnabled) {
-            computeZeroCrossingRate(frame)
-        } else {
-            0
-        }
-        lastHighPassApplied = highPassEnabled
-        debug("VAD metrics: energy=$lastFrameEnergy zcr=$lastZeroCrossingRate hp=$lastHighPassApplied")
-        if (debugLogging) {
-            metricsListener?.onMetrics(lastFrameEnergy, lastZeroCrossingRate, lastHighPassApplied)
-        }
-        val isSpeech = energy >= energyThreshold.toFloat()
-        return isSpeech
+
+        debug("VAD energy=$energy threshold=$energyThreshold")
+        return energy >= energyThreshold.toFloat()
     }
 }

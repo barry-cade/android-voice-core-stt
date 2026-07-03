@@ -19,8 +19,10 @@ class PublicApiSmokeTest {
         val methods = SpeechToText::class.java.methods.map { it.name }.toSet()
         assertTrue(methods.contains("start"))
         assertTrue(methods.contains("stop"))
+        assertTrue(methods.contains("stopAndTranscribe"))
         assertTrue(methods.contains("setOnResultListener"))
         assertTrue(methods.contains("setOnErrorListener"))
+        assertTrue(methods.contains("destroy"))
     }
 
     @Test
@@ -28,7 +30,6 @@ class PublicApiSmokeTest {
         val methods = AudioCapture::class.java.methods.map { it.name }.toSet()
         assertTrue(methods.contains("start"))
         assertTrue(methods.contains("stop"))
-        assertTrue(methods.contains("setOnAudioFrameListener"))
     }
 
     @Test

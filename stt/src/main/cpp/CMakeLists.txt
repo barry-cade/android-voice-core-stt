@@ -15,7 +15,7 @@ set_target_properties(whisper_prebuilt PROPERTIES
     IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a/libwhisper.so"
 )
 
-set(WHISPER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../whisper.cpp")
+set(WHISPER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../external/whisper.cpp")
 
 target_include_directories(whisper_bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

@@ -10,14 +10,13 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * AudioCapture provides a dedicated microphone thread for reading PCM16 mono audio.
- * It publishes each captured frame as a FloatArray into a shared queue and also keeps
- * the existing listener callback path for compatibility with the current STT pipeline.
+ * It publishes each captured frame as a FloatArray into a shared queue.
+ * Single output path: FloatArray frames only — no ShortArray callback.
  */
 class AudioCapture(
     private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int
 ) {
-    private var listener: ((ShortArray) -> Unit)? = null
     private val stateLock = Any()
 
     @Volatile
@@ -29,12 +28,6 @@ class AudioCapture(
     private var floatBuffer: FloatArray? = null
 
     val frameQueue: ConcurrentLinkedQueue<FloatArray> = ConcurrentLinkedQueue()
-
-    fun setOnAudioFrameListener(l: (ShortArray) -> Unit) {
-        synchronized(stateLock) {
-            listener = l
-        }
-    }
 
     fun getQueue(): ConcurrentLinkedQueue<FloatArray> = frameQueue
 
@@ -106,16 +99,12 @@ class AudioCapture(
             val readCount = ar.read(shortBuffer!!, 0, shortBuffer!!.size)
 
             if (readCount > 0) {
-                val capturedFrame = shortBuffer!!.copyOf(readCount)
                 for (index in 0 until readCount) {
-                    floatBuffer!![index] = capturedFrame[index].toFloat() / Short.MAX_VALUE
+                    floatBuffer!![index] = shortBuffer!![index].toFloat() / Short.MAX_VALUE
                 }
                 val floatFrame = floatBuffer!!.copyOf(readCount)
                 frameQueue.offer(floatFrame)
-
-                synchronized(stateLock) {
-                    listener?.invoke(capturedFrame)
-                }
+                Log.d("STT_PCM", "enqueue frame, size=${floatFrame.size}")
             } else if (readCount < 0) {
                 handleReadError(readCount)
                 if (readCount == AudioRecord.ERROR_DEAD_OBJECT) break

@@ -23,11 +23,12 @@ internal class SttProcessor(
         workerThread = Thread({
             while (isRunning.get()) {
                 try {
-                    val frame = audioCapture.frameQueue.poll()
+                                        val frame = audioCapture.frameQueue.poll()
                     if (frame == null) {
                         Thread.sleep(10L)
                         continue
                     }
+                    Log.d("STT_PCM", "dequeue frame for VAD, size=${frame.size}")
 
                     val isSpeechFrame = vad.isSpeech(frame)
                     val rms = computeRms(frame)
@@ -46,10 +47,18 @@ internal class SttProcessor(
         }, "SttProcessorThread").apply { start() }
     }
 
-    fun stop() {
+        fun stop() {
         if (!isRunning.getAndSet(false)) return
         workerThread?.join(500)
         workerThread = null
+    }
+
+    fun forceFinalize(): FloatArray? {
+        val utterance = utteranceAccumulator.forceFinalize()
+        if (utterance != null) {
+            calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
+        }
+        return utterance
     }
 
     private fun computeRms(frame: FloatArray): Double {

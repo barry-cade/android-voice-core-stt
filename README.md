@@ -115,7 +115,11 @@ startRecording()
 
 ### Clone
 
-git clone <https://github.com/barry-cade/android-voice-core-stt.git>
+git clone --recurse-submodules https://github.com/barry-cade/android-voice-core-stt.git
+
+Or if already cloned, initialize the whisper.cpp submodule:
+
+git submodule update --init --recursive
 
 ### Build
 

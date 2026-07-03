@@ -18,3 +18,6 @@ local.properties
 **/build/
 **/.cxx/
 **/.externalNativeBuild/
+
+# Whisper.cpp submodule - clone via: git submodule add https://github.com/ggerganov/whisper.cpp external/whisper.cpp
+/external/

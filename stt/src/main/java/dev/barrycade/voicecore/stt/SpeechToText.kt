@@ -1,18 +1,19 @@
 package dev.barrycade.voicecore.stt
 
 import android.util.Log
-import java.util.Collections
-import java.util.concurrent.BlockingQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * SpeechToText accumulates microphone audio and transcribes the full utterance once
- * when recording stops. This removes the sliding-window streaming pipeline while
- * keeping the Whisper bridge and capture path intact for future replacement.
+ * SpeechToText captures microphone audio, runs VAD-driven utterance detection,
+ * and transcribes finalized utterances via Whisper. Transcription is triggered
+ * only by the UtteranceAccumulator (VAD-driven path). stopAndTranscribe() forces
+ * accumulator finalization and returns that result — no raw PCM fallback path.
+ *
+ * Whisper lifecycle (loadModel / unloadModel) is serialized through a dedicated
+ * single-thread executor to prevent race conditions between teardown and re-init.
  */
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
@@ -27,7 +28,6 @@ class SpeechToText internal constructor(
             preRollMs: Int,
             maxUtteranceLengthMs: Int,
             stableChunkSizeMs: Int,
-            highPassCutoffHz: Int,
             motionModeEnergyThreshold: Float,
             motionModeSilencePaddingMs: Int,
             modelPath: String
@@ -38,7 +38,6 @@ class SpeechToText internal constructor(
                 preRollMs = preRollMs,
                 maxUtteranceLengthMs = maxUtteranceLengthMs,
                 stableChunkSizeMs = stableChunkSizeMs,
-                highPassCutoffHz = highPassCutoffHz,
                 motionMode = MotionModeConfig(
                     energyThreshold = motionModeEnergyThreshold,
                     silencePaddingMs = motionModeSilencePaddingMs
@@ -62,16 +61,15 @@ class SpeechToText internal constructor(
 
     private var audioCapture: AudioCapture? = null
     private var sttProcessor: SttProcessor? = null
-    private var nativeSession: NativeSession? = null
 
-    private val audioQueue: BlockingQueue<ShortArray> = LinkedBlockingQueue()
-    private var inferenceWorker: ExecutorService? = null
-    private val inferenceExecutor = Executors.newSingleThreadExecutor()
-
-    private val transcriptBuilder = StringBuilder()
-    private val transcriptLock = Any()
-    private val audioBufferLock = Any()
-    private val accumulatedSamples = Collections.synchronizedList(mutableListOf<Short>())
+    /**
+     * Dedicated single-thread executor for Whisper lifecycle operations.
+     * All loadModel() and unloadModel() calls are serialized through this executor.
+     * unloadModel() must fully complete before any subsequent loadModel() begins.
+     * The executor is shut down only when the entire STT engine is destroyed.
+     */
+    private val whisperExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var lastTranscribedText: String? = null
 
     fun setOnResultListener(listener: (String) -> Unit) {
         onResult = listener
@@ -88,20 +86,21 @@ class SpeechToText internal constructor(
             try {
                 resetInternalState()
                 dumpConfig()
-                nativeSession = NativeSession(debug = true).apply { loadModel(modelPath) }
+
+                // Load model on the dedicated Whisper executor — ensures any
+                // previous unloadModel() has completed before we proceed.
+                val loadFuture = whisperExecutor.submit<java.lang.Void> {
+                    NativeSession.loadModel(modelPath, debug = true)
+                    null
+                }
+                loadFuture.get(30, TimeUnit.SECONDS)
 
                 isRunning.set(true)
-                startInferenceWorker()
 
                 val capture = AudioCapture(
                     sampleRate = 16000,
                     requestedBufferSizeInBytes = 32000
                 ).apply {
-                    setOnAudioFrameListener { frame ->
-                        if (!audioQueue.offer(frame)) {
-                            Log.w(TAG, "Audio FIFO overflow")
-                        }
-                    }
                     start()
                 }
                 audioCapture = capture
@@ -110,32 +109,25 @@ class SpeechToText internal constructor(
                     audioCapture = capture,
                     vad = Vad(config).apply {
                         debugLogging = config.debugLoggingEnabled
-                        metricsListener = object : MetricsListener {
-                            override fun onMetrics(energy: Float, zcr: Int, highPass: Boolean) {
-                                println("VAD METRICS: energy=$energy zcr=$zcr hp=$highPass")
-                            }
-                        }
                     },
                     utteranceAccumulator = UtteranceAccumulator(config),
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
                             if (debugVad) Log.i("STT_PCM", "Final PCM size=${pcm.size}")
-                            inferenceExecutor.execute {
-                                val session = nativeSession
-                                val samples = pcm.toShortArray()
-                                if (debugVad) Log.i("STT_WHISPER", "Calling Whisper with PCM size=${pcm.size}")
-                                val text = session?.transcribe(samples)?.trim().orEmpty()
-                                if (text.isNotBlank()) {
-                                    Log.d(TAG, "Whisper utterance transcript: $text")
-                                    onResult?.invoke(text)
-                                }
+                            val samples = pcm.toShortArray()
+                            if (debugVad) Log.i("STT_WHISPER", "Calling Whisper with PCM size=${pcm.size}")
+                            val text = NativeSession.transcribe(samples)?.trim().orEmpty()
+                            if (text.isNotBlank()) {
+                                Log.d(TAG, "Whisper utterance transcript: $text")
+                                lastTranscribedText = text
+                                onResult?.invoke(text)
                             }
                         }
                     },
                     calibrationLogger = if (debugVad) VadCalibrationLogger() else null
                 ).apply { start() }
 
-                Log.d(TAG, "Single-pass transcription pipeline started")
+                Log.d(TAG, "VAD-driven transcription pipeline started")
             } catch (t: Throwable) {
                 stopInternal()
                 dispatchError(t)
@@ -150,25 +142,23 @@ class SpeechToText internal constructor(
 
             try {
                 sttProcessor?.stop()
+                val pcm = sttProcessor?.forceFinalize()
                 sttProcessor = null
 
                 audioCapture?.stop()
                 audioCapture = null
 
-                inferenceWorker?.shutdown()
-                val finished = inferenceWorker?.awaitTermination(20, TimeUnit.SECONDS) ?: true
-                if (!finished) {
-                    Log.w(TAG, "Inference worker timeout during drain")
-                    inferenceWorker?.shutdownNow()
+                if (pcm != null && pcm.isNotEmpty()) {
+                    Log.d(TAG, "final pcm size=${pcm.size}")
+                    val samples = pcm.toShortArray()
+                    val text = NativeSession.transcribe(samples)?.trim().orEmpty()
+                    if (text.isNotBlank()) {
+                        lastTranscribedText = text
+                        onResult?.invoke(text)
+                    }
+                } else {
+                    Log.w(TAG, "no pcm available from accumulator")
                 }
-                inferenceWorker = null
-
-                val finalText = transcribeAccumulatedSamples()
-                synchronized(transcriptLock) {
-                    transcriptBuilder.setLength(0)
-                    transcriptBuilder.append(finalText)
-                }
-                onResult?.invoke(finalText)
             } catch (t: Throwable) {
                 dispatchError(t)
             } finally {
@@ -178,57 +168,9 @@ class SpeechToText internal constructor(
     }
 
     fun stop() = stopAndTranscribe()
-    fun transcribeRecorded() = stopAndTranscribe()
 
     private fun resetInternalState() {
-        audioQueue.clear()
-        synchronized(audioBufferLock) {
-            accumulatedSamples.clear()
-        }
-        synchronized(transcriptLock) {
-            transcriptBuilder.setLength(0)
-        }
-    }
-
-    private fun startInferenceWorker() {
-        inferenceWorker = Executors.newSingleThreadExecutor()
-        inferenceWorker?.execute {
-            while (isRunning.get() || audioQueue.isNotEmpty()) {
-                try {
-                    val frame = audioQueue.poll(100, TimeUnit.MILLISECONDS)
-                    if (frame != null) {
-                        appendAudioFrame(frame)
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                } catch (t: Throwable) {
-                    dispatchError(t)
-                }
-            }
-            Log.d(TAG, "Inference worker finished")
-        }
-    }
-
-    private fun appendAudioFrame(frame: ShortArray) {
-        synchronized(audioBufferLock) {
-            accumulatedSamples.addAll(frame.toList())
-        }
-    }
-
-    private fun transcribeAccumulatedSamples(): String {
-        val samples = synchronized(audioBufferLock) {
-            accumulatedSamples.toList()
-        }
-
-        if (samples.isEmpty()) return ""
-
-        val pcm = ShortArray(samples.size)
-        for (index in samples.indices) {
-            pcm[index] = samples[index]
-        }
-
-        return nativeSession?.transcribe(pcm)?.trim().orEmpty()
+        lastTranscribedText = null
     }
 
     private fun stopInternal() {
@@ -237,12 +179,28 @@ class SpeechToText internal constructor(
         sttProcessor = null
         audioCapture?.stop()
         audioCapture = null
-        inferenceWorker?.shutdownNow()
-        inferenceWorker = null
-        inferenceExecutor.shutdown()
-        val session = nativeSession
-        nativeSession = null
-        Thread { try { session?.close() } catch(_: Exception) {} }.start()
+
+        // Unload model on the dedicated Whisper executor — serialized and
+        // guaranteed to complete before any future loadModel() call.
+        whisperExecutor.submit {
+            NativeSession.unloadModel()
+        }
+    }
+
+    /**
+     * Releases all resources. Must be called when the STT engine is no longer needed.
+     * Shuts down the Whisper lifecycle executor.
+     */
+    fun destroy() {
+        synchronized(stateLock) {
+            stopInternal()
+        }
+        whisperExecutor.shutdown()
+        try {
+            whisperExecutor.awaitTermination(10, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            whisperExecutor.shutdownNow()
+        }
     }
 
     private fun dispatchError(t: Throwable) = onError?.invoke(t)
@@ -260,16 +218,23 @@ class SpeechToText internal constructor(
         return shorts
     }
 
-    private class NativeSession(private val debug: Boolean) {
-        fun loadModel(path: String) {
-            if (debug) Log.d("Whisper", "Loading: $path")
+    /**
+     * NativeSession encapsulates all Whisper JNI calls. Load/unload are performed
+     * on the dedicated whisperExecutor to ensure deterministic lifecycle sequencing.
+     * Transcribe is thread-safe (C++ mutex in whisper_bridge.cpp).
+     */
+    private object NativeSession {
+        private val TAG = "NativeSession"
+
+        fun loadModel(path: String, debug: Boolean) {
+            if (debug) Log.d(TAG, "Loading model: $path")
             WhisperBridge.loadModel(path)
         }
 
         fun transcribe(pcm: ShortArray): String = WhisperBridge.transcribe(pcm)
 
-        fun close() {
-            if (debug) Log.d("Whisper", "Unloading model")
+        fun unloadModel() {
+            Log.d(TAG, "Unloading model")
             WhisperBridge.unloadModel()
         }
     }

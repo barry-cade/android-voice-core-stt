@@ -4,7 +4,6 @@
   "preRollMs": 200,
   "maxUtteranceLengthMs": 7000,
   "stableChunkSizeMs": 500,
-  "highPassCutoffHz": 0,
   "motionMode": {
     "energyThreshold": 0.05,
     "silencePaddingMs": 300

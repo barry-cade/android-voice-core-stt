@@ -93,7 +93,6 @@ class MainActivity : ComponentActivity() {
                 preRollMs = runtimeConfig.preRollMs,
                 maxUtteranceLengthMs = runtimeConfig.maxUtteranceLengthMs,
                 stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
-                highPassCutoffHz = runtimeConfig.highPassCutoffHz,
                 motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
                 motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                 modelPath = modelPath
@@ -149,6 +148,9 @@ class MainActivity : ComponentActivity() {
             try {
                 Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
                 stt?.stopAndTranscribe()
+                if (stt == null) {
+                    runOnUiThread { txtOutput.text = "Not yet started" }
+                }
             } catch (t: Throwable) {
                 runOnUiThread { txtOutput.text = "Error: ${t.message}" }
             }

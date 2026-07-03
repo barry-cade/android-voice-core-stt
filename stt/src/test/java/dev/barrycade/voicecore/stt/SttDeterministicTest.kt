@@ -1,8 +1,8 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.InputStream
@@ -50,6 +50,129 @@ class SttDeterministicTest {
         utterances.forEach { utterance ->
             assertTrue(utterance.contentEquals(firstUtterance))
         }
+    }
+
+    @Test
+    fun vadDoesNotFireOnLowEnergyFrames() {
+        val vad = Vad(energyThreshold = 0.05)
+        val lowEnergyFrame = FloatArray(320) { 0.001f }
+        assertTrue(!vad.isSpeech(lowEnergyFrame))
+    }
+
+    @Test
+    fun vadFiresOnHighEnergyFrames() {
+        val vad = Vad(energyThreshold = 0.01)
+        val highEnergyFrame = FloatArray(320) { 0.2f }
+        assertTrue(vad.isSpeech(highEnergyFrame))
+    }
+
+    @Test
+    fun accumulatorDoesNotFinalizeOnLowEnergyPcm() {
+        val vad = Vad(energyThreshold = 0.05)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            preRollMs = 200,
+            silenceDurationMs = 250,
+            maxUtteranceLengthMs = 4000,
+            stableBlockMs = 120,
+            vad = vad
+        )
+
+        // Feed 1 second of low-energy PCM (should never trigger speech)
+        val lowEnergyFrame = FloatArray(320) { 0.001f }
+        for (i in 0 until 50) {
+            val utterance = accumulator.processChunk(lowEnergyFrame, vad.isSpeech(lowEnergyFrame))
+            assertNull("Accumulator must not finalize on low-energy PCM ($i)", utterance)
+        }
+    }
+
+    @Test
+    fun forceFinalizeReturnsBufferedSpeech() {
+        val vad = Vad(energyThreshold = 0.01)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            preRollMs = 100,
+            silenceDurationMs = 500,
+            maxUtteranceLengthMs = 4000,
+            stableBlockMs = 120,
+            vad = vad
+        )
+
+        val speechFrame = FloatArray(320) { 0.2f }
+        accumulator.processChunk(speechFrame, true)
+
+        val result = accumulator.forceFinalize()
+        assertNotNull("forceFinalize must return buffered speech", result)
+        assertTrue("forceFinalize result must not be empty", result!!.isNotEmpty())
+    }
+
+    @Test
+    fun forceFinalizeReturnsNullWhenNoSpeech() {
+        val vad = Vad(energyThreshold = 0.05)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            silenceDurationMs = 250,
+            vad = vad
+        )
+
+        // Feed only 1 frame of silence — pre-roll adds it to preRollBuffer
+        // but speechPtr may still be 0 because processChunk also calls appendFrame
+        // unconditionally now. With no frames at all, speechPtr is 0.
+        val result = accumulator.forceFinalize()
+        assertNull("forceFinalize must return null when no frames were ever fed", result)
+    }
+
+    @Test
+    fun maxUtteranceLengthTriggersFinalization() {
+        val vad = Vad(energyThreshold = 0.01)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            preRollMs = 0,
+            silenceDurationMs = 10000, // long silence, won't trigger
+            maxUtteranceLengthMs = 250, // 250ms = 4000 samples buffer, needs >250ms to trigger
+            stableBlockMs = 120,
+            vad = vad
+        )
+
+        val speechFrame = FloatArray(320) { 0.2f } // 20ms per frame at 16kHz
+        var utterance: FloatArray? = null
+
+        // Feed continuous speech; maxUtteranceLengthMs (250ms) should trigger
+        // Each frame is 20ms, so at frame 13: totalDurationMs = 260 > 250
+        for (i in 0 until 30) {
+            val result = accumulator.processChunk(speechFrame, true)
+            if (result != null) {
+                utterance = result
+                break
+            }
+        }
+
+        assertNotNull("maxUtteranceLength must trigger finalization", utterance)
+        assertTrue("finalized utterance must not be empty", utterance!!.isNotEmpty())
+    }
+
+    @Test
+    fun silencePaddingTriggersFinalization() {
+        val vad = Vad(energyThreshold = 0.01)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            preRollMs = 0,
+            silenceDurationMs = 40, // 2 silence frames (20ms each) = finalize
+            maxUtteranceLengthMs = 10000,
+            stableBlockMs = 120,
+            vad = vad
+        )
+
+        val speechFrame = FloatArray(320) { 0.2f } // 20ms at 16kHz
+        val silenceFrame = FloatArray(320) { 0.0f }
+
+        // Feed speech then two silence frames (40ms total silence)
+        accumulator.processChunk(speechFrame, true)
+        accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 1
+        val utterance = accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 2 >= maxSilenceFrames
+
+        assertNotNull("silence padding must trigger finalization", utterance)
+        assertTrue("finalized utterance must not be empty", utterance!!.isNotEmpty())
     }
 
     private fun loadPcm16Mono(inputStream: InputStream): ShortArray {

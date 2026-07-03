@@ -16,6 +16,7 @@ class AudioTestService : Service() {
         sampleRate = 16000,
         requestedBufferSizeInBytes = 32000
     )
+    private var workerThread: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -55,17 +56,28 @@ class AudioTestService : Service() {
             startForeground(1, notification)
         }
 
-        audioCapture.setOnAudioFrameListener { buffer ->
-            Log.d(
-                "AudioTest",
-                "buffer=${buffer.size} samples, t=${System.currentTimeMillis()}"
-            )
-        }
         audioCapture.start()
+
+        // Poll FloatArray frames from the queue
+        workerThread = Thread({
+            while (true) {
+                val frame = audioCapture.frameQueue.poll()
+                if (frame != null) {
+                    Log.d(
+                        "AudioTest",
+                        "frame=${frame.size} samples, t=${System.currentTimeMillis()}"
+                    )
+                } else {
+                    Thread.sleep(10L)
+                }
+            }
+        }, "AudioTestPollThread").apply { start() }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        workerThread?.interrupt()
+        workerThread = null
         audioCapture.stop()
         super.onDestroy()
     }

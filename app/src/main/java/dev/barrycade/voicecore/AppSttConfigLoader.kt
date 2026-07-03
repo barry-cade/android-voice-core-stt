@@ -28,7 +28,6 @@ object AppSttConfigLoader {
             preRollMs = root.getInt("preRollMs"),
             maxUtteranceLengthMs = root.getInt("maxUtteranceLengthMs"),
             stableChunkSizeMs = root.getInt("stableChunkSizeMs"),
-            highPassCutoffHz = root.getInt("highPassCutoffHz"),
             motionMode = AppMotionModeConfig(
                 energyThreshold = motionMode.getDouble("energyThreshold").toFloat(),
                 silencePaddingMs = motionMode.getInt("silencePaddingMs")

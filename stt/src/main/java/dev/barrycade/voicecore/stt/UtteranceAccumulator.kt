@@ -1,8 +1,12 @@
 package dev.barrycade.voicecore.stt
 
+import android.util.Log
+
 /**
  * UtteranceAccumulator transforms incoming FloatArray frames into complete utterance buffers.
- * It supports a short pre-roll, silence-based finalization, and a hard safety cap.
+ * Every frame is continuously buffered into speechAccumulator regardless of VAD state.
+ * VAD is used only to mark utterance start/end for automatic finalization (silence padding,
+ * max duration). forceFinalize() returns all buffered PCM even if VAD never fired.
  */
 internal class UtteranceAccumulator(
     private val sampleRate: Int = 16000,
@@ -40,68 +44,60 @@ internal class UtteranceAccumulator(
         val frameDurationMs = frame.size * 1000 / sampleRate
         totalDurationMs += frameDurationMs
 
-        return if (speechActive) {
-            if (isSpeechFrame) {
-                for (sample in frame) {
-                    if (speechPtr >= speechAccumulator.size) {
-                        return null
-                    }
-                    speechAccumulator[speechPtr] = sample
-                    speechPtr++
-                }
-                silenceFrameCount = 0
-                if (totalDurationMs > maxUtteranceLengthMs) {
-                    finalizeUtterance()
-                } else {
-                    null
-                }
-            } else {
-                for (sample in frame) {
-                    if (speechPtr >= speechAccumulator.size) {
-                        return null
-                    }
-                    speechAccumulator[speechPtr] = sample
-                    speechPtr++
-                }
-                silenceFrameCount += 1
-                if (silenceFrameCount >= maxSilenceFrames) {
-                    finalizeUtterance()
-                } else {
-                    null
-                }
+        // Always buffer every frame into speechAccumulator regardless of VAD state.
+        // This guarantees forceFinalize() always returns PCM when frames have been fed.
+        appendFrame(frame)
+
+        // Sanity check: speechPtr must never go negative
+        if (speechPtr < 0) {
+            Log.e("ACCUM", "speechPtr went negative ($speechPtr), clamping to 0")
+            speechPtr = 0
+        }
+
+        if (speechActive) {
+            silenceFrameCount = if (isSpeechFrame) 0 else silenceFrameCount + 1
+            if (silenceFrameCount >= maxSilenceFrames) {
+                return finalizeUtterance()
             }
+            if (totalDurationMs >= maxUtteranceLengthMs) {
+                return finalizeUtterance()
+            }
+            return null
         } else {
             if (isSpeechFrame) {
                 speechActive = true
                 silenceFrameCount = 0
-                speechPtr = 0
-                for (sample in preRollBuffer) {
-                    if (speechPtr >= speechAccumulator.size) {
-                        return null
-                    }
-                    speechAccumulator[speechPtr] = sample
-                    speechPtr++
-                }
-                for (sample in frame) {
-                    if (speechPtr >= speechAccumulator.size) {
-                        return null
-                    }
-                    speechAccumulator[speechPtr] = sample
-                    speechPtr++
-                }
-                preRollBuffer.clear()
                 totalDurationMs = 0
-                null
+                return null
             } else {
+                // Maintain pre-roll ring buffer for speech-start context
                 preRollBuffer.addAll(frame.toList())
                 if (preRollBuffer.size > preRollSamples) {
                     val excess = preRollBuffer.size - preRollSamples
                     repeat(excess) {
-                        preRollBuffer.removeAt(0)
+                        if (preRollBuffer.isNotEmpty()) {
+                            preRollBuffer.removeAt(0)
+                        } else {
+                            Log.e("ACCUM", "preRollBuffer unexpectedly empty during trim")
+                        }
                     }
                 }
-                null
+                return null
             }
+        }
+    }
+
+    /**
+     * Appends a frame into the continuous speechAccumulator, growing up to maxSamples.
+     * If the buffer would overflow, it finalizes and discards the frame.
+     */
+    private fun appendFrame(frame: FloatArray) {
+        for (sample in frame) {
+            if (speechPtr >= speechAccumulator.size) {
+                return
+            }
+            speechAccumulator[speechPtr] = sample
+            speechPtr++
         }
     }
 
@@ -115,8 +111,19 @@ internal class UtteranceAccumulator(
         totalDurationMs = 0
     }
 
+    /**
+     * forceFinalize returns all buffered PCM, even if VAD never fired.
+     * Returns null only when no frames have ever been buffered (speechPtr == 0).
+     */
+    fun forceFinalize(): FloatArray? {
+        if (speechPtr == 0) return null
+        return finalizeUtterance()
+    }
+
     private fun finalizeUtterance(): FloatArray {
-        val utterance = speechAccumulator.copyOf(speechPtr)
+        // Guard against negative or zero speechPtr
+        val safePtr = if (speechPtr <= 0) 0 else speechPtr
+        val utterance = speechAccumulator.copyOf(safePtr)
         val paddedLength = if (utterance.size % stableBlockSamples == 0) {
             utterance.size
         } else {
