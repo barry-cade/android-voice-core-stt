@@ -8,7 +8,7 @@ data class AppRuntimeSttConfig(
     val stableChunkSizeMs: Int,
     val highPassCutoffHz: Int,
     val motionMode: AppMotionModeConfig,
-    val debugLoggingEnabled: Boolean = false
+    val debugLoggingEnabled: Boolean = true
 )
 
 data class AppMotionModeConfig(
