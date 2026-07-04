@@ -8,8 +8,8 @@ object AppSttConfigLoader {
     private const val TAG = "STT_CONFIG"
 
     fun loadFromAssets(context: Context): AppRuntimeSttConfig {
-        val json = context.assets.open("stt_config.json")
-            .use { it.readBytes().toString(Charsets.UTF_8) }
+        val inputStream = context.assets.open("stt_config.json")
+        val json = inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
 
         return try {
             parse(json)
