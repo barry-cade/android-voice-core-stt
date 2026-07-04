@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtOutput: TextView
     private lateinit var txtErrorBanner: TextView
     private lateinit var txtDiagnostics: TextView
+    private lateinit var txtConfigDisplay: TextView
     private lateinit var txtDebugTitle: TextView
     private lateinit var layoutDebugToggles: View
     private lateinit var btnForceAudioFail: Button
@@ -42,6 +43,10 @@ class MainActivity : ComponentActivity() {
         if (debugLogging) Log.i(tag, message)
     }
 
+    private fun postToUi(action: () -> Unit) {
+        runOnUiThread(action)
+    }
+
     private val requestPermissionLauncher = registerForActivityResult(
         RequestPermission()
     ) { granted ->
@@ -59,6 +64,7 @@ class MainActivity : ComponentActivity() {
         txtOutput = findViewById(R.id.txtOutput)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
+        txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         txtDebugTitle = findViewById(R.id.txtDebugTitle)
         layoutDebugToggles = findViewById(R.id.layoutDebugToggles)
         btnForceAudioFail = findViewById(R.id.btnForceAudioFail)
@@ -153,12 +159,12 @@ class MainActivity : ComponentActivity() {
 
             // ── Result callback ───────────────────────────────────────────
             speechToText.setOnResultListener { result ->
-                runOnUiThread { txtOutput.text = result }
+                postToUi { txtOutput.text = result }
             }
 
             // ── Timing callback ───────────────────────────────────────────
             val timingListener: (Long, Long, Long, Long) -> Unit = { pcmMs, vadActiveMs, whisperMs, totalMs ->
-                runOnUiThread {
+                postToUi {
                     txtDiagnostics.visibility = android.view.View.VISIBLE
                     txtDiagnostics.text = buildString {
                         appendLine("=== Timing Diagnostics ===")
@@ -173,7 +179,7 @@ class MainActivity : ComponentActivity() {
 
             // ── Structured error callback ─────────────────────────────────
             val errorListener = SttErrorListener { error ->
-                runOnUiThread {
+                postToUi {
                     val keySet = setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs")
                     val timingCtx = error.context.filterKeys { it in keySet }
                     txtDiagnostics.visibility = android.view.View.VISIBLE
@@ -201,7 +207,7 @@ class MainActivity : ComponentActivity() {
 
             // ── Legacy error callback (backwards compat) ──────────────────
             speechToText.setOnErrorListener { t ->
-                runOnUiThread {
+                postToUi {
                     if (txtDiagnostics.text.isNullOrBlank()) {
                         txtDiagnostics.visibility = android.view.View.VISIBLE
                         txtDiagnostics.text = "Error: ${t.message}"
@@ -212,6 +218,19 @@ class MainActivity : ComponentActivity() {
 
             speechToText.start()
             stt = speechToText
+
+            // ── Show active config ────────────────────────────────────────
+            txtConfigDisplay.visibility = android.view.View.VISIBLE
+            txtConfigDisplay.text = buildString {
+                appendLine("=== Active Config ===")
+                appendLine("energyThreshold:        ${runtimeConfig.energyThreshold}")
+                appendLine("silencePaddingMs:       ${runtimeConfig.silencePaddingMs}")
+                appendLine("preRollMs:              ${runtimeConfig.preRollMs}")
+                appendLine("maxUtteranceLengthMs:   ${runtimeConfig.maxUtteranceLengthMs}")
+                appendLine("stableChunkSizeMs:      ${runtimeConfig.stableChunkSizeMs}")
+                appendLine("motionMode.energyThreshold:   ${runtimeConfig.motionMode.energyThreshold}")
+                appendLine("motionMode.silencePaddingMs:  ${runtimeConfig.motionMode.silencePaddingMs}")
+            }
 
             isRecording = true
             txtOutput.text = "Recording..."
@@ -251,10 +270,10 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
                 stt?.stopAndTranscribe()
                 if (stt == null) {
-                    runOnUiThread { txtOutput.text = "Not yet started" }
+                    postToUi { txtOutput.text = "Not yet started" }
                 }
             } catch (t: Throwable) {
-                runOnUiThread { txtOutput.text = "Error: ${t.message}" }
+                postToUi { txtOutput.text = "Error: ${t.message}" }
             }
         }.start()
     }
