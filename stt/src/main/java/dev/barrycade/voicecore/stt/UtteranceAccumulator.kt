@@ -1,7 +1,5 @@
 package dev.barrycade.voicecore.stt
 
-import android.util.Log
-
 /**
  * UtteranceAccumulator transforms incoming FloatArray frames into complete utterance buffers.
  * Uses a simple append-only buffer: every frame is appended to speechAccumulator regardless
@@ -11,6 +9,9 @@ import android.util.Log
  *
  * Pre-roll is disabled (no separate preRollBuffer with trimming). When VAD fires, the
  * utterance starts from whatever has been accumulated so far.
+ *
+ * Testing hook: internal [forceTimeout] flag causes immediate max-utterance finalization
+ * the next time speech is detected.
  */
 internal class UtteranceAccumulator(
     private val sampleRate: Int = 16000,
@@ -31,9 +32,11 @@ internal class UtteranceAccumulator(
         vad = vad
     )
 
-    companion object {
-        private const val TAG = "ACCUM"
-    }
+    /** Error listener forwarded from SpeechToText for structured error reporting. */
+    internal var sttErrorListener: SttErrorListener? = null
+
+    /** Testing hook: when true, simulates max-utterance timeout on first speech frame. */
+    internal var forceTimeout: Boolean = false
 
     private val silenceFrameDurationMs = 20
     private val maxSilenceFrames = (silenceDurationMs / silenceFrameDurationMs).coerceAtLeast(1)
@@ -62,6 +65,17 @@ internal class UtteranceAccumulator(
                 return finalizeUtterance()
             }
             if (totalDurationMs >= maxUtteranceLengthMs) {
+                SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
+                val error = SttError(
+                    code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
+                    message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
+                    context = mapOf(
+                        "totalDurationMs" to totalDurationMs,
+                        "maxUtteranceLengthMs" to maxUtteranceLengthMs,
+                        "bufferSize" to speechAccumulator.size
+                    )
+                )
+                sttErrorListener?.onSttError(error)
                 return finalizeUtterance()
             }
             return null
@@ -70,6 +84,18 @@ internal class UtteranceAccumulator(
                 speechActive = true
                 silenceFrameCount = 0
                 totalDurationMs = 0
+
+                // ── Testing hook: forceTimeout on first speech frame ──────
+                if (forceTimeout) {
+                    SttLogger.error("forcedFailure: TIMEOUT_MAX_UTTERANCE")
+                    val error = SttError(
+                        code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
+                        message = "Forced test failure: max utterance timeout",
+                        context = mapOf("forcedFailure" to "forceTimeout")
+                    )
+                    sttErrorListener?.onSttError(error)
+                    return finalizeUtterance()
+                }
             }
             return null
         }
@@ -93,9 +119,11 @@ internal class UtteranceAccumulator(
         return finalizeUtterance()
     }
 
+    internal fun currentDurationMs(): Int = totalDurationMs
+
     private fun finalizeUtterance(): FloatArray {
         if (speechAccumulator.isEmpty()) {
-            Log.w(TAG, "finalizeUtterance called with empty buffer, returning null")
+            SttLogger.pcmW("finalizeUtterance called with empty buffer, returning null")
             return FloatArray(0)
         }
 

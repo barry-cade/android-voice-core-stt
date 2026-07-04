@@ -1,6 +1,5 @@
 package dev.barrycade.voicecore.stt
 
-import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -14,8 +13,13 @@ internal class SttProcessor(
     private val listener: UtteranceListener,
     private val calibrationLogger: VadCalibrationLogger? = null
 ) {
-    private val isRunning = AtomicBoolean(false)
+        private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
+
+    /** Accumulated VAD active time in milliseconds. */
+    @Volatile
+    internal var vadActiveMs: Long = 0L
+        private set
 
     fun start() {
         if (isRunning.getAndSet(true)) return
@@ -28,20 +32,35 @@ internal class SttProcessor(
                         Thread.sleep(10L)
                         continue
                     }
-                    Log.d("STT_PCM", "dequeue frame for VAD, size=${frame.size}")
+                                        SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
                     val isSpeechFrame = vad.isSpeech(frame)
                     val rms = computeRms(frame)
                     calibrationLogger?.logFrame(frame, isSpeechFrame, rms, 0)
+
+                    // ── Timing: accumulate VAD active duration ────────────
+                    if (isSpeechFrame) {
+                        val frameDurationMs = (frame.size * 1000L) / 16000L
+                        vadActiveMs += frameDurationMs
+                    }
+
                     val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
                     if (utterance != null) {
-                        Log.d("SttProcessor", "Utterance finalized with ${utterance.size} samples")
+                        SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
                         calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
                         listener.onUtteranceReady(utterance)
                     }
-                } catch (_: InterruptedException) {
+                                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
+                } catch (t: Throwable) {
+                    SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
+                    val error = SttError(
+                        code = SttErrorCode.UNKNOWN_ERROR,
+                        message = "SttProcessor worker thread error: ${t.message}",
+                        context = mapOf("exception" to t::class.java.simpleName)
+                    )
+                    sttErrorListener?.onSttError(error)
                 }
             }
         }, "SttProcessorThread").apply { start() }
@@ -61,12 +80,16 @@ internal class SttProcessor(
         return utterance
     }
 
-    private fun computeRms(frame: FloatArray): Double {
+        private fun computeRms(frame: FloatArray): Double {
         if (frame.isEmpty()) return 0.0
         var sumSquares = 0.0
         for (sample in frame) {
             sumSquares += sample * sample
         }
         return kotlin.math.sqrt(sumSquares / frame.size)
+    }
+
+    companion object {
+        var sttErrorListener: SttErrorListener? = null
     }
 }

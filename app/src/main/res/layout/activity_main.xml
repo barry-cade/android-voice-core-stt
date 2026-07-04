@@ -51,11 +51,73 @@
         android:layout_marginTop="16dp"
         android:fillViewport="true">
 
-        <TextView
-            android:id="@+id/txtOutput"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Say something..."
-            android:textIsSelectable="true" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/txtOutput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Say something..."
+                android:textIsSelectable="true" />
+
+            <TextView
+                android:id="@+id/txtDiagnostics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:padding="8dp"
+                android:background="#E8EAF6"
+                android:textColor="#1A237E"
+                android:textSize="11sp"
+                android:typeface="monospace"
+                android:visibility="gone"
+                android:text="" />
+        </LinearLayout>
     </ScrollView>
+
+    <TextView
+        android:id="@+id/txtDebugTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Debug Toggles"
+        android:textStyle="bold"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/layoutDebugToggles"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnForceAudioFail"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Audio Fail"
+            android:textSize="10sp"
+            android:padding="4dp" />
+
+        <Button
+            android:id="@+id/btnForceWhisperFail"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Whisper Fail"
+            android:textSize="10sp"
+            android:padding="4dp" />
+
+        <Button
+            android:id="@+id/btnForceTimeout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Timeout"
+            android:textSize="10sp"
+            android:padding="4dp" />
+    </LinearLayout>
 </LinearLayout>

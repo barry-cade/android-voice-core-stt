@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -11,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts.RequestPermissi
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.stt.SttErrorListener
 import java.io.File
 import java.io.FileOutputStream
 
@@ -20,11 +22,22 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnClear: Button
     private lateinit var txtOutput: TextView
     private lateinit var txtErrorBanner: TextView
+    private lateinit var txtDiagnostics: TextView
+    private lateinit var txtDebugTitle: TextView
+    private lateinit var layoutDebugToggles: View
+    private lateinit var btnForceAudioFail: Button
+    private lateinit var btnForceWhisperFail: Button
+    private lateinit var btnForceTimeout: Button
 
     private var stt: SpeechToText? = null
     private var isRecording = false
     private var sttAvailable = true
     private val debugLogging = true
+
+    // ── Debug toggle state ───────────────────────────────────────────────
+    private var debugForceAudioInitFailure = false
+    private var debugForceWhisperLoadFailure = false
+    private var debugForceTimeout = false
 
     private fun logInfo(tag: String, message: String) {
         if (debugLogging) Log.i(tag, message)
@@ -46,6 +59,44 @@ class MainActivity : ComponentActivity() {
         btnClear = findViewById(R.id.btnClear)
         txtOutput = findViewById(R.id.txtOutput)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
+        txtDiagnostics = findViewById(R.id.txtDiagnostics)
+        txtDebugTitle = findViewById(R.id.txtDebugTitle)
+        layoutDebugToggles = findViewById(R.id.layoutDebugToggles)
+        btnForceAudioFail = findViewById(R.id.btnForceAudioFail)
+        btnForceWhisperFail = findViewById(R.id.btnForceWhisperFail)
+        btnForceTimeout = findViewById(R.id.btnForceTimeout)
+
+        // ── Debug toggle click handlers ────────────────────────────────
+        btnForceAudioFail.setOnClickListener {
+            debugForceAudioInitFailure = !debugForceAudioInitFailure
+            btnForceAudioFail.isSelected = debugForceAudioInitFailure
+            btnForceAudioFail.setBackgroundColor(
+                if (debugForceAudioInitFailure) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
+            )
+            logInfo("STT_DEBUG", "forceAudioInitFailure=$debugForceAudioInitFailure")
+        }
+
+        btnForceWhisperFail.setOnClickListener {
+            debugForceWhisperLoadFailure = !debugForceWhisperLoadFailure
+            btnForceWhisperFail.isSelected = debugForceWhisperLoadFailure
+            btnForceWhisperFail.setBackgroundColor(
+                if (debugForceWhisperLoadFailure) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
+            )
+            logInfo("STT_DEBUG", "forceWhisperLoadFailure=$debugForceWhisperLoadFailure")
+        }
+
+        btnForceTimeout.setOnClickListener {
+            debugForceTimeout = !debugForceTimeout
+            btnForceTimeout.isSelected = debugForceTimeout
+            btnForceTimeout.setBackgroundColor(
+                if (debugForceTimeout) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
+            )
+            logInfo("STT_DEBUG", "forceTimeout=$debugForceTimeout")
+        }
+
+        // Show debug section
+        txtDebugTitle.visibility = android.view.View.VISIBLE
+        layoutDebugToggles.visibility = android.view.View.VISIBLE
 
         btnStart.setOnClickListener {
             if (!sttAvailable) return@setOnClickListener
@@ -96,14 +147,71 @@ class MainActivity : ComponentActivity() {
                 motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
                 motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                 modelPath = modelPath
-            ).also {
-                it.setOnResultListener { result ->
+            ).also { speechToText ->
+                // ── Apply test hooks via public API ───────────────────
+                speechToText.setDebugOptions(
+                    forceAudioInitFailure = debugForceAudioInitFailure,
+                    forceWhisperLoadFailure = debugForceWhisperLoadFailure,
+                    forceTimeout = debugForceTimeout
+                )
+
+                // ── Result callback ───────────────────────────────────
+                speechToText.setOnResultListener { result ->
                     runOnUiThread { txtOutput.text = result }
                 }
-                it.setOnErrorListener { t ->
-                    runOnUiThread { txtOutput.text = "Error: ${t.message}" }
+
+                // ── Timing callback ───────────────────────────────────
+                speechToText.onTimingListener = { pcmMs, vadActiveMs, whisperMs, totalMs ->
+                    runOnUiThread {
+                        txtDiagnostics.visibility = android.view.View.VISIBLE
+                        txtDiagnostics.text = buildString {
+                            appendLine("=== Timing Diagnostics ===")
+                            appendLine("PCM duration:    ${pcmMs}ms")
+                            appendLine("VAD active:      ${vadActiveMs}ms")
+                            appendLine("Whisper inf:     ${whisperMs}ms")
+                            appendLine("Total duration:  ${totalMs}ms")
+                        }
+                    }
                 }
-                it.start()
+
+                // ── Structured error callback ─────────────────────────
+                speechToText.setSttErrorListener(SttErrorListener { error ->
+                    runOnUiThread {
+                        val timingCtx = error.context.filterKeys { it in setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs") }
+                        txtDiagnostics.visibility = android.view.View.VISIBLE
+                        txtDiagnostics.text = buildString {
+                            appendLine("=== Error ===")
+                            appendLine("Code:    ${error.code}")
+                            appendLine("Message: ${error.message}")
+                            if (error.context.isNotEmpty()) {
+                                appendLine("Context:")
+                                error.context.forEach { (key, value) ->
+                                    appendLine("  $key = $value")
+                                }
+                            }
+                            if (timingCtx.isNotEmpty()) {
+                                appendLine("Timing at error:")
+                                timingCtx.forEach { (key, value) ->
+                                    appendLine("  $key = $value")
+                                }
+                            }
+                        }
+                        txtOutput.text = "Error: ${error.code} - ${error.message}"
+                    }
+                })
+
+                // ── Legacy error callback (backwards compat) ──────────
+                speechToText.setOnErrorListener { t ->
+                    runOnUiThread {
+                        if (txtDiagnostics.text.isNullOrBlank()) {
+                            txtDiagnostics.visibility = android.view.View.VISIBLE
+                            txtDiagnostics.text = "Error: ${t.message}"
+                        }
+                        txtOutput.text = "Error: ${t.message}"
+                    }
+                }
+
+                speechToText.start()
             }
 
             sttAvailable = true
