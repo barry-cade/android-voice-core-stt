@@ -38,6 +38,13 @@ internal class UtteranceAccumulator(
     /** Testing hook: when true, simulates max-utterance timeout on first speech frame. */
     internal var forceTimeout: Boolean = false
 
+    /**
+     * Callback invoked when a new utterance starts (SILENCE → SPEECH transition).
+     * Fires before any accumulation for the utterance begins.
+     * SttProcessor uses this to reset per-utterance timing counters.
+     */
+    internal var onSpeechStart: (() -> Unit)? = null
+
     private val silenceFrameDurationMs = 20
     private val maxSilenceFrames = (silenceDurationMs / silenceFrameDurationMs).coerceAtLeast(1)
     private val stableBlockSamples = (sampleRate * stableBlockMs / 1000).coerceAtLeast(1)
@@ -84,6 +91,9 @@ internal class UtteranceAccumulator(
                 speechActive = true
                 silenceFrameCount = 0
                 totalDurationMs = 0
+
+                // ── Notify SttProcessor to reset per-utterance counters ──
+                onSpeechStart?.invoke()
 
                 // ── Testing hook: forceTimeout on first speech frame ──────
                 if (forceTimeout) {

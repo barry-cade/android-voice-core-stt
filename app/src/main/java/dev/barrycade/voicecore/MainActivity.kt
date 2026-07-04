@@ -31,7 +31,6 @@ class MainActivity : ComponentActivity() {
 
     private var stt: SpeechToText? = null
     private var isRecording = false
-    private var sttAvailable = true
     private val debugLogging = true
 
     // ── Debug toggle state ───────────────────────────────────────────────
@@ -99,15 +98,13 @@ class MainActivity : ComponentActivity() {
         layoutDebugToggles.visibility = android.view.View.VISIBLE
 
         btnStart.setOnClickListener {
-            if (!sttAvailable) return@setOnClickListener
-            logInfo("STT_FLOW", "startRecording() called, sttAvailable=$sttAvailable")
+            logInfo("STT_FLOW", "startRecording() called")
             if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         btnStop.setOnClickListener {
-            if (!sttAvailable) return@setOnClickListener
-            logInfo("STT_FLOW", "stopAndTranscribe() called, sttAvailable=$sttAvailable")
+            logInfo("STT_FLOW", "stopAndTranscribe() called")
             if (isRecording) stopAndTranscribe()
         }
 
@@ -126,8 +123,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRecording() {
-        if (!sttAvailable) return
-
         val modelPath = getModelPath()
         val runtimeConfig = try {
             AppSttConfigLoader.loadFromAssets(this)
@@ -138,7 +133,7 @@ class MainActivity : ComponentActivity() {
 
         try {
             logInfo("STT_INIT", "Constructing STT with modelPath=$modelPath")
-            stt = SpeechToText.create(
+            val speechToText = SpeechToText.create(
                 energyThreshold = runtimeConfig.energyThreshold,
                 silencePaddingMs = runtimeConfig.silencePaddingMs,
                 preRollMs = runtimeConfig.preRollMs,
@@ -147,75 +142,81 @@ class MainActivity : ComponentActivity() {
                 motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
                 motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                 modelPath = modelPath
-            ).also { speechToText ->
-                // ── Apply test hooks via public API ───────────────────
-                speechToText.setDebugOptions(
-                    forceAudioInitFailure = debugForceAudioInitFailure,
-                    forceWhisperLoadFailure = debugForceWhisperLoadFailure,
-                    forceTimeout = debugForceTimeout
                 )
 
-                // ── Result callback ───────────────────────────────────
-                speechToText.setOnResultListener { result ->
-                    runOnUiThread { txtOutput.text = result }
-                }
+            // ── Apply test hooks via public API ───────────────────────────
+            speechToText.setDebugOptions(
+                forceAudioInitFailure = debugForceAudioInitFailure,
+                forceWhisperLoadFailure = debugForceWhisperLoadFailure,
+                forceTimeout = debugForceTimeout
+            )
 
-                // ── Timing callback ───────────────────────────────────
-                speechToText.onTimingListener = { pcmMs, vadActiveMs, whisperMs, totalMs ->
-                    runOnUiThread {
-                        txtDiagnostics.visibility = android.view.View.VISIBLE
-                        txtDiagnostics.text = buildString {
-                            appendLine("=== Timing Diagnostics ===")
-                            appendLine("PCM duration:    ${pcmMs}ms")
-                            appendLine("VAD active:      ${vadActiveMs}ms")
-                            appendLine("Whisper inf:     ${whisperMs}ms")
-                            appendLine("Total duration:  ${totalMs}ms")
-                        }
-                    }
-                }
-
-                // ── Structured error callback ─────────────────────────
-                speechToText.setSttErrorListener(SttErrorListener { error ->
-                    runOnUiThread {
-                        val timingCtx = error.context.filterKeys { it in setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs") }
-                        txtDiagnostics.visibility = android.view.View.VISIBLE
-                        txtDiagnostics.text = buildString {
-                            appendLine("=== Error ===")
-                            appendLine("Code:    ${error.code}")
-                            appendLine("Message: ${error.message}")
-                            if (error.context.isNotEmpty()) {
-                                appendLine("Context:")
-                                error.context.forEach { (key, value) ->
-                                    appendLine("  $key = $value")
-                                }
-                            }
-                            if (timingCtx.isNotEmpty()) {
-                                appendLine("Timing at error:")
-                                timingCtx.forEach { (key, value) ->
-                                    appendLine("  $key = $value")
-                                }
-                            }
-                        }
-                        txtOutput.text = "Error: ${error.code} - ${error.message}"
-                    }
-                })
-
-                // ── Legacy error callback (backwards compat) ──────────
-                speechToText.setOnErrorListener { t ->
-                    runOnUiThread {
-                        if (txtDiagnostics.text.isNullOrBlank()) {
-                            txtDiagnostics.visibility = android.view.View.VISIBLE
-                            txtDiagnostics.text = "Error: ${t.message}"
-                        }
-                        txtOutput.text = "Error: ${t.message}"
-                    }
-                }
-
-                speechToText.start()
+            // ── Result callback ───────────────────────────────────────────
+            speechToText.setOnResultListener { result ->
+                runOnUiThread { txtOutput.text = result }
             }
 
-            sttAvailable = true
-            logInfo("STT_STATE", "sttAvailable=$sttAvailable")
+            // ── Timing callback ───────────────────────────────────────────
+            val timingListener: (Long, Long, Long, Long) -> Unit = { pcmMs, vadActiveMs, whisperMs, totalMs ->
+                runOnUiThread {
+                    txtDiagnostics.visibility = android.view.View.VISIBLE
+                    txtDiagnostics.text = buildString {
+                        appendLine("=== Timing Diagnostics ===")
+                        appendLine("PCM duration:    ${pcmMs}ms")
+                        appendLine("VAD active:      ${vadActiveMs}ms")
+                        appendLine("Whisper inf:     ${whisperMs}ms")
+                        appendLine("Total duration:  ${totalMs}ms")
+                    }
+                }
+            }
+            speechToText.onTimingListener = timingListener
+
+            // ── Structured error callback ─────────────────────────────────
+            val errorListener = SttErrorListener { error ->
+                runOnUiThread {
+                    val keySet = setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs")
+                    val timingCtx = error.context.filterKeys { it in keySet }
+                    txtDiagnostics.visibility = android.view.View.VISIBLE
+                    txtDiagnostics.text = buildString {
+                        appendLine("=== Error ===")
+                        appendLine("Code:    ${error.code}")
+                        appendLine("Message: ${error.message}")
+                        if (error.context.isNotEmpty()) {
+                            appendLine("Context:")
+                            error.context.forEach { (key, value) ->
+                                appendLine("  $key = $value")
+                            }
+                                }
+                        if (timingCtx.isNotEmpty()) {
+                            appendLine("Timing at error:")
+                            timingCtx.forEach { (key, value) ->
+                                appendLine("  $key = $value")
+                            }
+                        }
+                    }
+                    txtOutput.text = "Error: ${error.code} - ${error.message}"
+                }
+            }
+            speechToText.setSttErrorListener(errorListener)
+
+            // ── Legacy error callback (backwards compat) ──────────────────
+            speechToText.setOnErrorListener { t ->
+                runOnUiThread {
+                    if (txtDiagnostics.text.isNullOrBlank()) {
+                        txtDiagnostics.visibility = android.view.View.VISIBLE
+                        txtDiagnostics.text = "Error: ${t.message}"
+                    }
+                    txtOutput.text = "Error: ${t.message}"
+                }
+            }
+
+            speechToText.start()
+            stt = speechToText
+
+            isRecording = true
+            txtOutput.text = "Recording..."
+            updateUi()
+
             isRecording = true
             txtOutput.text = "Recording..."
             updateUi()
@@ -230,8 +231,6 @@ class MainActivity : ComponentActivity() {
             title = "Invalid STT Configuration",
             message = "The STT tuning values are invalid:\n${e.message}"
         )
-        sttAvailable = false
-        Log.i("STT_STATE", "sttAvailable=$sttAvailable")
         isRecording = false
         stt = null
         txtErrorBanner.visibility = android.view.View.VISIBLE
@@ -247,7 +246,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopAndTranscribe() {
-        if (!sttAvailable) return
         isRecording = false
         txtOutput.text = "Processing..."
         updateUi()
@@ -266,12 +264,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        if (!sttAvailable) {
-            btnStart.isEnabled = false
-            btnStop.isEnabled = false
-            btnClear.isEnabled = false
-            return
-        }
         btnStart.isEnabled = !isRecording
         btnStop.isEnabled = isRecording
         btnClear.isEnabled = !isRecording

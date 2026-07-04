@@ -16,10 +16,20 @@ internal class SttProcessor(
         private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
-    /** Accumulated VAD active time in milliseconds. */
+        /** Accumulated VAD active time in milliseconds. */
     @Volatile
     internal var vadActiveMs: Long = 0L
         private set
+
+    /**
+     * Reset per-utterance VAD active time to 0.
+     * Called when UtteranceAccumulator detects a SILENCE → SPEECH transition,
+     * and by SpeechToText.stopAndTranscribe() for manual invocation.
+     * Guarantees per-utterance timing, not cumulative.
+     */
+    internal fun resetVadActiveMs() {
+        vadActiveMs = 0L
+    }
 
     fun start() {
         if (isRunning.getAndSet(true)) return
@@ -38,8 +48,9 @@ internal class SttProcessor(
                     val rms = computeRms(frame)
                     calibrationLogger?.logFrame(frame, isSpeechFrame, rms, 0)
 
-                    // ── Timing: accumulate VAD active duration ────────────
+                                        // ── Timing: accumulate VAD active duration ────────────
                     if (isSpeechFrame) {
+                        SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
                         val frameDurationMs = (frame.size * 1000L) / 16000L
                         vadActiveMs += frameDurationMs
                     }

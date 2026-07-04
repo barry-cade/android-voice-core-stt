@@ -4,7 +4,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-
+    
 /**
  * SpeechToText captures microphone audio, runs VAD-driven utterance detection,
  * and transcribes finalized utterances via Whisper. Transcription is triggered
@@ -75,7 +75,7 @@ class SpeechToText internal constructor(
     private val stateLock = Any()
 
     private val lifecycleManager = SttLifecycleManager(
-        errorListener = SttErrorListener { error ->
+        errorListener = { error ->
             sttErrorListener?.onSttError(error)
             onError?.let { listener ->
                 listener(RuntimeException("STT error: ${error.code} - ${error.message}"))
@@ -291,6 +291,8 @@ class SpeechToText internal constructor(
                         if (this@SpeechToText.forceTimeout) {
                             this.forceTimeout = true
                         }
+                        // ── Reset per-utterance VAD timing on speech start ─
+                        onSpeechStart = { sttProcessor?.resetVadActiveMs() }
                     },
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
@@ -307,7 +309,7 @@ class SpeechToText internal constructor(
                             if (debugVad) SttLogger.whisperD("inferenceStart: pcmMs=${pcm.size * 1000 / 16000}")
 
                             val text = try {
-                                val result = NativeSession.transcribe(samples)?.trim().orEmpty()
+                                val result = NativeSession.transcribe(samples).trim()
                                 val whisperMs = System.currentTimeMillis() - inferenceStartMs
                                 SttLogger.whisper("inferenceEnd: timeMs=$whisperMs, text=\"$result\"")
                                 result
@@ -394,7 +396,7 @@ class SpeechToText internal constructor(
                     SttLogger.pcmD("final pcm size=${pcm.size}")
                     val inferenceStartMs = System.currentTimeMillis()
                     val samples = pcm.toShortArray()
-                    val text = NativeSession.transcribe(samples)?.trim().orEmpty()
+                    val text = NativeSession.transcribe(samples).trim()
                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
 
                     if (text.isNotBlank()) {
