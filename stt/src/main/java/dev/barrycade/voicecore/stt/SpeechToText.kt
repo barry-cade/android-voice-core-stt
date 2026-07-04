@@ -72,6 +72,7 @@ class SpeechToText internal constructor(
     private val debugVad = true
 
     private val isRunning = AtomicBoolean(false)
+    private val isInferencing = AtomicBoolean(false)
     private val stateLock = Any()
 
     private val lifecycleManager = SttLifecycleManager(
@@ -306,59 +307,72 @@ class SpeechToText internal constructor(
                     },
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
-                            // Transition: RECORDING → INFERENCING
-                            try {
-                                lifecycleManager.transitionTo(SttLifecycleState.INFERENCING)
-                            } catch (_: IllegalStateException) {
+                            // Guard: no inference after stop, error, or teardown
+                            if (!isRunning.get()) return
+
+                            // Guard: only one inference at a time
+                            if (!isInferencing.compareAndSet(false, true)) {
+                                SttLogger.whisperW("inference skipped: another inference already in progress")
                                 return
                             }
 
-                            if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
-                            val samples = pcm.toShortArray()
-                            val inferenceStartMs = System.currentTimeMillis()
-                            if (debugVad) SttLogger.whisperD("inferenceStart: pcmMs=${pcm.size * 1000 / 16000}")
-
-                            val text = try {
-                                val result = NativeSession.transcribe(samples).trim()
-                                val whisperMs = System.currentTimeMillis() - inferenceStartMs
-                                SttLogger.whisper("inferenceEnd: timeMs=$whisperMs, text=\"$result\"")
-                                result
-                            } catch (t: Throwable) {
-                                SttLogger.whisperE("inference failed: ${t.message}")
-                                val error = SttError(
-                                    category = SttErrorCategory.WHISPER_ERROR,
-                                    code = SttErrorCode.WHISPER_INFERENCE_FAILED,
-                                    message = "Whisper inference failed: ${t.message}",
-                                    cause = t,
-                                    context = mapOf("pcmSamples" to samples.size, "exception" to t::class.java.simpleName)
-                                )
-                                sttErrorListener?.onSttError(error)
-                                ""
-                            }
-
-                            // Transition back: INFERENCING → RECORDING
                             try {
-                                lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
-                            } catch (_: IllegalStateException) { }
+                                // Transition: RECORDING → INFERENCING
+                                try {
+                                    lifecycleManager.transitionTo(SttLifecycleState.INFERENCING)
+                                } catch (_: IllegalStateException) {
+                                    return
+                                }
 
-                            if (text.isNotBlank()) {
-                                // ── Timing: compute and log diagnostic ─────
-                                val whisperMs = System.currentTimeMillis() - inferenceStartMs
-                                timingPcmTotalMs = System.currentTimeMillis() - timingPcmStartMs
-                                timingVadActiveMs = sttProcessor?.vadActiveMs ?: 0L
-                                timingTotalMs = System.currentTimeMillis() - timingUtteranceStartMs
-                                val timing = SttTiming(
-                                    pcmMs = timingPcmTotalMs,
-                                    vadActiveMs = timingVadActiveMs,
-                                    whisperMs = whisperMs,
-                                    totalMs = timingTotalMs
-                                )
-                                SttLogger.pcm("[DIAG] timing: pcmMs=${timing.pcmMs}, vadActiveMs=${timing.vadActiveMs}, whisperMs=${timing.whisperMs}, totalMs=${timing.totalMs}")
+                                if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
+                                val samples = pcm.toShortArray()
+                                val inferenceStartMs = System.currentTimeMillis()
+                                if (debugVad) SttLogger.whisperD("inferenceStart: pcmMs=${pcm.size * 1000 / 16000}")
 
-                                lastTranscribedText = text
-                                onTimingCallback?.invoke(timing)
-                                onTimingListener?.invoke(timing.pcmMs, timing.vadActiveMs, timing.whisperMs, timing.totalMs)
-                                onResult?.invoke(text)
+                                val text = try {
+                                    val result = NativeSession.transcribe(samples).trim()
+                                    val whisperMs = System.currentTimeMillis() - inferenceStartMs
+                                    SttLogger.whisper("inferenceEnd: timeMs=$whisperMs, text=\"$result\"")
+                                    result
+                                } catch (t: Throwable) {
+                                    SttLogger.whisperE("inference failed: ${t.message}")
+                                    val error = SttError(
+                                        category = SttErrorCategory.WHISPER_ERROR,
+                                        code = SttErrorCode.WHISPER_INFERENCE_FAILED,
+                                        message = "Whisper inference failed: ${t.message}",
+                                        cause = t,
+                                        context = mapOf("pcmSamples" to samples.size, "exception" to t::class.java.simpleName)
+                                    )
+                                    sttErrorListener?.onSttError(error)
+                                    ""
+                                }
+
+                                // Transition back: INFERENCING → RECORDING
+                                try {
+                                    lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
+                                } catch (_: IllegalStateException) { }
+
+                                if (text.isNotBlank()) {
+                                    // ── Timing: compute and log diagnostic ─────
+                                    val whisperMs = System.currentTimeMillis() - inferenceStartMs
+                                    timingPcmTotalMs = System.currentTimeMillis() - timingPcmStartMs
+                                    timingVadActiveMs = sttProcessor?.vadActiveMs ?: 0L
+                                    timingTotalMs = System.currentTimeMillis() - timingUtteranceStartMs
+                                    val timing = SttTiming(
+                                        pcmMs = timingPcmTotalMs,
+                                        vadActiveMs = timingVadActiveMs,
+                                        whisperMs = whisperMs,
+                                        totalMs = timingTotalMs
+                                    )
+                                    SttLogger.pcm("[DIAG] timing: pcmMs=${timing.pcmMs}, vadActiveMs=${timing.vadActiveMs}, whisperMs=${timing.whisperMs}, totalMs=${timing.totalMs}")
+
+                                    lastTranscribedText = text
+                                    onTimingCallback?.invoke(timing)
+                                    onTimingListener?.invoke(timing.pcmMs, timing.vadActiveMs, timing.whisperMs, timing.totalMs)
+                                    onResult?.invoke(text)
+                                }
+                            } finally {
+                                isInferencing.set(false)
                             }
                         }
                     },
@@ -449,6 +463,7 @@ class SpeechToText internal constructor(
 
     private fun stopInternal() {
         isRunning.set(false)
+        isInferencing.set(false)
         sttProcessor?.stop()
         sttProcessor = null
         audioCapture?.stop()

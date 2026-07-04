@@ -99,12 +99,15 @@ class AudioCapture(
             val readCount = ar.read(shortBuffer!!, 0, shortBuffer!!.size)
 
             if (readCount > 0) {
+                if (!isRunning) break
                 for (index in 0 until readCount) {
                     floatBuffer!![index] = shortBuffer!![index].toFloat() / Short.MAX_VALUE
                 }
                 val floatFrame = floatBuffer!!.copyOf(readCount)
-                frameQueue.offer(floatFrame)
-                Log.d("STT_PCM", "enqueue frame, size=${floatFrame.size}")
+                if (isRunning) {
+                    frameQueue.offer(floatFrame)
+                    Log.d("STT_PCM", "enqueue frame, size=${floatFrame.size}")
+                }
             } else if (readCount < 0) {
                 handleReadError(readCount)
                 if (readCount == AudioRecord.ERROR_DEAD_OBJECT) break
@@ -148,6 +151,7 @@ class AudioCapture(
             audioRecord?.release()
             audioRecord = null
             workerThread = null
+            frameQueue.clear()
             Log.d("AudioCapture", "Capture stopped")
         }
     }

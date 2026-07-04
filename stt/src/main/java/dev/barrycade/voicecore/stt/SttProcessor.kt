@@ -13,10 +13,10 @@ internal class SttProcessor(
     private val listener: UtteranceListener,
     private val calibrationLogger: VadCalibrationLogger? = null
 ) {
-        private val isRunning = AtomicBoolean(false)
+    private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
-        /** Accumulated VAD active time in milliseconds. */
+    /** Accumulated VAD active time in milliseconds. */
     @Volatile
     internal var vadActiveMs: Long = 0L
         private set
@@ -37,18 +37,22 @@ internal class SttProcessor(
         workerThread = Thread({
             while (isRunning.get()) {
                 try {
-                                        val frame = audioCapture.frameQueue.poll()
+                    val frame = audioCapture.frameQueue.poll()
                     if (frame == null) {
                         Thread.sleep(10L)
                         continue
                     }
-                                        SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
+
+                    // Drop frames if stop was requested while frame was in transit
+                    if (!isRunning.get()) break
+
+                    SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
                     val isSpeechFrame = vad.isSpeech(frame)
                     val rms = computeRms(frame)
                     calibrationLogger?.logFrame(frame, isSpeechFrame, rms, 0)
 
-                                        // ── Timing: accumulate VAD active duration ────────────
+                    // ── Timing: accumulate VAD active duration ────────────
                     if (isSpeechFrame) {
                         SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
                         val frameDurationMs = (frame.size * 1000L) / 16000L
@@ -61,11 +65,11 @@ internal class SttProcessor(
                         calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
                         listener.onUtteranceReady(utterance)
                     }
-                                } catch (_: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
                 } catch (t: Throwable) {
-                                        SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
+                    SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
                     val error = SttError(
                         category = SttErrorCategory.UNKNOWN,
                         code = SttErrorCode.UNKNOWN_ERROR,
@@ -95,7 +99,7 @@ internal class SttProcessor(
         return utterance
     }
 
-        private fun computeRms(frame: FloatArray): Double {
+    private fun computeRms(frame: FloatArray): Double {
         if (frame.isEmpty()) return 0.0
         var sumSquares = 0.0
         for (sample in frame) {
