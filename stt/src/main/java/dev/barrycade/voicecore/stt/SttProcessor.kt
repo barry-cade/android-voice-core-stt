@@ -11,12 +11,14 @@ internal class SttProcessor(
     private val vad: Vad,
     private val utteranceAccumulator: UtteranceAccumulator,
     private val listener: UtteranceListener,
-    private val calibrationLogger: VadCalibrationLogger? = null
+    private val calibrationLogger: VadCalibrationLogger? = null,
+    private val debugLogging: Boolean = false,
+    private val sampleRate: Int = 16000
 ) {
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
-        /** Accumulated VAD active time in milliseconds. */
+    /** Accumulated VAD active time in milliseconds. */
     @Volatile
     internal var vadActiveMs: Long = 0L
         private set
@@ -24,6 +26,20 @@ internal class SttProcessor(
     /** Last utterance duration in milliseconds, captured at finalization. */
     @Volatile
     internal var lastUtteranceDurationMs: Int = 0
+        private set
+
+        /** RMS sampler for diagnostic logging. */
+    internal val rmsSampler: RmsSampler = RmsSampler(
+        sampleRate = sampleRate,
+        debugLogging = debugLogging,
+        onSample = { avg, peak, floor ->
+            SttLogger.pcmD("[RMS] avg=$avg peak=$peak floor=$floor")
+        }
+    )
+
+    /** Pass-through VAD confidence for diagnostic use. */
+    @Volatile
+    internal var vadConfidence: Float = 0f
         private set
 
     /**
@@ -48,12 +64,21 @@ internal class SttProcessor(
                         continue
                     }
 
-                    // Drop frames if stop was requested while frame was in transit
+                                        // Drop frames if stop was requested while frame was in transit
                     if (!isRunning.get()) break
 
                     SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
                     val isSpeechFrame = vad.isSpeech(frame)
+                    val confidence = vad.vadConfidence
+                    vadConfidence = confidence
+                    if (debugLogging) {
+                        SttLogger.vadD("confidence=$confidence")
+                    }
+
+                    // ── RMS sampling (every ~200ms) ─────────────────────
+                    rmsSampler.feedFrame(frame)
+
                     val rms = computeRms(frame)
                     calibrationLogger?.logFrame(frame, isSpeechFrame, rms, 0)
 
@@ -91,13 +116,14 @@ internal class SttProcessor(
         }, "SttProcessorThread").apply { start() }
     }
 
-        fun stop() {
+            fun stop() {
         if (!isRunning.getAndSet(false)) return
         workerThread?.join(500)
         workerThread = null
+        rmsSampler.reset()
     }
 
-        fun forceFinalize(): FloatArray? {
+    fun forceFinalize(): FloatArray? {
         val utterance = utteranceAccumulator.forceFinalize()
         if (utterance != null) {
             lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs

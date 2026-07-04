@@ -11,6 +11,10 @@ package dev.barrycade.voicecore.stt
  * @property inferenceMs Whisper inference duration (ms).
  * @property ttsHandoffMs TTS handoff time, if applicable (null for STT-only builds) (ms).
  * @property totalPipelineMs End-to-end time from utterance start to final transcript (ms).
+ * @property vadConfidence VAD confidence at utterance end (nullable, diagnostic only).
+ * @property avgRms Average RMS over the sampling window at utterance end (nullable).
+ * @property peakRms Peak RMS over the sampling window at utterance end (nullable).
+ * @property noiseFloorRms Noise floor RMS estimate at utterance end (nullable).
  */
 data class SttTimingSnapshot(
     val vadActiveMs: Long,
@@ -19,5 +23,9 @@ data class SttTimingSnapshot(
     val preRollMs: Long,
     val inferenceMs: Long,
     val ttsHandoffMs: Long? = null,
-    val totalPipelineMs: Long
+    val totalPipelineMs: Long,
+    val vadConfidence: Float? = null,
+    val avgRms: Float? = null,
+    val peakRms: Float? = null,
+    val noiseFloorRms: Float? = null
 )

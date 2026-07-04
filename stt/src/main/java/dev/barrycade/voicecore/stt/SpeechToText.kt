@@ -390,7 +390,8 @@ class SpeechToText internal constructor(
                             }
                         }
                     },
-                    calibrationLogger = if (debugVad) VadCalibrationLogger() else null
+                    calibrationLogger = if (debugVad) VadCalibrationLogger() else null,
+                    debugLogging = config.debugLoggingEnabled
                 ).apply { start() }
 
                 // ── Timing: utterance start marker ────────────────────────
@@ -488,13 +489,18 @@ class SpeechToText internal constructor(
         inferenceMs: Long,
         totalPipelineMs: Long
     ): SttTimingSnapshot {
+        val sampler = sttProcessor?.rmsSampler
         return SttTimingSnapshot(
             vadActiveMs = vadActiveMs,
             utteranceDurationMs = utteranceDurationMs,
             silencePaddingMs = config.silencePaddingMs.toLong(),
             preRollMs = config.preRollMs.toLong(),
             inferenceMs = inferenceMs,
-            totalPipelineMs = totalPipelineMs
+            totalPipelineMs = totalPipelineMs,
+            vadConfidence = sttProcessor?.vadConfidence,
+            avgRms = sampler?.avgRms,
+            peakRms = sampler?.peakRms,
+            noiseFloorRms = sampler?.noiseFloorRms
         )
     }
 
@@ -562,6 +568,8 @@ class SpeechToText internal constructor(
             null
         }
 
+        val sampler = sttProcessor?.rmsSampler
+
         val timingCtx = mutableMapOf<String, Any?>(
             "exception" to t::class.java.simpleName
         )
@@ -574,6 +582,10 @@ class SpeechToText internal constructor(
             message = t.message ?: "Unknown error",
             cause = t,
             timingSnapshotMs = partialTiming,
+            vadConfidence = sttProcessor?.vadConfidence,
+            avgRms = sampler?.avgRms,
+            peakRms = sampler?.peakRms,
+            noiseFloorRms = sampler?.noiseFloorRms,
             context = timingCtx
         )
         sttErrorListener?.onSttError(error)
