@@ -1,6 +1,5 @@
 package dev.barrycade.voicecore.stt
 
-import android.util.Log
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -14,14 +13,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Whisper lifecycle (loadModel / unloadModel) is serialized through a dedicated
  * single-thread executor to prevent race conditions between teardown and re-init.
+ *
+ * Lifecycle state machine:
+ *   UNINITIALISED → READY → RECORDING → INFERENCING → RECORDING → ... → DESTROYED
+ *
+ * All failures produce structured [SttError] objects delivered via [SttErrorListener].
+ * No silent failures. No swallowed exceptions. No fallback behaviour.
  */
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
     private val modelPath: String
 ) {
     companion object {
-        private const val TAG = "STT_STREAM"
-
         fun create(
             energyThreshold: Float,
             silencePaddingMs: Int,
@@ -47,17 +50,39 @@ class SpeechToText internal constructor(
         }
     }
 
-    init {
-        config.validate()
-        Log.i("STT_CONFIG", "Validated STT config: $config")
-    }
-
     private var onResult: ((String) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
+    private var sttErrorListener: SttErrorListener? = null
     private val debugVad = true
 
     private val isRunning = AtomicBoolean(false)
     private val stateLock = Any()
+
+    private val lifecycleManager = SttLifecycleManager(
+        errorListener = SttErrorListener { error ->
+            sttErrorListener?.onSttError(error)
+            onError?.let { listener ->
+                listener(RuntimeException("STT error: ${error.code} - ${error.message}"))
+            }
+        }
+    )
+
+    init {
+        // Fail-fast: config validation
+        try {
+            config.validate()
+        } catch (e: IllegalArgumentException) {
+            SttLogger.configE("validation failed: ${e.message}")
+            val error = SttError(
+                code = SttErrorCode.CONFIG_INVALID,
+                message = "Configuration validation failed: ${e.message}",
+                context = mapOf("config" to config.toString(), "reason" to (e.message ?: ""))
+            )
+            sttErrorListener?.onSttError(error)
+            throw e
+        }
+        SttLogger.config("Validated STT config: $config")
+    }
 
     private var audioCapture: AudioCapture? = null
     private var sttProcessor: SttProcessor? = null
@@ -79,31 +104,86 @@ class SpeechToText internal constructor(
         onError = listener
     }
 
+    /**
+     * Register a structured error listener for [SttError] events.
+     * Every failure in the STT subsystem is delivered here.
+     */
+    fun setSttErrorListener(listener: SttErrorListener) {
+        sttErrorListener = listener
+    }
+
     fun start() {
         synchronized(stateLock) {
+            // Fail-fast: lifecycle validation
+            try {
+                lifecycleManager.transitionTo(SttLifecycleState.READY)
+            } catch (e: IllegalStateException) {
+                // Lifecycle violation already reported via error listener in transitionTo
+                return
+            }
+
             if (isRunning.get()) return
 
             try {
                 resetInternalState()
                 dumpConfig()
 
-                // Load model on the dedicated Whisper executor — ensures any
-                // previous unloadModel() has completed before we proceed.
+                // Fail-fast: Load model on the dedicated Whisper executor
                 val loadFuture = whisperExecutor.submit<java.lang.Void> {
-                    NativeSession.loadModel(modelPath, debug = true)
+                    try {
+                        SttLogger.whisper("loadModel: $modelPath")
+                        NativeSession.loadModel(modelPath, debug = true)
+                    } catch (t: Throwable) {
+                        SttLogger.whisperE("loadModel failed: ${t.message}")
+                        val error = SttError(
+                            code = SttErrorCode.WHISPER_MODEL_LOAD_FAILED,
+                            message = "Failed to load Whisper model: ${t.message}",
+                            context = mapOf("modelPath" to modelPath, "exception" to t::class.java.simpleName)
+                        )
+                        sttErrorListener?.onSttError(error)
+                        throw RuntimeException("Whisper model load failed", t)
+                    }
                     null
                 }
-                loadFuture.get(30, TimeUnit.SECONDS)
+                try {
+                    loadFuture.get(30, TimeUnit.SECONDS)
+                } catch (e: Exception) {
+                    SttLogger.whisperE("model load timed out or failed: ${e.message}")
+                    val error = SttError(
+                        code = SttErrorCode.WHISPER_MODEL_LOAD_FAILED,
+                        message = "Whisper model load failed or timed out: ${e.message}",
+                        context = mapOf("modelPath" to modelPath, "exception" to e::class.java.simpleName)
+                    )
+                    sttErrorListener?.onSttError(error)
+                    dispatchError(e)
+                    return
+                }
 
                 isRunning.set(true)
 
-                val capture = AudioCapture(
-                    sampleRate = 16000,
-                    requestedBufferSizeInBytes = 32000
-                ).apply {
-                    start()
+                // Fail-fast: AudioCapture creation
+                val capture = try {
+                    AudioCapture(
+                        sampleRate = 16000,
+                        requestedBufferSizeInBytes = 32000
+                    ).apply {
+                        start()
+                    }
+                } catch (e: Exception) {
+                    SttLogger.pcmE("AudioCapture start failed: ${e.message}")
+                    val error = SttError(
+                        code = SttErrorCode.AUDIO_RECORD_FAILED,
+                        message = "Audio capture failed to start: ${e.message}",
+                        context = mapOf("exception" to e::class.java.simpleName, "detail" to (e.message ?: ""))
+                    )
+                    sttErrorListener?.onSttError(error)
+                    isRunning.set(false)
+                    stopInternal()
+                    dispatchError(e)
+                    return
                 }
                 audioCapture = capture
+                lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
 
                 sttProcessor = SttProcessor(
                     audioCapture = capture,
@@ -113,12 +193,38 @@ class SpeechToText internal constructor(
                     utteranceAccumulator = UtteranceAccumulator(config),
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
-                            if (debugVad) Log.i("STT_PCM", "Final PCM size=${pcm.size}")
+                            // Transition: RECORDING → INFERENCING
+                            try {
+                                lifecycleManager.transitionTo(SttLifecycleState.INFERENCING)
+                            } catch (_: IllegalStateException) {
+                                return
+                            }
+
+                            if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
                             val samples = pcm.toShortArray()
-                            if (debugVad) Log.i("STT_WHISPER", "Calling Whisper with PCM size=${pcm.size}")
-                            val text = NativeSession.transcribe(samples)?.trim().orEmpty()
+                            if (debugVad) SttLogger.whisperD("inferenceStart: pcmMs=${pcm.size * 1000 / 16000}")
+
+                            val text = try {
+                                val result = NativeSession.transcribe(samples)?.trim().orEmpty()
+                                SttLogger.whisper("inferenceEnd: timeMs=${pcm.size * 1000 / 16000}, text=\"$result\"")
+                                result
+                            } catch (t: Throwable) {
+                                SttLogger.whisperE("inference failed: ${t.message}")
+                                val error = SttError(
+                                    code = SttErrorCode.WHISPER_INFERENCE_FAILED,
+                                    message = "Whisper inference failed: ${t.message}",
+                                    context = mapOf("pcmSamples" to samples.size, "exception" to t::class.java.simpleName)
+                                )
+                                sttErrorListener?.onSttError(error)
+                                ""
+                            }
+
+                            // Transition back: INFERENCING → RECORDING
+                            try {
+                                lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
+                            } catch (_: IllegalStateException) { }
+
                             if (text.isNotBlank()) {
-                                Log.d(TAG, "Whisper utterance transcript: $text")
                                 lastTranscribedText = text
                                 onResult?.invoke(text)
                             }
@@ -127,8 +233,15 @@ class SpeechToText internal constructor(
                     calibrationLogger = if (debugVad) VadCalibrationLogger() else null
                 ).apply { start() }
 
-                Log.d(TAG, "VAD-driven transcription pipeline started")
+                SttLogger.lifecycle("VAD-driven transcription pipeline started, state=${lifecycleManager.currentState.javaClass.simpleName}")
             } catch (t: Throwable) {
+                SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
+                val error = SttError(
+                    code = SttErrorCode.UNKNOWN_ERROR,
+                    message = "Unhandled error during start: ${t.message}",
+                    context = mapOf("exception" to t::class.java.simpleName)
+                )
+                sttErrorListener?.onSttError(error)
                 stopInternal()
                 dispatchError(t)
             }
@@ -148,8 +261,13 @@ class SpeechToText internal constructor(
                 audioCapture?.stop()
                 audioCapture = null
 
+                // Transition: RECORDING → READY
+                try {
+                    lifecycleManager.transitionTo(SttLifecycleState.READY)
+                } catch (_: IllegalStateException) { }
+
                 if (pcm != null && pcm.isNotEmpty()) {
-                    Log.d(TAG, "final pcm size=${pcm.size}")
+                    SttLogger.pcmD("final pcm size=${pcm.size}")
                     val samples = pcm.toShortArray()
                     val text = NativeSession.transcribe(samples)?.trim().orEmpty()
                     if (text.isNotBlank()) {
@@ -157,7 +275,7 @@ class SpeechToText internal constructor(
                         onResult?.invoke(text)
                     }
                 } else {
-                    Log.w(TAG, "no pcm available from accumulator")
+                    SttLogger.pcmW("no pcm available from accumulator")
                 }
             } catch (t: Throwable) {
                 dispatchError(t)
@@ -190,10 +308,19 @@ class SpeechToText internal constructor(
     /**
      * Releases all resources. Must be called when the STT engine is no longer needed.
      * Shuts down the Whisper lifecycle executor.
+     *
+     * Destroy behaviour:
+     *   - stop PCM capture
+     *   - stop inference
+     *   - release AudioRecord
+     *   - unload Whisper model
+     *   - clear buffers
+     *   - transition to DESTROYED
      */
     fun destroy() {
         synchronized(stateLock) {
             stopInternal()
+            lifecycleManager.transitionToDestroyed()
         }
         whisperExecutor.shutdown()
         try {
@@ -201,12 +328,21 @@ class SpeechToText internal constructor(
         } catch (_: InterruptedException) {
             whisperExecutor.shutdownNow()
         }
+        SttLogger.lifecycle("destroy: resources released, state=DESTROYED")
     }
 
-    private fun dispatchError(t: Throwable) = onError?.invoke(t)
+    private fun dispatchError(t: Throwable) {
+        onError?.invoke(t)
+        val error = SttError(
+            code = SttErrorCode.UNKNOWN_ERROR,
+            message = t.message ?: "Unknown error",
+            context = mapOf("exception" to t::class.java.simpleName)
+        )
+        sttErrorListener?.onSttError(error)
+    }
 
     fun dumpConfig() {
-        Log.i("STT_CONFIG", "Active config: $config")
+        SttLogger.config("Active config: $config")
     }
 
     private fun FloatArray.toShortArray(): ShortArray {
@@ -224,17 +360,15 @@ class SpeechToText internal constructor(
      * Transcribe is thread-safe (C++ mutex in whisper_bridge.cpp).
      */
     private object NativeSession {
-        private val TAG = "NativeSession"
-
         fun loadModel(path: String, debug: Boolean) {
-            if (debug) Log.d(TAG, "Loading model: $path")
+            if (debug) SttLogger.whisperD("Loading model: $path")
             WhisperBridge.loadModel(path)
         }
 
         fun transcribe(pcm: ShortArray): String = WhisperBridge.transcribe(pcm)
 
         fun unloadModel() {
-            Log.d(TAG, "Unloading model")
+            SttLogger.whisperD("Unloading model")
             WhisperBridge.unloadModel()
         }
     }

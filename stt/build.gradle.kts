@@ -17,18 +17,22 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
 
     @TaskAction
     fun verify() {
-        val expectedPublicApiTypes = setOf(
+                val expectedPublicApiTypes = setOf(
             "SpeechToText",
             "SttConfig",
             "AudioCapture",
-            "WhisperBridge"
+            "WhisperBridge",
+            "SttErrorCode",
+            "SttError",
+            "SttErrorListener",
+            "SttLifecycleState"
         )
 
         val sttSources = sourceDir.get().asFile
         val kotlinFiles = sttSources.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 
         val publicTopLevelTypes = mutableSetOf<String>()
-        val publicRegex = Regex("^(?:data\\s+class|class|object|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)")
+        val publicRegex = Regex("^(?:data\\s+class|enum\\s+class|sealed\\s+(?:class|interface)|fun\\s+interface|class|object|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)")
 
         kotlinFiles.forEach { sourceFile ->
             sourceFile.readLines().forEach { rawLine ->
