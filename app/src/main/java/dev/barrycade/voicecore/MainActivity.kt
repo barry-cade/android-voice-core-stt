@@ -216,10 +216,6 @@ class MainActivity : ComponentActivity() {
             isRecording = true
             txtOutput.text = "Recording..."
             updateUi()
-
-            isRecording = true
-            txtOutput.text = "Recording..."
-            updateUi()
         } catch (e: IllegalArgumentException) {
             handleConfigError(e)
         }
