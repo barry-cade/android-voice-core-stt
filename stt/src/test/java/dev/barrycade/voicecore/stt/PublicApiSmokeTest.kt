@@ -14,13 +14,14 @@ class PublicApiSmokeTest {
         assertEquals(null, config.modelPath)
     }
 
-    @Test
+        @Test
     fun speechToTextPublicMethods_exist() {
         val methods = SpeechToText::class.java.methods.map { it.name }.toSet()
         assertTrue(methods.contains("start"))
         assertTrue(methods.contains("stop"))
         assertTrue(methods.contains("stopAndTranscribe"))
         assertTrue(methods.contains("setOnResultListener"))
+        assertTrue(methods.contains("setOnResultWithTimingListener"))
         assertTrue(methods.contains("setOnErrorListener"))
         assertTrue(methods.contains("destroy"))
     }

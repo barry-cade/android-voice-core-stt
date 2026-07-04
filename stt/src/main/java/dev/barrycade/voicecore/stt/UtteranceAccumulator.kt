@@ -55,6 +55,10 @@ internal class UtteranceAccumulator(
     private var silenceFrameCount = 0
     private var totalDurationMs = 0
 
+    /** Captured utterance duration at last finalization (ms). 0 if no utterance has completed. */
+    internal var lastUtteranceDurationMs: Int = 0
+        private set
+
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
         if (frame.isEmpty()) return null
 
@@ -137,11 +141,19 @@ internal class UtteranceAccumulator(
 
     internal fun currentDurationMs(): Int = totalDurationMs
 
+    /**
+     * Returns the total duration of the current utterance in milliseconds.
+     * Same as [currentDurationMs] but named for clarity at finalization time.
+     */
+    internal fun utteranceDurationMs(): Int = totalDurationMs
+
     private fun finalizeUtterance(): FloatArray {
         if (speechAccumulator.isEmpty()) {
             SttLogger.pcmW("finalizeUtterance called with empty buffer, returning null")
             return FloatArray(0)
         }
+
+        lastUtteranceDurationMs = totalDurationMs
 
         val utterance = speechAccumulator.toFloatArray()
         val paddedLength = if (utterance.size % stableBlockSamples == 0) {

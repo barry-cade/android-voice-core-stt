@@ -16,9 +16,14 @@ internal class SttProcessor(
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
-    /** Accumulated VAD active time in milliseconds. */
+        /** Accumulated VAD active time in milliseconds. */
     @Volatile
     internal var vadActiveMs: Long = 0L
+        private set
+
+    /** Last utterance duration in milliseconds, captured at finalization. */
+    @Volatile
+    internal var lastUtteranceDurationMs: Int = 0
         private set
 
     /**
@@ -59,8 +64,9 @@ internal class SttProcessor(
                         vadActiveMs += frameDurationMs
                     }
 
-                    val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
+                                        val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
                     if (utterance != null) {
+                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
                         calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
                         listener.onUtteranceReady(utterance)
@@ -91,9 +97,10 @@ internal class SttProcessor(
         workerThread = null
     }
 
-    fun forceFinalize(): FloatArray? {
+        fun forceFinalize(): FloatArray? {
         val utterance = utteranceAccumulator.forceFinalize()
         if (utterance != null) {
+            lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
             calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
         }
         return utterance

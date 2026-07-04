@@ -67,6 +67,7 @@ class SpeechToText internal constructor(
     internal var forceTimeout: Boolean = false
 
     private var onResult: ((String) -> Unit)? = null
+    private var onResultWithTiming: ((text: String, timing: SttTimingSnapshot?) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
     private var sttErrorListener: SttErrorListener? = null
     private val debugVad = true
@@ -132,6 +133,14 @@ class SpeechToText internal constructor(
 
     fun setOnResultListener(listener: (String) -> Unit) {
         onResult = listener
+    }
+
+    /**
+     * Register a result listener that also receives the [SttTimingSnapshot] for the utterance.
+     * The timing field is null when timing was not captured (e.g. during initial setup).
+     */
+    fun setOnResultWithTimingListener(listener: (text: String, timing: SttTimingSnapshot?) -> Unit) {
+        onResultWithTiming = listener
     }
 
     /**
@@ -353,23 +362,28 @@ class SpeechToText internal constructor(
                                 } catch (_: IllegalStateException) { }
 
                                 if (text.isNotBlank()) {
-                                    // ── Timing: compute and log diagnostic ─────
+                                    // ── Timing: build snapshot ──────────────
                                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
-                                    timingPcmTotalMs = System.currentTimeMillis() - timingPcmStartMs
-                                    timingVadActiveMs = sttProcessor?.vadActiveMs ?: 0L
-                                    timingTotalMs = System.currentTimeMillis() - timingUtteranceStartMs
-                                    val timing = SttTiming(
-                                        pcmMs = timingPcmTotalMs,
-                                        vadActiveMs = timingVadActiveMs,
-                                        whisperMs = whisperMs,
-                                        totalMs = timingTotalMs
+                                    val currentVadMs = sttProcessor?.vadActiveMs ?: 0L
+                                    val currentUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
+                                    val pipelineMs = System.currentTimeMillis() - timingUtteranceStartMs
+                                    val snapshot = buildTimingSnapshot(
+                                        vadActiveMs = currentVadMs,
+                                        utteranceDurationMs = currentUtteranceMs,
+                                        inferenceMs = whisperMs,
+                                        totalPipelineMs = pipelineMs
                                     )
-                                    SttLogger.pcm("[DIAG] timing: pcmMs=${timing.pcmMs}, vadActiveMs=${timing.vadActiveMs}, whisperMs=${timing.whisperMs}, totalMs=${timing.totalMs}")
+                                    SttLogger.pcm("[DIAG] timing: vadActiveMs=${snapshot.vadActiveMs}, utteranceMs=${snapshot.utteranceDurationMs}, inferenceMs=${snapshot.inferenceMs}, totalMs=${snapshot.totalPipelineMs}")
 
                                     lastTranscribedText = text
-                                    onTimingCallback?.invoke(timing)
-                                    onTimingListener?.invoke(timing.pcmMs, timing.vadActiveMs, timing.whisperMs, timing.totalMs)
-                                    onResult?.invoke(text)
+                                    onTimingCallback?.invoke(SttTiming(
+                                        pcmMs = timingPcmTotalMs,
+                                        vadActiveMs = currentVadMs,
+                                        whisperMs = whisperMs,
+                                        totalMs = pipelineMs
+                                    ))
+                                    onTimingListener?.invoke(timingPcmTotalMs, currentVadMs, whisperMs, pipelineMs)
+                                    dispatchResult(text, snapshot)
                                 }
                             } finally {
                                 isInferencing.set(false)
@@ -428,21 +442,26 @@ class SpeechToText internal constructor(
                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
 
                     if (text.isNotBlank()) {
-                        timingPcmTotalMs = captureDurationMs
-                        timingVadActiveMs = processorVadMs
-                        timingTotalMs = System.currentTimeMillis() - timingUtteranceStartMs
-                        val timing = SttTiming(
-                            pcmMs = timingPcmTotalMs,
-                            vadActiveMs = timingVadActiveMs,
-                            whisperMs = whisperMs,
-                            totalMs = timingTotalMs
+                        val currentVadMs = processorVadMs
+                        val currentUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
+                        val pipelineMs = System.currentTimeMillis() - timingUtteranceStartMs
+                        val snapshot = buildTimingSnapshot(
+                            vadActiveMs = currentVadMs,
+                            utteranceDurationMs = currentUtteranceMs,
+                            inferenceMs = whisperMs,
+                            totalPipelineMs = pipelineMs
                         )
-                        SttLogger.pcm("[DIAG] timing: pcmMs=${timing.pcmMs}, vadActiveMs=${timing.vadActiveMs}, whisperMs=${timing.whisperMs}, totalMs=${timing.totalMs}")
+                        SttLogger.pcm("[DIAG] timing: vadActiveMs=${snapshot.vadActiveMs}, utteranceMs=${snapshot.utteranceDurationMs}, inferenceMs=${snapshot.inferenceMs}, totalMs=${snapshot.totalPipelineMs}")
 
                         lastTranscribedText = text
-                        onTimingCallback?.invoke(timing)
-                        onTimingListener?.invoke(timing.pcmMs, timing.vadActiveMs, timing.whisperMs, timing.totalMs)
-                        onResult?.invoke(text)
+                        onTimingCallback?.invoke(SttTiming(
+                            pcmMs = captureDurationMs,
+                            vadActiveMs = currentVadMs,
+                            whisperMs = whisperMs,
+                            totalMs = pipelineMs
+                        ))
+                        onTimingListener?.invoke(captureDurationMs, currentVadMs, whisperMs, pipelineMs)
+                        dispatchResult(text, snapshot)
                     }
                 } else {
                     SttLogger.pcmW("no pcm available from accumulator")
@@ -456,6 +475,28 @@ class SpeechToText internal constructor(
     }
 
     fun stop() = stopAndTranscribe()
+
+    private fun dispatchResult(text: String, timing: SttTimingSnapshot?) {
+        lastTranscribedText = text
+        onResultWithTiming?.invoke(text, timing)
+        onResult?.invoke(text)
+    }
+
+    private fun buildTimingSnapshot(
+        vadActiveMs: Long,
+        utteranceDurationMs: Long,
+        inferenceMs: Long,
+        totalPipelineMs: Long
+    ): SttTimingSnapshot {
+        return SttTimingSnapshot(
+            vadActiveMs = vadActiveMs,
+            utteranceDurationMs = utteranceDurationMs,
+            silencePaddingMs = config.silencePaddingMs.toLong(),
+            preRollMs = config.preRollMs.toLong(),
+            inferenceMs = inferenceMs,
+            totalPipelineMs = totalPipelineMs
+        )
+    }
 
     private fun resetInternalState() {
         lastTranscribedText = null
@@ -505,19 +546,34 @@ class SpeechToText internal constructor(
     private fun dispatchError(t: Throwable) {
         onError?.invoke(t)
 
-        // Include timing fields in error context when available
+        // Build partial timing snapshot if available
+        val vadMs = sttProcessor?.vadActiveMs ?: 0L
+        val utterMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
+        val totalMs = if (timingUtteranceStartMs > 0) System.currentTimeMillis() - timingUtteranceStartMs else 0L
+        val partialTiming: Map<String, Long>? = if (vadMs > 0 || utterMs > 0) {
+            mapOf(
+                "vadActiveMs" to vadMs,
+                "utteranceDurationMs" to utterMs,
+                "silencePaddingMs" to config.silencePaddingMs.toLong(),
+                "preRollMs" to config.preRollMs.toLong(),
+                "totalPipelineMs" to totalMs
+            )
+        } else {
+            null
+        }
+
         val timingCtx = mutableMapOf<String, Any?>(
             "exception" to t::class.java.simpleName
         )
         if (timingPcmTotalMs > 0) timingCtx["pcmMs"] = timingPcmTotalMs
-        if (timingVadActiveMs > 0) timingCtx["vadActiveMs"] = timingVadActiveMs
-        if (timingTotalMs > 0) timingCtx["totalMs"] = timingTotalMs
+        if (totalMs > 0) timingCtx["totalMs"] = totalMs
 
         val error = SttError(
             category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.UNKNOWN_ERROR,
             message = t.message ?: "Unknown error",
             cause = t,
+            timingSnapshotMs = partialTiming,
             context = timingCtx
         )
         sttErrorListener?.onSttError(error)

@@ -26,6 +26,7 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
                     "SttError",
                     "SttErrorListener",
                     "SttErrorCategory",
+                    "SttTimingSnapshot",
                     "SttLifecycleState"
                 )
 
