@@ -74,8 +74,11 @@ internal class UtteranceAccumulator(
             if (totalDurationMs >= maxUtteranceLengthMs) {
                 SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
                 val error = SttError(
+                    category = SttErrorCategory.TIMEOUT,
                     code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
                     message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
+                    lastRms = vad.lastFrameEnergy,
+                    lastVadState = true,
                     context = mapOf(
                         "totalDurationMs" to totalDurationMs,
                         "maxUtteranceLengthMs" to maxUtteranceLengthMs,
@@ -99,8 +102,11 @@ internal class UtteranceAccumulator(
                 if (forceTimeout) {
                     SttLogger.error("forcedFailure: TIMEOUT_MAX_UTTERANCE")
                     val error = SttError(
+                        category = SttErrorCategory.TIMEOUT,
                         code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
                         message = "Forced test failure: max utterance timeout",
+                        lastRms = vad.lastFrameEnergy,
+                        lastVadState = true,
                         context = mapOf("forcedFailure" to "forceTimeout")
                     )
                     sttErrorListener?.onSttError(error)

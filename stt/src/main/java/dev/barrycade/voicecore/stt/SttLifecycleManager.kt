@@ -38,6 +38,7 @@ internal class SttLifecycleManager(
             val message = "Illegal lifecycle transition: ${from.javaClass.simpleName} → ${target.javaClass.simpleName}"
             SttLogger.lifecycleE(message)
             val error = SttError(
+                category = SttErrorCategory.UNKNOWN,
                 code = SttErrorCode.LIFECYCLE_VIOLATION,
                 message = message,
                 context = mapOf(

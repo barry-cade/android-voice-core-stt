@@ -65,11 +65,15 @@ internal class SttProcessor(
                     Thread.currentThread().interrupt()
                     break
                 } catch (t: Throwable) {
-                    SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
+                                        SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
                     val error = SttError(
+                        category = SttErrorCategory.UNKNOWN,
                         code = SttErrorCode.UNKNOWN_ERROR,
                         message = "SttProcessor worker thread error: ${t.message}",
-                        context = mapOf("exception" to t::class.java.simpleName)
+                        lastVadState = vad.lastFrameEnergy > 0f,
+                        lastRms = vad.lastFrameEnergy,
+                        cause = t,
+                        context = mapOf("exception" to t::class.java.simpleName, "detail" to (t.message ?: ""))
                     )
                     sttErrorListener?.onSttError(error)
                 }

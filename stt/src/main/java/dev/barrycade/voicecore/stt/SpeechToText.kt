@@ -90,8 +90,10 @@ class SpeechToText internal constructor(
         } catch (e: IllegalArgumentException) {
             SttLogger.configE("validation failed: ${e.message}")
             val error = SttError(
+                category = SttErrorCategory.CONFIG_ERROR,
                 code = SttErrorCode.CONFIG_INVALID,
                 message = "Configuration validation failed: ${e.message}",
+                cause = e,
                 context = mapOf("config" to config.toString(), "reason" to (e.message ?: ""))
             )
             sttErrorListener?.onSttError(error)
@@ -196,6 +198,7 @@ class SpeechToText internal constructor(
                 if (forceWhisperLoadFailure) {
                     SttLogger.error("forcedFailure: WHISPER_MODEL_LOAD_FAILED")
                     val error = SttError(
+                        category = SttErrorCategory.WHISPER_ERROR,
                         code = SttErrorCode.WHISPER_MODEL_LOAD_FAILED,
                         message = "Forced test failure: Whisper model load",
                         context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
@@ -213,8 +216,10 @@ class SpeechToText internal constructor(
                     } catch (t: Throwable) {
                         SttLogger.whisperE("loadModel failed: ${t.message}")
                         val error = SttError(
+                            category = SttErrorCategory.WHISPER_ERROR,
                             code = SttErrorCode.WHISPER_MODEL_LOAD_FAILED,
                             message = "Failed to load Whisper model: ${t.message}",
+                            cause = t,
                             context = mapOf("modelPath" to modelPath, "exception" to t::class.java.simpleName)
                         )
                         sttErrorListener?.onSttError(error)
@@ -227,8 +232,10 @@ class SpeechToText internal constructor(
                 } catch (e: Exception) {
                     SttLogger.whisperE("model load timed out or failed: ${e.message}")
                     val error = SttError(
+                        category = SttErrorCategory.WHISPER_ERROR,
                         code = SttErrorCode.WHISPER_MODEL_LOAD_FAILED,
                         message = "Whisper model load failed or timed out: ${e.message}",
+                        cause = e,
                         context = mapOf("modelPath" to modelPath, "exception" to e::class.java.simpleName)
                     )
                     sttErrorListener?.onSttError(error)
@@ -242,6 +249,7 @@ class SpeechToText internal constructor(
                 if (forceAudioInitFailure) {
                     SttLogger.error("forcedFailure: AUDIO_INIT_FAILED")
                     val error = SttError(
+                        category = SttErrorCategory.CAPTURE_ERROR,
                         code = SttErrorCode.AUDIO_INIT_FAILED,
                         message = "Forced test failure: AudioCapture init",
                         context = mapOf("forcedFailure" to "forceAudioInitFailure")
@@ -264,8 +272,10 @@ class SpeechToText internal constructor(
                 } catch (e: Exception) {
                     SttLogger.pcmE("AudioCapture start failed: ${e.message}")
                     val error = SttError(
+                        category = SttErrorCategory.CAPTURE_ERROR,
                         code = SttErrorCode.AUDIO_RECORD_FAILED,
                         message = "Audio capture failed to start: ${e.message}",
+                        cause = e,
                         context = mapOf("exception" to e::class.java.simpleName, "detail" to (e.message ?: ""))
                     )
                     sttErrorListener?.onSttError(error)
@@ -316,8 +326,10 @@ class SpeechToText internal constructor(
                             } catch (t: Throwable) {
                                 SttLogger.whisperE("inference failed: ${t.message}")
                                 val error = SttError(
+                                    category = SttErrorCategory.WHISPER_ERROR,
                                     code = SttErrorCode.WHISPER_INFERENCE_FAILED,
                                     message = "Whisper inference failed: ${t.message}",
+                                    cause = t,
                                     context = mapOf("pcmSamples" to samples.size, "exception" to t::class.java.simpleName)
                                 )
                                 sttErrorListener?.onSttError(error)
@@ -360,8 +372,10 @@ class SpeechToText internal constructor(
             } catch (t: Throwable) {
                 SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
                 val error = SttError(
+                    category = SttErrorCategory.UNKNOWN,
                     code = SttErrorCode.UNKNOWN_ERROR,
                     message = "Unhandled error during start: ${t.message}",
+                    cause = t,
                     context = mapOf("exception" to t::class.java.simpleName)
                 )
                 sttErrorListener?.onSttError(error)
@@ -485,8 +499,10 @@ class SpeechToText internal constructor(
         if (timingTotalMs > 0) timingCtx["totalMs"] = timingTotalMs
 
         val error = SttError(
+            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.UNKNOWN_ERROR,
             message = t.message ?: "Unknown error",
+            cause = t,
             context = timingCtx
         )
         sttErrorListener?.onSttError(error)

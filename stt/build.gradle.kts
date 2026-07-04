@@ -18,15 +18,16 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
     @TaskAction
     fun verify() {
                 val expectedPublicApiTypes = setOf(
-            "SpeechToText",
-            "SttConfig",
-            "AudioCapture",
-            "WhisperBridge",
-            "SttErrorCode",
-            "SttError",
-            "SttErrorListener",
-            "SttLifecycleState"
-        )
+                    "SpeechToText",
+                    "SttConfig",
+                    "AudioCapture",
+                    "WhisperBridge",
+                    "SttErrorCode",
+                    "SttError",
+                    "SttErrorListener",
+                    "SttErrorCategory",
+                    "SttLifecycleState"
+                )
 
         val sttSources = sourceDir.get().asFile
         val kotlinFiles = sttSources.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()

@@ -182,14 +182,31 @@ class MainActivity : ComponentActivity() {
                 postToUi {
                     val keySet = setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs")
                     val timingCtx = error.context.filterKeys { it in keySet }
+                    val timingMs = error.timingSnapshotMs
+                    val rms = error.lastRms
+                    val vadState = error.lastVadState
+                    val errorContext = error.context
                     txtDiagnostics.visibility = android.view.View.VISIBLE
                     txtDiagnostics.text = buildString {
                         appendLine("=== Error ===")
+                        appendLine("Category: ${error.category}")
                         appendLine("Code:    ${error.code}")
                         appendLine("Message: ${error.message}")
-                        if (error.context.isNotEmpty()) {
+                        if (rms != null) {
+                            appendLine("Last RMS: $rms")
+                        }
+                        if (vadState != null) {
+                            appendLine("VAD speech: $vadState")
+                        }
+                        if (timingMs != null) {
+                            appendLine("Timing:")
+                            timingMs.forEach { (key, value) ->
+                                appendLine("  $key = ${value}ms")
+                            }
+                        }
+                        if (errorContext.isNotEmpty()) {
                             appendLine("Context:")
-                            error.context.forEach { (key, value) ->
+                            errorContext.forEach { (key, value) ->
                                 appendLine("  $key = $value")
                             }
                                 }
@@ -200,7 +217,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    txtOutput.text = "Error: ${error.code} - ${error.message}"
+                    txtOutput.text = "Error: ${error.category} - ${error.code} - ${error.message}"
                 }
             }
             speechToText.setSttErrorListener(errorListener)
