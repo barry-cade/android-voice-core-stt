@@ -104,6 +104,16 @@ class SpeechToText internal constructor(
         SttLogger.config("Validated STT config: $config")
     }
 
+    /** Tracks whether Whisper warm-up has been performed in this session. */
+    private var warmupPerformed: Boolean = false
+
+    /**
+     * Cancellation flag for all Whisper executor tasks.
+     * Set true by any Stop path. Tasks check this as their first action.
+     */
+    @Volatile
+    private var whisperCancelled = false
+
     private var audioCapture: AudioCapture? = null
     private var sttProcessor: SttProcessor? = null
 
@@ -336,6 +346,7 @@ class SpeechToText internal constructor(
                                 if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
                                 val samples = pcm.toShortArray()
                                 val inferenceStartMs = System.currentTimeMillis()
+
                                 if (debugVad) SttLogger.whisperD("inferenceStart: pcmMs=${pcm.size * 1000 / 16000}")
 
                                 val text = try {
@@ -398,6 +409,11 @@ class SpeechToText internal constructor(
                 timingUtteranceStartMs = System.currentTimeMillis()
 
                 SttLogger.lifecycle("VAD-driven transcription pipeline started, state=${lifecycleManager.currentState.javaClass.simpleName}")
+
+                // ── Async Whisper warm-up ────────────────────────────────
+                whisperExecutor.submit {
+                    performWarmup()
+                }
             } catch (t: Throwable) {
                 SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
                 val error = SttError(
@@ -506,9 +522,12 @@ class SpeechToText internal constructor(
 
     private fun resetInternalState() {
         lastTranscribedText = null
+        warmupPerformed = false
+        whisperCancelled = false
     }
 
     private fun stopInternal() {
+        whisperCancelled = true
         isRunning.set(false)
         isInferencing.set(false)
         sttProcessor?.stop()
@@ -516,10 +535,46 @@ class SpeechToText internal constructor(
         audioCapture?.stop()
         audioCapture = null
 
-        // Unload model on the dedicated Whisper executor — serialized and
-        // guaranteed to complete before any future loadModel() call.
-        whisperExecutor.submit {
-            NativeSession.unloadModel()
+        // Unload model immediately — do not wait for Whisper executor tasks.
+        // Cancelled tasks will exit naturally when they see the flag.
+        NativeSession.unloadModel()
+    }
+
+    /**
+     * Perform async Whisper warm-up after capture has started.
+     * Runs on the whisperExecutor. Does not block start().
+     * Checks whisperCancelled before operations.
+     * If cancelled, returns immediately without side effects, logging, or errors.
+     */
+    private fun performWarmup() {
+        if (whisperCancelled) return
+
+        if (!warmupPerformed) {
+            val warmupStartMs = System.currentTimeMillis()
+            try {
+                NativeSession.warmup()
+                if (whisperCancelled) return
+                val warmupMs = System.currentTimeMillis() - warmupStartMs
+                SttLogger.whisper("warmUpMs=$warmupMs")
+                warmupPerformed = true
+            } catch (t: Throwable) {
+                if (whisperCancelled) return
+                SttLogger.whisperE("warmup failed: ${t.message}")
+                val error = SttError(
+                    category = SttErrorCategory.WHISPER_ERROR,
+                    code = SttErrorCode.WHISPER_INFERENCE_FAILED,
+                    message = "Whisper warm-up failed: ${t.message}",
+                    cause = t,
+                    context = mapOf("exception" to t::class.java.simpleName)
+                )
+                sttErrorListener?.onSttError(error)
+                if (!whisperCancelled && isRunning.get()) {
+                    synchronized(stateLock) {
+                        stopInternal()
+                    }
+                    dispatchError(t)
+                }
+            }
         }
     }
 
@@ -610,6 +665,9 @@ class SpeechToText internal constructor(
      * Transcribe is thread-safe (C++ mutex in whisper_bridge.cpp).
      */
     private object NativeSession {
+        /** Tiny PCM buffer for warm-up and health check (200ms of silence at 16kHz). */
+        private val warmupPcm: ShortArray = ShortArray(3200)
+
         fun loadModel(path: String, debug: Boolean) {
             if (debug) SttLogger.whisperD("Loading model: $path")
             WhisperBridge.loadModel(path)
@@ -620,6 +678,14 @@ class SpeechToText internal constructor(
         fun unloadModel() {
             SttLogger.whisperD("Unloading model")
             WhisperBridge.unloadModel()
+        }
+
+        /**
+         * Run a lightweight warm-up inference. Synchronous, low-overhead.
+         * Must only be called once per session after model load.
+         */
+        fun warmup() {
+            WhisperBridge.transcribe(warmupPcm)
         }
     }
 }

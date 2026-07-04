@@ -21,7 +21,7 @@ object WhisperBridge {
         Log.d("WhisperBridge", "Kotlin bridge init end t=${System.currentTimeMillis()}")
     }
 
-    external fun loadModel(modelPath: String)
+            external fun loadModel(modelPath: String)
     external fun transcribe(samples: ShortArray): String
     external fun unloadModel()
 

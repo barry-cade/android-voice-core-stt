@@ -10,7 +10,7 @@ CATO must follow these rules for all Kotlin code it writes or modifies.
 
 ## 2. Avoid scope functions inside scope functions
 
-- Only one scope function (`also`, `apply`, `let`, `run`, `with`) per block.
+- Only one scope function (also, apply, let, run, with) per block.
 - Never nest them.
 
 ## 3. Avoid trailing lambdas inside other lambdas
@@ -39,6 +39,21 @@ CATO must follow these rules for all Kotlin code it writes or modifies.
 - Avoid implicit SAM conversions when they obscure intent.
 - Avoid type inference that hides meaning.
 - Prefer explicit types when clarity improves.
+
+## 8. No nested conditionals
+
+- Never place an `if` inside another `if`.
+- Flatten conditional logic using guard clauses or early returns.
+- Prefer:
+    if (!condition) return
+    // main logic
+  instead of:
+    if (condition) {
+        if (otherCondition) {
+            ...
+        }
+    }
+- Nested conditionals hide intent and violate PDP linearity.
 
 ---
 
