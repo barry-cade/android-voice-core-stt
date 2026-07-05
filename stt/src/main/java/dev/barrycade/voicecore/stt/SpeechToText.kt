@@ -114,9 +114,17 @@ class SpeechToText internal constructor(
      * Dedicated single-thread executor for Whisper lifecycle operations.
      * All loadModel() and unloadModel() calls are serialized through this executor.
      * unloadModel() must fully complete before any subsequent loadModel() begins.
-     * The executor is shut down only when the entire STT engine is destroyed.
+     * The executor is shut down via shutdownExecutors() when the engine is destroyed
+     * or a fatal error occurs.
      */
     private val whisperExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
+    /**
+     * Idempotency guard for executor shutdown.
+     * Once true, shutdownExecutors() becomes a no-op.
+     */
+    private var executorsShutdown: Boolean = false
+
     private var lastTranscribedText: String? = null
 
     // ── Timing accumulator ───────────────────────────────────────────────
@@ -212,6 +220,8 @@ class SpeechToText internal constructor(
                         context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
                     )
                     sttErrorListener?.onSttError(error)
+                    stopInternal()
+                    shutdownExecutors()
                     dispatchError(RuntimeException("Forced test failure: Whisper model load"))
                     return
                 }
@@ -247,6 +257,8 @@ class SpeechToText internal constructor(
                         context = mapOf("modelPath" to modelPath, "exception" to e::class.java.simpleName)
                     )
                     sttErrorListener?.onSttError(error)
+                    stopInternal()
+                    shutdownExecutors()
                     dispatchError(e)
                     return
                 }
@@ -265,6 +277,7 @@ class SpeechToText internal constructor(
                     sttErrorListener?.onSttError(error)
                     isRunning.set(false)
                     stopInternal()
+                    shutdownExecutors()
                     dispatchError(RuntimeException("Forced test failure: AudioCapture init"))
                     return
                 }
@@ -289,6 +302,7 @@ class SpeechToText internal constructor(
                     sttErrorListener?.onSttError(error)
                     isRunning.set(false)
                     stopInternal()
+                    shutdownExecutors()
                     dispatchError(e)
                     return
                 }
@@ -297,6 +311,7 @@ class SpeechToText internal constructor(
                     capture.stop()
                     isRunning.set(false)
                     stopInternal()
+                    shutdownExecutors()
                     return
                 }
 
@@ -406,6 +421,7 @@ class SpeechToText internal constructor(
                 )
                 sttErrorListener?.onSttError(error)
                 stopInternal()
+                shutdownExecutors()
                 dispatchError(t)
             }
         }
@@ -551,6 +567,59 @@ class SpeechToText internal constructor(
     }
 
     /**
+     * Shuts down all worker executors deterministically.
+     *
+     * Order of operations:
+     *   1. Stop audio capture cleanly
+     *   2. Stop PCM/VAD processing cleanly
+     *   3. Cancel Whisper executor tasks
+     *   4. Call shutdown() on each executor
+     *   5. Wait for termination with a bounded 5-second timeout
+     *   6. Log one line per executor with status
+     *
+     * Idempotent: multiple calls are safe. The executorsShutdown flag
+     * prevents duplicate shutdown and duplicate logging.
+     *
+     * Status values:
+     *   TERMINATED  — executor shut down within timeout
+     *   TIMEOUT     — executor did not terminate within timeout
+     *   INTERRUPTED — current thread was interrupted while waiting
+     */
+    private fun shutdownExecutors() {
+        if (executorsShutdown) return
+        executorsShutdown = true
+
+        // Step 1: Stop audio capture cleanly
+        audioCapture?.stop()
+        audioCapture = null
+
+        // Step 2: Stop PCM/VAD processing cleanly
+        sttProcessor?.stop()
+        sttProcessor = null
+
+        // Step 3: Cancel whisper tasks
+        whisperCancelled = true
+        isRunning.set(false)
+        isInferencing.set(false)
+
+        // Step 4-6: Shutdown whisper executor with bounded timeout
+        whisperExecutor.shutdown()
+        try {
+            val terminated = whisperExecutor.awaitTermination(5, TimeUnit.SECONDS)
+            if (terminated) {
+                SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=TERMINATED")
+            } else {
+                whisperExecutor.shutdownNow()
+                SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=TIMEOUT")
+            }
+        } catch (e: InterruptedException) {
+            whisperExecutor.shutdownNow()
+            Thread.currentThread().interrupt()
+            SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=INTERRUPTED")
+        }
+    }
+
+    /**
      * Perform async Whisper warm-up after capture has started.
      * Runs on the whisperExecutor. Does not block start().
      * Checks whisperCancelled before operations.
@@ -605,12 +674,7 @@ class SpeechToText internal constructor(
             stopInternal()
             lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
         }
-        whisperExecutor.shutdown()
-        try {
-            whisperExecutor.awaitTermination(10, TimeUnit.SECONDS)
-        } catch (_: InterruptedException) {
-            whisperExecutor.shutdownNow()
-        }
+        shutdownExecutors()
         SttLogger.lifecycle("destroy: resources released, state=UNINITIALISED")
     }
 
