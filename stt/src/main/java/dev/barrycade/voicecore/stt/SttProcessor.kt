@@ -99,11 +99,11 @@ internal class SttProcessor(
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
-                } catch (t: Throwable) {
-                    SttLogger.error("code=UNKNOWN_ERROR, message=\"${t.message}\"")
+                                } catch (t: Throwable) {
+                    SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
                     val error = SttError(
                         category = SttErrorCategory.UNKNOWN,
-                        code = SttErrorCode.UNKNOWN_ERROR,
+                        code = SttErrorCode.INTERNAL_EXCEPTION,
                         message = "SttProcessor worker thread error: ${t.message}",
                         lastVadState = vad.lastFrameEnergy > 0f,
                         lastRms = vad.lastFrameEnergy,

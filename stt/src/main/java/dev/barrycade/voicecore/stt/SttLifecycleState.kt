@@ -10,7 +10,7 @@ package dev.barrycade.voicecore.stt
  *   FINALISING    → READY
  *
  * No other transitions are permitted. Any illegal transition produces
- * a [SttError] with code [SttErrorCode.LIFECYCLE_VIOLATION].
+ * a [SttError] with code [SttErrorCode.PIPELINE_ILLEGAL_STATE].
  */
 sealed class SttLifecycleState {
 

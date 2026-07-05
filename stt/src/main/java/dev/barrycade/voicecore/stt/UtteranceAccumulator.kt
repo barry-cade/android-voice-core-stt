@@ -78,8 +78,8 @@ internal class UtteranceAccumulator(
             if (totalDurationMs >= maxUtteranceLengthMs) {
                 SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
                 val error = SttError(
-                    category = SttErrorCategory.TIMEOUT,
-                    code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
+                    category = SttErrorCategory.UNKNOWN,
+                    code = SttErrorCode.INTERNAL_EXCEPTION,
                     message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
                     lastRms = vad.lastFrameEnergy,
                     lastVadState = true,
@@ -104,10 +104,10 @@ internal class UtteranceAccumulator(
 
                 // ── Testing hook: forceTimeout on first speech frame ──────
                 if (forceTimeout) {
-                    SttLogger.error("forcedFailure: TIMEOUT_MAX_UTTERANCE")
+                    SttLogger.error("forcedFailure: PIPELINE_ILLEGAL_STATE")
                     val error = SttError(
-                        category = SttErrorCategory.TIMEOUT,
-                        code = SttErrorCode.TIMEOUT_MAX_UTTERANCE,
+                        category = SttErrorCategory.UNKNOWN,
+                        code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
                         message = "Forced test failure: max utterance timeout",
                         lastRms = vad.lastFrameEnergy,
                         lastVadState = true,
