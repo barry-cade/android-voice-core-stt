@@ -107,6 +107,21 @@ class SpeechToText internal constructor(
     @Volatile
     private var whisperCancelled = false
 
+    /**
+     * Stop-requested flag for deterministic freeze of PCM/VAD/accumulator.
+     *
+     * Semantics:
+     * - false => normal recording. PCM ingestion, VAD processing, and accumulator
+     *   updates proceed normally.
+     * - true  => Stop has been requested. No new PCM/VAD/accumulator work may
+     *   proceed. Frames are dropped, VAD is skipped, accumulator is frozen.
+     *
+     * Reset to false when transitioning from READY -> RECORDING in start().
+     * Set to true at the very beginning of stopAndTranscribe().
+     */
+    @Volatile
+    private var stopRequested: Boolean = false
+
     private var audioCapture: AudioCapture? = null
     private var sttProcessor: SttProcessor? = null
 
@@ -398,7 +413,8 @@ class SpeechToText internal constructor(
                         }
                     },
                     calibrationLogger = if (debugVad) VadCalibrationLogger() else null,
-                    debugLogging = config.debugLoggingEnabled
+                    debugLogging = config.debugLoggingEnabled,
+                    stopRequestedRef = { this@SpeechToText.stopRequested }
                 ).apply { start() }
 
                 // ── Timing: utterance start marker ────────────────────────
@@ -433,24 +449,34 @@ class SpeechToText internal constructor(
             isRunning.set(false)
 
             try {
-                // Transition: RECORDING → FINALISING
+                // Step 1: Transition RECORDING → FINALISING
                 if (!transitionTo(SttLifecycleState.FINALISING)) return
 
-                val captureDurationMs = timingPcmStartMs.let { if (it > 0) System.currentTimeMillis() - it else 0L }
+                // Step 2: Set stopRequested to freeze PCM/VAD/accumulator
+                stopRequested = true
+                SttLogger.pcm("[STOP] stopRequested=true")
 
+                // Step 3: Stop the processor thread (freezes PCM/VAD/accumulator)
                 sttProcessor?.stop()
-                val pcm = sttProcessor?.forceFinalize()
                 val processorVadMs = sttProcessor?.vadActiveMs ?: 0L
                 val processorUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
+
+                // Step 4: Finalise PCM exactly once
+                val pcm = sttProcessor?.finaliseUtterance()
                 sttProcessor = null
 
+                // Step 5: Stop audio capture
                 audioCapture?.stop()
                 audioCapture = null
 
-                if (pcm != null && pcm.isNotEmpty()) {
-                    SttLogger.pcmD("final pcm size=${pcm.size}")
+                // Step 6: Whisper inference
+                val captureDurationMs = timingPcmStartMs.let { if (it > 0) System.currentTimeMillis() - it else 0L }
+
+                if (pcm != null) {
+                    val pcmNonNull = pcm
+                    SttLogger.whisper("[WHISPER] stop inference started")
                     val inferenceStartMs = System.currentTimeMillis()
-                    val samples = pcm.toShortArray()
+                    val samples = pcmNonNull.toShortArray()
                     val text = NativeSession.transcribe(samples).trim()
                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
 
@@ -473,7 +499,10 @@ class SpeechToText internal constructor(
                     SttLogger.pcmW("no pcm available from accumulator")
                 }
 
-                // Transition: FINALISING → READY
+                // Step 7: Unload model
+                NativeSession.unloadModel()
+
+                // Step 8: Transition FINALISING → READY
                 transitionTo(SttLifecycleState.READY)
             } catch (t: Throwable) {
                 dispatchError(t)
@@ -550,6 +579,7 @@ class SpeechToText internal constructor(
         lastTranscribedText = null
         warmupPerformed = false
         whisperCancelled = false
+        stopRequested = false
     }
 
     private fun stopInternal() {

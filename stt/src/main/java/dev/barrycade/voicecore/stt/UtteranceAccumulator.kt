@@ -139,6 +139,19 @@ internal class UtteranceAccumulator(
         return finalizeUtterance()
     }
 
+    /**
+     * finaliseUtterance finalises the current utterance and returns the PCM buffer.
+     * Called only from the deterministic Stop path, after stopRequested has been set.
+     * Logs the final PCM size for diagnostic clarity.
+     */
+    fun finaliseUtterance(): FloatArray? {
+        val pcm = forceFinalize()
+        if (pcm != null) {
+            SttLogger.pcm("[PCM] final pcm size=${pcm.size}")
+        }
+        return pcm
+    }
+
     internal fun currentDurationMs(): Int = totalDurationMs
 
     /**

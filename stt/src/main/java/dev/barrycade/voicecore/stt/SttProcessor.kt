@@ -5,6 +5,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * SttProcessor polls FloatArray frames from AudioCapture and routes them to the VAD and
  * utterance accumulator. It does not call Whisper; it only emits finalized utterances.
+ *
+ * @param stopRequestedRef Supplier that returns true when Stop has been requested.
+ *        When true, PCM ingestion, VAD processing, and accumulator updates are frozen.
+ *        Defaults to { false } for backward compatibility in tests.
  */
 internal class SttProcessor(
     private val audioCapture: AudioCapture,
@@ -13,7 +17,8 @@ internal class SttProcessor(
     private val listener: UtteranceListener,
     private val calibrationLogger: VadCalibrationLogger? = null,
     private val debugLogging: Boolean = false,
-    private val sampleRate: Int = 16000
+    private val sampleRate: Int = 16000,
+    private val stopRequestedRef: () -> Boolean = { false }
 ) {
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -64,8 +69,14 @@ internal class SttProcessor(
                         continue
                     }
 
-                                        // Drop frames if stop was requested while frame was in transit
+                                                            // Drop frames if stop was requested while frame was in transit
                     if (!isRunning.get()) break
+
+                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
+                    if (stopRequestedRef()) {
+                        SttLogger.pcm("[PCM] dropped frame due to stopRequested=true")
+                        continue
+                    }
 
                     SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
@@ -74,6 +85,12 @@ internal class SttProcessor(
                     vadConfidence = confidence
                     if (debugLogging) {
                         SttLogger.vadD("confidence=$confidence")
+                    }
+
+                    // ── Section 4: Freeze VAD processing when stopRequested ──
+                    if (stopRequestedRef()) {
+                        SttLogger.vad("[VAD] skipped frame due to stopRequested=true")
+                        continue
                     }
 
                     // ── RMS sampling (every ~200ms) ─────────────────────
@@ -89,7 +106,13 @@ internal class SttProcessor(
                         vadActiveMs += frameDurationMs
                     }
 
-                                        val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
+                    // ── Section 5: Freeze accumulator updates when stopRequested ──
+                    if (stopRequestedRef()) {
+                        SttLogger.pcm("[ACC] skipped update due to stopRequested=true")
+                        continue
+                    }
+
+                    val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
                     if (utterance != null) {
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
@@ -123,13 +146,28 @@ internal class SttProcessor(
         rmsSampler.reset()
     }
 
-    fun forceFinalize(): FloatArray? {
+            fun forceFinalize(): FloatArray? {
         val utterance = utteranceAccumulator.forceFinalize()
         if (utterance != null) {
             lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
             calibrationLogger?.logUtteranceFinalized(utterance.size, utterance.size * 1000 / 16000)
         }
         return utterance
+    }
+
+    /**
+     * finaliseUtterance finalises the current utterance and returns the PCM buffer.
+     * Called only from the deterministic Stop path, after stopRequested has been set.
+     * Delegates to UtteranceAccumulator.finaliseUtterance().
+     */
+    fun finaliseUtterance(): FloatArray? {
+        val pcm = utteranceAccumulator.finaliseUtterance()
+        if (pcm != null) {
+            val pcmSize = pcm.size
+            lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+            calibrationLogger?.logUtteranceFinalized(pcmSize, pcmSize * 1000 / 16000)
+        }
+        return pcm
     }
 
     private fun computeRms(frame: FloatArray): Double {
