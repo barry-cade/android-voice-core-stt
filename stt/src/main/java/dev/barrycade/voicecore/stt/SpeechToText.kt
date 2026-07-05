@@ -8,14 +8,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * SpeechToText captures microphone audio, runs VAD-driven utterance detection,
  * and transcribes finalized utterances via Whisper. Transcription is triggered
- * only by the UtteranceAccumulator (VAD-driven path). stopAndTranscribe() forces
- * accumulator finalization and returns that result — no raw PCM fallback path.
+ * by the UtteranceAccumulator (VAD-driven path) in both Manual and Streaming Modes.
+ *
+ * Manual Mode (default):
+ *   stopAndTranscribe() forces accumulator finalization and returns that result.
+ *   Lifecycle: READY → RECORDING → FINALISING → READY
+ *
+ * Streaming Mode (opt-in via start(streamingEnabled=true)):
+ *   Utterances are segmented automatically using VAD and transcribed continuously.
+ *   Stop is not required. Model stays loaded until destroy().
+ *   Lifecycle: READY → RECORDING → RECORDING → ...
  *
  * Whisper lifecycle (loadModel / unloadModel) is serialized through a dedicated
  * single-thread executor to prevent race conditions between teardown and re-init.
- *
- * Lifecycle state machine:
- *   UNINITIALISED → READY → RECORDING → FINALISING → READY → ...
  *
  * All failures produce structured [SttError] objects delivered via [SttErrorListener].
  * No silent failures. No swallowed exceptions. No fallback behaviour.
@@ -122,6 +127,19 @@ class SpeechToText internal constructor(
     @Volatile
     private var stopRequested: Boolean = false
 
+    /**
+     * Streaming mode flag. When true, utterances are segmented automatically
+     * using VAD and transcribed continuously without requiring Stop.
+     * When false, Manual Mode is used (current behaviour).
+     *
+     * Semantics:
+     * - false → Manual Mode (stopAndTranscribe() required)
+     * - true  → Streaming Mode (continuous multi-utterance)
+     *
+     * Reset to false in resetInternalState().
+     */
+    private var streamingEnabled: Boolean = false
+
     private var audioCapture: AudioCapture? = null
     private var sttProcessor: SttProcessor? = null
 
@@ -214,14 +232,26 @@ class SpeechToText internal constructor(
     }
 
     fun start() {
-        synchronized(stateLock) {
-            // Fail-fast: lifecycle validation
-            if (!transitionTo(SttLifecycleState.READY)) return
+        start(streamingEnabled = false)
+    }
 
+    /**
+     * Start recording with the specified mode.
+     *
+     * @param streamingEnabled When true, uses Streaming Mode (continuous multi-utterance).
+     *                         When false, uses Manual Mode (requires stopAndTranscribe()).
+     */
+    fun start(streamingEnabled: Boolean) {
+        synchronized(stateLock) {
+            // Fail-fast: verify STT is not already running
             if (isRunning.get()) return
 
             try {
                 resetInternalState()
+                this.streamingEnabled = streamingEnabled
+                if (streamingEnabled) {
+                    SttLogger.pcm("[STREAM] streamingEnabled=true")
+                }
                 resetTiming()
                 dumpConfig()
 
@@ -235,13 +265,15 @@ class SpeechToText internal constructor(
                         context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
                     )
                     sttErrorListener?.onSttError(error)
-                    stopInternal()
                     shutdownExecutors()
                     dispatchError(RuntimeException("Forced test failure: Whisper model load"))
                     return
                 }
 
-                // Fail-fast: Load model on the dedicated Whisper executor
+                // ── Phase A: Model load (synchronous) ─────────────────────────────
+                // Model load is allowed to block the UI thread. It runs on the
+                // dedicated whisperExecutor and is awaited with a 30-second timeout.
+                // Warm-up is NOT inside this task — it is submitted separately below.
                 val loadFuture = whisperExecutor.submit<java.lang.Void> {
                     try {
                         SttLogger.whisper("loadModel: $modelPath")
@@ -272,10 +304,21 @@ class SpeechToText internal constructor(
                         context = mapOf("modelPath" to modelPath, "exception" to e::class.java.simpleName)
                     )
                     sttErrorListener?.onSttError(error)
-                    stopInternal()
                     shutdownExecutors()
                     dispatchError(e)
                     return
+                }
+
+                // ── READY is entered immediately after model load ───────────
+                // Warm-up has NOT happened yet. It runs asynchronously below.
+                if (!transitionTo(SttLifecycleState.READY)) return
+
+                // ── Phase B: Warm-up (asynchronous, after READY) ────────────
+                // Warm-up runs on whisperExecutor in the background.
+                // It is NOT awaited. It does NOT block READY or RECORDING.
+                // PCM frames flow immediately because AudioCapture starts now.
+                whisperExecutor.submit {
+                    performWarmup()
                 }
 
                 isRunning.set(true)
@@ -333,24 +376,34 @@ class SpeechToText internal constructor(
                 // ── Timing: PCM capture start ─────────────────────────────
                 timingPcmStartMs = System.currentTimeMillis()
 
+                val accumulator = UtteranceAccumulator(config).apply {
+                    sttErrorListener = this@SpeechToText.sttErrorListener
+                    // ── Testing hook: forceTimeout ────────────────────
+                    if (this@SpeechToText.forceTimeout) {
+                        this.forceTimeout = true
+                    }
+                    // ── Reset per-utterance VAD timing on speech start ─
+                    onSpeechStart = { sttProcessor?.resetVadActiveMs() }
+                }
+
                 sttProcessor = SttProcessor(
                     audioCapture = capture,
                     vad = Vad(config).apply {
                         debugLogging = config.debugLoggingEnabled
                     },
-                    utteranceAccumulator = UtteranceAccumulator(config).apply {
-                        sttErrorListener = this@SpeechToText.sttErrorListener
-                        // ── Testing hook: forceTimeout ────────────────────
-                        if (this@SpeechToText.forceTimeout) {
-                            this.forceTimeout = true
-                        }
-                        // ── Reset per-utterance VAD timing on speech start ─
-                        onSpeechStart = { sttProcessor?.resetVadActiveMs() }
-                    },
+                    utteranceAccumulator = accumulator,
                     listener = object : UtteranceListener {
                         override fun onUtteranceReady(pcm: FloatArray) {
                             // Guard: no inference after stop, error, or teardown
                             if (!isRunning.get()) return
+
+                            val isStreaming = this@SpeechToText.streamingEnabled
+
+                            // In streaming mode, log utterance start/end
+                            if (isStreaming) {
+                                SttLogger.pcm("[STREAM] utterance end")
+                                SttLogger.pcm("[STREAM] inference triggered")
+                            }
 
                             // Guard: only one inference at a time
                             if (!isInferencing.compareAndSet(false, true)) {
@@ -363,6 +416,12 @@ class SpeechToText internal constructor(
                                 // No state transition — behavioural compatibility with VAD-driven pipeline.
 
                                 if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
+
+                                // In streaming mode, log utterance start before inference
+                                if (isStreaming) {
+                                    SttLogger.pcm("[STREAM] utterance start")
+                                }
+
                                 val samples = pcm.toShortArray()
                                 val inferenceStartMs = System.currentTimeMillis()
 
@@ -407,6 +466,11 @@ class SpeechToText internal constructor(
                                     onTimingListener?.invoke(timingPcmTotalMs, currentVadMs, whisperMs, pipelineMs)
                                     dispatchResult(text, null)
                                 }
+
+                                // In streaming mode, reset the accumulator for the next utterance
+                                if (isStreaming) {
+                                    accumulator.resetForNextUtterance()
+                                }
                             } finally {
                                 isInferencing.set(false)
                             }
@@ -421,11 +485,6 @@ class SpeechToText internal constructor(
                 timingUtteranceStartMs = System.currentTimeMillis()
 
                 SttLogger.lifecycle("VAD-driven transcription pipeline started")
-
-                // ── Async Whisper warm-up ────────────────────────────────
-                whisperExecutor.submit {
-                    performWarmup()
-                }
             } catch (t: Throwable) {
                 SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
                 val error = SttError(
@@ -445,6 +504,12 @@ class SpeechToText internal constructor(
 
     fun stopAndTranscribe() {
         synchronized(stateLock) {
+            // Streaming Mode does not support stopAndTranscribe
+            if (streamingEnabled) {
+                SttLogger.pcm("[STREAM] stopAndTranscribe called in Streaming Mode — no-op")
+                return
+            }
+
             if (!isRunning.get()) return
             isRunning.set(false)
 
@@ -473,10 +538,9 @@ class SpeechToText internal constructor(
                 val captureDurationMs = timingPcmStartMs.let { if (it > 0) System.currentTimeMillis() - it else 0L }
 
                 if (pcm != null) {
-                    val pcmNonNull = pcm
                     SttLogger.whisper("[WHISPER] stop inference started")
                     val inferenceStartMs = System.currentTimeMillis()
-                    val samples = pcmNonNull.toShortArray()
+                    val samples = pcm.toShortArray()
                     val text = NativeSession.transcribe(samples).trim()
                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
 
@@ -499,8 +563,8 @@ class SpeechToText internal constructor(
                     SttLogger.pcmW("no pcm available from accumulator")
                 }
 
-                // Step 7: Unload model
-                NativeSession.unloadModel()
+                // Step 7: Model stays loaded — no unload between Manual Mode utterances.
+                //         Unload only on destroy() or session end.
 
                 // Step 8: Transition FINALISING → READY
                 transitionTo(SttLifecycleState.READY)
@@ -577,9 +641,9 @@ class SpeechToText internal constructor(
 
     private fun resetInternalState() {
         lastTranscribedText = null
-        warmupPerformed = false
         whisperCancelled = false
         stopRequested = false
+        streamingEnabled = false
     }
 
     private fun stopInternal() {
@@ -590,10 +654,6 @@ class SpeechToText internal constructor(
         sttProcessor = null
         audioCapture?.stop()
         audioCapture = null
-
-        // Unload model immediately — do not wait for Whisper executor tasks.
-        // Cancelled tasks will exit naturally when they see the flag.
-        NativeSession.unloadModel()
     }
 
     /**
@@ -603,9 +663,10 @@ class SpeechToText internal constructor(
      *   1. Stop audio capture cleanly
      *   2. Stop PCM/VAD processing cleanly
      *   3. Cancel Whisper executor tasks
-     *   4. Call shutdown() on each executor
-     *   5. Wait for termination with a bounded 5-second timeout
-     *   6. Log one line per executor with status
+     *   4. Unload Whisper model
+     *   5. Call shutdown() on each executor
+     *   6. Wait for termination with a bounded 5-second timeout
+     *   7. Log one line per executor with status
      *
      * Idempotent: multiple calls are safe. The executorsShutdown flag
      * prevents duplicate shutdown and duplicate logging.
@@ -632,7 +693,10 @@ class SpeechToText internal constructor(
         isRunning.set(false)
         isInferencing.set(false)
 
-        // Step 4-6: Shutdown whisper executor with bounded timeout
+        // Step 4: Unload model before shutting down executor
+        NativeSession.unloadModel()
+
+        // Step 5-7: Shutdown whisper executor with bounded timeout
         whisperExecutor.shutdown()
         try {
             val terminated = whisperExecutor.awaitTermination(5, TimeUnit.SECONDS)
@@ -650,40 +714,33 @@ class SpeechToText internal constructor(
     }
 
     /**
-     * Perform async Whisper warm-up after capture has started.
-     * Runs on the whisperExecutor. Does not block start().
-     * Checks whisperCancelled before operations.
-     * If cancelled, returns immediately without side effects, logging, or errors.
+     * Run Whisper warm-up once per model load.
+     * Must only be called via whisperExecutor.submit { performWarmup() }.
+     * Must never run on the main thread or inside any lifecycle transition.
+     * Must never be inside a Future that is .get()-ed.
+     * Guarded by warmupPerformed flag: runs exactly once until model is unloaded.
      */
     private fun performWarmup() {
-        if (whisperCancelled) return
+        if (warmupPerformed) return
+        warmupPerformed = true
 
-        if (!warmupPerformed) {
-            val warmupStartMs = System.currentTimeMillis()
-            try {
-                NativeSession.warmup()
-                if (whisperCancelled) return
-                val warmupMs = System.currentTimeMillis() - warmupStartMs
-                SttLogger.whisper("warmUpMs=$warmupMs")
-                warmupPerformed = true
-            } catch (t: Throwable) {
-                if (whisperCancelled) return
-                SttLogger.whisperE("warmup failed: ${t.message}")
-                val error = SttError(
-                    category = SttErrorCategory.UNKNOWN,
-                    code = SttErrorCode.INFERENCE_FAILED,
-                    message = "Whisper warm-up failed: ${t.message}",
-                    cause = t,
-                    context = mapOf("exception" to t::class.java.simpleName)
-                )
-                sttErrorListener?.onSttError(error)
-                if (!whisperCancelled && isRunning.get()) {
-                    synchronized(stateLock) {
-                        stopInternal()
-                    }
-                    dispatchError(t)
-                }
-            }
+        val warmupStartMs = System.currentTimeMillis()
+        try {
+            NativeSession.warmup()
+            if (whisperCancelled) return
+            val warmupMs = System.currentTimeMillis() - warmupStartMs
+            SttLogger.whisper("warmUpMs=$warmupMs")
+        } catch (t: Throwable) {
+            if (whisperCancelled) return
+            SttLogger.whisperE("warmup failed: ${t.message}")
+            val error = SttError(
+                category = SttErrorCategory.UNKNOWN,
+                code = SttErrorCode.INFERENCE_FAILED,
+                message = "Whisper warm-up failed: ${t.message}",
+                cause = t,
+                context = mapOf("exception" to t::class.java.simpleName)
+            )
+            sttErrorListener?.onSttError(error)
         }
     }
 
@@ -702,6 +759,7 @@ class SpeechToText internal constructor(
     fun destroy() {
         synchronized(stateLock) {
             stopInternal()
+            NativeSession.unloadModel()
             lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
         }
         shutdownExecutors()

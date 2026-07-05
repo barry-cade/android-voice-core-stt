@@ -17,21 +17,18 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
-    private lateinit var btnStart: Button
+    private lateinit var btnStartManual: Button
+    private lateinit var btnStartStreaming: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
     private lateinit var txtOutput: TextView
     private lateinit var txtErrorBanner: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
-    private lateinit var txtDebugTitle: TextView
-    private lateinit var layoutDebugToggles: View
-    private lateinit var btnForceAudioFail: Button
-    private lateinit var btnForceWhisperFail: Button
-    private lateinit var btnForceTimeout: Button
 
     private var stt: SpeechToText? = null
     private var isRecording = false
+    private var isStreamingMode = false
     private val debugLogging = true
 
     // ── Debug toggle state ───────────────────────────────────────────────
@@ -50,62 +47,41 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         RequestPermission()
     ) { granted ->
-        if (granted) startRecording()
-        else txtOutput.text = "Microphone permission is required"
+        if (granted) {
+            isStreamingMode = false
+            updateUi()
+            startRecording(streamingEnabled = false)
+        } else {
+            txtOutput.text = "Microphone permission is required"
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        btnStart = findViewById(R.id.btnStart)
+        btnStartManual = findViewById(R.id.btnStartManual)
+        btnStartStreaming = findViewById(R.id.btnStartStreaming)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
         txtOutput = findViewById(R.id.txtOutput)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
-        txtDebugTitle = findViewById(R.id.txtDebugTitle)
-        layoutDebugToggles = findViewById(R.id.layoutDebugToggles)
-        btnForceAudioFail = findViewById(R.id.btnForceAudioFail)
-        btnForceWhisperFail = findViewById(R.id.btnForceWhisperFail)
-        btnForceTimeout = findViewById(R.id.btnForceTimeout)
 
-        // ── Debug toggle click handlers ────────────────────────────────
-        btnForceAudioFail.setOnClickListener {
-            debugForceAudioInitFailure = !debugForceAudioInitFailure
-            btnForceAudioFail.isSelected = debugForceAudioInitFailure
-            btnForceAudioFail.setBackgroundColor(
-                if (debugForceAudioInitFailure) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
-            )
-            logInfo("STT_DEBUG", "forceAudioInitFailure=$debugForceAudioInitFailure")
+        btnStartManual.setOnClickListener {
+            logInfo("STT_FLOW", "startManualMode() called")
+            isStreamingMode = false
+            updateUi()
+            if (hasRecordAudioPermission()) startRecording(streamingEnabled = false)
+            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
-        btnForceWhisperFail.setOnClickListener {
-            debugForceWhisperLoadFailure = !debugForceWhisperLoadFailure
-            btnForceWhisperFail.isSelected = debugForceWhisperLoadFailure
-            btnForceWhisperFail.setBackgroundColor(
-                if (debugForceWhisperLoadFailure) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
-            )
-            logInfo("STT_DEBUG", "forceWhisperLoadFailure=$debugForceWhisperLoadFailure")
-        }
-
-        btnForceTimeout.setOnClickListener {
-            debugForceTimeout = !debugForceTimeout
-            btnForceTimeout.isSelected = debugForceTimeout
-            btnForceTimeout.setBackgroundColor(
-                if (debugForceTimeout) 0xFFFFCDD2.toInt() else android.graphics.Color.TRANSPARENT
-            )
-            logInfo("STT_DEBUG", "forceTimeout=$debugForceTimeout")
-        }
-
-        // Show debug section
-        txtDebugTitle.visibility = android.view.View.VISIBLE
-        layoutDebugToggles.visibility = android.view.View.VISIBLE
-
-        btnStart.setOnClickListener {
-            logInfo("STT_FLOW", "startRecording() called")
-            if (hasRecordAudioPermission()) startRecording()
+        btnStartStreaming.setOnClickListener {
+            logInfo("STT_FLOW", "startStreamingMode() called")
+            isStreamingMode = true
+            updateUi()
+            if (hasRecordAudioPermission()) startRecording(streamingEnabled = true)
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
@@ -128,7 +104,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startRecording() {
+    private fun startRecording(streamingEnabled: Boolean) {
         val modelPath = getModelPath()
         val runtimeConfig = try {
             AppSttConfigLoader.loadFromAssets(this)
@@ -233,7 +209,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            speechToText.start()
+            speechToText.start(streamingEnabled)
             stt = speechToText
 
             // ── Show active config ────────────────────────────────────────
@@ -250,7 +226,9 @@ class MainActivity : ComponentActivity() {
             }
 
             isRecording = true
-            txtOutput.text = "Recording..."
+            isStreamingMode = streamingEnabled
+            val label = if (streamingEnabled) "Streaming..." else "Recording..."
+            txtOutput.text = label
             updateUi()
         } catch (e: IllegalArgumentException) {
             handleConfigError(e)
@@ -264,6 +242,7 @@ class MainActivity : ComponentActivity() {
             message = "The STT tuning values are invalid:\n${e.message}"
         )
         isRecording = false
+        isStreamingMode = false
         stt = null
         txtErrorBanner.visibility = android.view.View.VISIBLE
         updateUi()
@@ -285,6 +264,7 @@ class MainActivity : ComponentActivity() {
         }
 
         isRecording = false
+        isStreamingMode = false
         txtOutput.text = "Processing..."
         updateUi()
 
@@ -299,9 +279,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        btnStart.isEnabled = !isRecording
-        btnStop.isEnabled = isRecording
-        btnClear.isEnabled = !isRecording
+        btnStop.visibility = if (isStreamingMode) View.GONE else View.VISIBLE
+        btnStartManual.isEnabled = !isRecording
+        btnStartStreaming.isEnabled = !isRecording
     }
 
     private fun getModelPath(): String {

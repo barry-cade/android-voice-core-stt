@@ -152,6 +152,19 @@ internal class UtteranceAccumulator(
         return pcm
     }
 
+    /**
+     * resetForNextUtterance clears all state for the next utterance cycle.
+     * Used in Streaming Mode after an utterance has been transcribed and dispatched.
+     * Must not leak any PCM between utterances.
+     */
+    fun resetForNextUtterance() {
+        speechAccumulator.clear()
+        speechActive = false
+        silenceFrameCount = 0
+        totalDurationMs = 0
+        SttLogger.pcm("[STREAM] accumulator reset")
+    }
+
     internal fun currentDurationMs(): Int = totalDurationMs
 
     /**
