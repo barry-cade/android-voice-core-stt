@@ -169,13 +169,8 @@ class SttWarmupTest {
     fun warmup_neverRunsIfModelLoadFails() {
         modelLoadSucceeded = false
 
-        // Simulate: model load fails, so warmup is never submitted.
-        // In production, if model load fails, return is called before
-        // the warmup submission line is reached.
-        if (modelLoadSucceeded) {
-            performWarmup()
-        }
-
+        // In production, if model load fails, performWarmup is never called.
+        // Simulate that: warmup is simply not invoked.
         val warmupLogs = capturedLogs.filter { it.contains("warmUpMs") }
         assertTrue("no warmup logs when model load fails", warmupLogs.isEmpty())
         assertFalse("warmup not performed when model load fails", warmupPerformed)
@@ -188,15 +183,8 @@ class SttWarmupTest {
         // If it fails, warmup is never submitted to the executor.
         modelLoadSucceeded = false
 
-        var warmupSubmitted = false
-
-        // Simulate the production start() flow
-        if (modelLoadSucceeded) {
-            warmupSubmitted = true
-            performWarmup()
-        }
-
-        assertFalse("warmup must not be submitted when model load fails", warmupSubmitted)
+        // PerformWarmup is never reached when model load fails
+        assertFalse("warmup must not be performed when model load fails", warmupPerformed)
     }
 
     // ── Warm-up log format ──────────────────────────────────────────────

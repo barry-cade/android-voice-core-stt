@@ -207,8 +207,8 @@ class SttErrorCodeTest {
 
     @Test
     fun enumContainsOnlyApprovedCodes() {
-        val codes = SttErrorCode.values().toSet()
-        val allCodes = SttErrorCode.values().toList()
+        val codes = SttErrorCode.entries.toSet()
+        val allCodes = SttErrorCode.entries.toList()
 
         assertEquals("SttErrorCode must have exactly 6 values", 6, codes.size)
         assertTrue("must contain MODEL_LOAD_FAILED", codes.contains(SttErrorCode.MODEL_LOAD_FAILED))
@@ -245,7 +245,7 @@ class SttErrorCodeTest {
 
         for (legacyName in legacyNames) {
             // Verify no enum value has this name
-            val matchingCodes = SttErrorCode.values().filter {
+            val matchingCodes = SttErrorCode.entries.filter {
                 it.name == legacyName
             }
             assertTrue(
