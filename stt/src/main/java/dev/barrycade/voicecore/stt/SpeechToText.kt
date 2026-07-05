@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * single-thread executor to prevent race conditions between teardown and re-init.
  *
  * Lifecycle state machine:
- *   UNINITIALISED → READY → RECORDING → INFERENCING → RECORDING → ... → DESTROYED
+ *   UNINITIALISED → READY → RECORDING → FINALISING → READY → ...
  *
  * All failures produce structured [SttError] objects delivered via [SttErrorListener].
  * No silent failures. No swallowed exceptions. No fallback behaviour.
@@ -76,14 +76,7 @@ class SpeechToText internal constructor(
     private val isInferencing = AtomicBoolean(false)
     private val stateLock = Any()
 
-    private val lifecycleManager = SttLifecycleManager(
-        errorListener = { error ->
-            sttErrorListener?.onSttError(error)
-            onError?.let { listener ->
-                listener(RuntimeException("STT error: ${error.code} - ${error.message}"))
-            }
-        }
-    )
+    private val lifecycleManager = SttLifecycleManager()
 
     init {
         // Fail-fast: config validation
@@ -200,12 +193,7 @@ class SpeechToText internal constructor(
     fun start() {
         synchronized(stateLock) {
             // Fail-fast: lifecycle validation
-            try {
-                lifecycleManager.transitionTo(SttLifecycleState.READY)
-            } catch (e: IllegalStateException) {
-                // Lifecycle violation already reported via error listener in transitionTo
-                return
-            }
+            if (!transitionTo(SttLifecycleState.READY)) return
 
             if (isRunning.get()) return
 
@@ -305,7 +293,12 @@ class SpeechToText internal constructor(
                     return
                 }
                 audioCapture = capture
-                lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
+                if (!transitionTo(SttLifecycleState.RECORDING)) {
+                    capture.stop()
+                    isRunning.set(false)
+                    stopInternal()
+                    return
+                }
 
                 // ── Timing: PCM capture start ─────────────────────────────
                 timingPcmStartMs = System.currentTimeMillis()
@@ -336,12 +329,8 @@ class SpeechToText internal constructor(
                             }
 
                             try {
-                                // Transition: RECORDING → INFERENCING
-                                try {
-                                    lifecycleManager.transitionTo(SttLifecycleState.INFERENCING)
-                                } catch (_: IllegalStateException) {
-                                    return
-                                }
+                                // Remains in RECORDING during inference (FINALISING is for user-initiated stop)
+                                // No state transition — behavioural compatibility with VAD-driven pipeline.
 
                                 if (debugVad) SttLogger.pcmD("Final PCM size=${pcm.size}")
                                 val samples = pcm.toShortArray()
@@ -367,10 +356,7 @@ class SpeechToText internal constructor(
                                     ""
                                 }
 
-                                // Transition back: INFERENCING → RECORDING
-                                try {
-                                    lifecycleManager.transitionTo(SttLifecycleState.RECORDING)
-                                } catch (_: IllegalStateException) { }
+                                // Remains in RECORDING — only user-initiated stop triggers FINALISING.
 
                                 if (text.isNotBlank()) {
                                     // ── Timing: build snapshot ──────────────
@@ -378,23 +364,18 @@ class SpeechToText internal constructor(
                                     val currentVadMs = sttProcessor?.vadActiveMs ?: 0L
                                     val currentUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
                                     val pipelineMs = System.currentTimeMillis() - timingUtteranceStartMs
-                                    val snapshot = buildTimingSnapshot(
-                                        vadActiveMs = currentVadMs,
-                                        utteranceDurationMs = currentUtteranceMs,
-                                        inferenceMs = whisperMs,
-                                        totalPipelineMs = pipelineMs
+                                    val timingSnapshot = SttTiming(
+                                        vadActiveMs = currentVadMs.toInt(),
+                                        utteranceMs = currentUtteranceMs.toInt(),
+                                        inferenceMs = whisperMs.toInt(),
+                                        totalMs = pipelineMs.toInt()
                                     )
-                                    SttLogger.pcm("[DIAG] timing: vadActiveMs=${snapshot.vadActiveMs}, utteranceMs=${snapshot.utteranceDurationMs}, inferenceMs=${snapshot.inferenceMs}, totalMs=${snapshot.totalPipelineMs}")
+                                    SttLogger.pcm("[DIAG] timing: $timingSnapshot")
 
                                     lastTranscribedText = text
-                                    onTimingCallback?.invoke(SttTiming(
-                                        pcmMs = timingPcmTotalMs,
-                                        vadActiveMs = currentVadMs,
-                                        whisperMs = whisperMs,
-                                        totalMs = pipelineMs
-                                    ))
+                                    onTimingCallback?.invoke(timingSnapshot)
                                     onTimingListener?.invoke(timingPcmTotalMs, currentVadMs, whisperMs, pipelineMs)
-                                    dispatchResult(text, snapshot)
+                                    dispatchResult(text, null)
                                 }
                             } finally {
                                 isInferencing.set(false)
@@ -408,7 +389,7 @@ class SpeechToText internal constructor(
                 // ── Timing: utterance start marker ────────────────────────
                 timingUtteranceStartMs = System.currentTimeMillis()
 
-                SttLogger.lifecycle("VAD-driven transcription pipeline started, state=${lifecycleManager.currentState.javaClass.simpleName}")
+                SttLogger.lifecycle("VAD-driven transcription pipeline started")
 
                 // ── Async Whisper warm-up ────────────────────────────────
                 whisperExecutor.submit {
@@ -436,20 +417,19 @@ class SpeechToText internal constructor(
             isRunning.set(false)
 
             try {
+                // Transition: RECORDING → FINALISING
+                if (!transitionTo(SttLifecycleState.FINALISING)) return
+
                 val captureDurationMs = timingPcmStartMs.let { if (it > 0) System.currentTimeMillis() - it else 0L }
 
                 sttProcessor?.stop()
                 val pcm = sttProcessor?.forceFinalize()
                 val processorVadMs = sttProcessor?.vadActiveMs ?: 0L
+                val processorUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
                 sttProcessor = null
 
                 audioCapture?.stop()
                 audioCapture = null
-
-                // Transition: RECORDING → READY
-                try {
-                    lifecycleManager.transitionTo(SttLifecycleState.READY)
-                } catch (_: IllegalStateException) { }
 
                 if (pcm != null && pcm.isNotEmpty()) {
                     SttLogger.pcmD("final pcm size=${pcm.size}")
@@ -459,30 +439,26 @@ class SpeechToText internal constructor(
                     val whisperMs = System.currentTimeMillis() - inferenceStartMs
 
                     if (text.isNotBlank()) {
-                        val currentVadMs = processorVadMs
-                        val currentUtteranceMs = (sttProcessor?.lastUtteranceDurationMs ?: 0).toLong()
                         val pipelineMs = System.currentTimeMillis() - timingUtteranceStartMs
-                        val snapshot = buildTimingSnapshot(
-                            vadActiveMs = currentVadMs,
-                            utteranceDurationMs = currentUtteranceMs,
-                            inferenceMs = whisperMs,
-                            totalPipelineMs = pipelineMs
+                        val timingSnapshot = SttTiming(
+                            vadActiveMs = processorVadMs.toInt(),
+                            utteranceMs = processorUtteranceMs.toInt(),
+                            inferenceMs = whisperMs.toInt(),
+                            totalMs = pipelineMs.toInt()
                         )
-                        SttLogger.pcm("[DIAG] timing: vadActiveMs=${snapshot.vadActiveMs}, utteranceMs=${snapshot.utteranceDurationMs}, inferenceMs=${snapshot.inferenceMs}, totalMs=${snapshot.totalPipelineMs}")
+                        SttLogger.pcm("[DIAG] timing: $timingSnapshot")
 
                         lastTranscribedText = text
-                        onTimingCallback?.invoke(SttTiming(
-                            pcmMs = captureDurationMs,
-                            vadActiveMs = currentVadMs,
-                            whisperMs = whisperMs,
-                            totalMs = pipelineMs
-                        ))
-                        onTimingListener?.invoke(captureDurationMs, currentVadMs, whisperMs, pipelineMs)
-                        dispatchResult(text, snapshot)
+                        onTimingCallback?.invoke(timingSnapshot)
+                        onTimingListener?.invoke(captureDurationMs, processorVadMs, whisperMs, pipelineMs)
+                        dispatchResult(text, null)
                     }
                 } else {
                     SttLogger.pcmW("no pcm available from accumulator")
                 }
+
+                // Transition: FINALISING → READY
+                transitionTo(SttLifecycleState.READY)
             } catch (t: Throwable) {
                 dispatchError(t)
             } finally {
@@ -493,31 +469,65 @@ class SpeechToText internal constructor(
 
     fun stop() = stopAndTranscribe()
 
+    // ── State machine ────────────────────────────────────────────────────
+
+    /**
+     * Validate and apply a lifecycle state transition.
+     *
+     * Legal transitions:
+     *   UNINITIALISED → READY
+     *   READY         → RECORDING
+     *   RECORDING     → FINALISING
+     *   FINALISING    → READY
+     *
+     * @return true if the transition was applied, false if it was illegal
+     *         (the pipeline is stopped and an error is emitted).
+     */
+    private fun transitionTo(newState: SttLifecycleState): Boolean {
+        val from = lifecycleManager.currentState
+
+        // No-op: already in target state.
+        if (from == newState) return true
+
+        val valid = when (from) {
+            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
+            is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING
+            is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
+            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.READY
+        }
+
+        if (valid) {
+            val fromName = from.javaClass.simpleName
+            val toName = newState.javaClass.simpleName
+            SttLogger.lifecycle("state: $fromName → $toName")
+            lifecycleManager.currentState = newState
+            return true
+        }
+
+        val fromName = from.javaClass.simpleName
+        val toName = newState.javaClass.simpleName
+        SttLogger.lifecycleE("illegal transition: $fromName → $toName")
+        val error = SttError(
+            category = SttErrorCategory.UNKNOWN,
+            code = SttErrorCode.LIFECYCLE_VIOLATION,
+            message = "Illegal lifecycle transition: $fromName → $toName",
+            context = mapOf("from" to fromName, "to" to toName)
+        )
+        sttErrorListener?.onSttError(error)
+        onError?.let { listener ->
+            listener(RuntimeException("Illegal lifecycle transition: $fromName → $toName"))
+        }
+        // Stop the pipeline cleanly on illegal transition
+        stopInternal()
+        return false
+    }
+
+    // ── Private helpers ─────────────────────────────────────────────────
+
     private fun dispatchResult(text: String, timing: SttTimingSnapshot?) {
         lastTranscribedText = text
         onResultWithTiming?.invoke(text, timing)
         onResult?.invoke(text)
-    }
-
-    private fun buildTimingSnapshot(
-        vadActiveMs: Long,
-        utteranceDurationMs: Long,
-        inferenceMs: Long,
-        totalPipelineMs: Long
-    ): SttTimingSnapshot {
-        val sampler = sttProcessor?.rmsSampler
-        return SttTimingSnapshot(
-            vadActiveMs = vadActiveMs,
-            utteranceDurationMs = utteranceDurationMs,
-            silencePaddingMs = config.silencePaddingMs.toLong(),
-            preRollMs = config.preRollMs.toLong(),
-            inferenceMs = inferenceMs,
-            totalPipelineMs = totalPipelineMs,
-            vadConfidence = sttProcessor?.vadConfidence,
-            avgRms = sampler?.avgRms,
-            peakRms = sampler?.peakRms,
-            noiseFloorRms = sampler?.noiseFloorRms
-        )
     }
 
     private fun resetInternalState() {
@@ -588,12 +598,12 @@ class SpeechToText internal constructor(
      *   - release AudioRecord
      *   - unload Whisper model
      *   - clear buffers
-     *   - transition to DESTROYED
+     *   - reset pipeline state to UNINITIALISED
      */
     fun destroy() {
         synchronized(stateLock) {
             stopInternal()
-            lifecycleManager.transitionToDestroyed()
+            lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
         }
         whisperExecutor.shutdown()
         try {
@@ -601,7 +611,7 @@ class SpeechToText internal constructor(
         } catch (_: InterruptedException) {
             whisperExecutor.shutdownNow()
         }
-        SttLogger.lifecycle("destroy: resources released, state=DESTROYED")
+        SttLogger.lifecycle("destroy: resources released, state=UNINITIALISED")
     }
 
     private fun dispatchError(t: Throwable) {

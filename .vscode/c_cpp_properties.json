@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "Android-NDK-arm64-v8a",
+            "compileCommands": "",
+            "compilerPath": "${env:LOCALAPPDATA}\\Android\\Sdk\\ndk\\28.0.12674087\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\aarch64-linux-android21-clang.cmd",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "clang-x64",
+            "includePath": [
+                "${workspaceFolder}/stt/src/main/cpp",
+                "${workspaceFolder}/external/whisper.cpp/include",
+                "${workspaceFolder}/external/whisper.cpp/ggml/include",
+                "${workspaceFolder}/external/whisper.cpp/ggml/src",
+                "${env:LOCALAPPDATA}\\Android\\Sdk\\ndk\\28.0.12674087\\toolchains\\llvm\\prebuilt\\windows-x86_64\\sysroot\\usr\\include",
+                "${env:LOCALAPPDATA}\\Android\\Sdk\\ndk\\28.0.12674087\\toolchains\\llvm\\prebuilt\\windows-x86_64\\sysroot\\usr\\include\\aarch64-linux-android",
+                "${env:LOCALAPPDATA}\\Android\\Sdk\\ndk\\28.0.12674087\\toolchains\\llvm\\prebuilt\\windows-x86_64\\lib\\clang\\19\\include"
+            ],
+            "defines": [
+                "__ANDROID_API__=21",
+                "ANDROID",
+                "_GNU_SOURCE"
+            ]
+        }
+    ],
+    "version": 4
+}

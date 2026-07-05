@@ -11,8 +11,8 @@ package dev.barrycade.voicecore.stt
  * When [debugLogging] is enabled, calls [onSample] with each sample output.
  */
 internal class RmsSampler(
-    private val sampleRate: Int = 16000,
-    private val samplingIntervalMs: Int = 200,
+    sampleRate: Int = 16000,
+    samplingIntervalMs: Int = 200,
     private val debugLogging: Boolean = false,
     private val onSample: ((avg: Float, peak: Float, floor: Float) -> Unit)? = null
 ) {
@@ -62,7 +62,7 @@ internal class RmsSampler(
         if (frameRms < currentNoiseFloor * 1.5f) {
             currentNoiseFloor = currentNoiseFloor * 0.9f + frameRms * 0.1f
         } else {
-            currentNoiseFloor = currentNoiseFloor * 0.99f // slow decay
+            currentNoiseFloor *= 0.99f // slow decay
         }
 
         // Check if window is complete

@@ -278,6 +278,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopAndTranscribe() {
+        val currentStt = stt
+        if (currentStt == null) {
+            postToUi { txtOutput.text = "Not yet started" }
+            return
+        }
+
         isRecording = false
         txtOutput.text = "Processing..."
         updateUi()
@@ -285,10 +291,7 @@ class MainActivity : ComponentActivity() {
         Thread {
             try {
                 Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
-                stt?.stopAndTranscribe()
-                if (stt == null) {
-                    postToUi { txtOutput.text = "Not yet started" }
-                }
+                currentStt.stopAndTranscribe()
             } catch (t: Throwable) {
                 postToUi { txtOutput.text = "Error: ${t.message}" }
             }
