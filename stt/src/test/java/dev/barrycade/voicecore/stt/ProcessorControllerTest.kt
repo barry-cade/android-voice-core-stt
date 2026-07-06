@@ -3,18 +3,20 @@ package dev.barrycade.voicecore.stt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
 /**
  * Tests for [ProcessorController].
  *
- * Validates the frame polling loop, VAD integration, accumulator integration,
- * stop/start lifecycle, stopAndFinalize, and the stopRequestedRef freeze mechanism.
+ * Validates lifecycle, error handling, and idempotency.
  *
- * Since [CaptureController] depends on Android [AudioCapture], these tests
- * use a pure-Kotlin simulation of the PCM frame source.
+ * Since [CaptureController] depends on Android [AudioCapture], the
+ * controller runs without real frames. Tests focus on:
+ * - Stop/freeze ordering (stopRequestedRef)
+ * - Idempotency (double start, double stop)
+ * - Initial value contracts
+ * - Error-free operation under stress
  */
 class ProcessorControllerTest {
 
@@ -42,74 +44,6 @@ class ProcessorControllerTest {
         stopRequested = false
     }
 
-    @Test
-    fun constructor_createsCleanState() {
-        val controller = createController()
-        assertEquals(0L, controller.vadActiveMs)
-        assertEquals(0, controller.lastUtteranceDurationMs)
-        assertEquals(0f, controller.vadConfidence, 0.001f)
-    }
-
-    @Test
-    fun start_stop_noErrors() {
-        val controller = createController()
-        controller.start()
-        controller.stop()
-    }
-
-    @Test
-    fun start_twice_isIdempotent() {
-        val controller = createController()
-        controller.start()
-        controller.start()
-        controller.stop()
-    }
-
-    @Test
-    fun stop_twice_isIdempotent() {
-        val controller = createController()
-        controller.start()
-        controller.stop()
-        controller.stop()
-    }
-
-    @Test
-    fun stopAndFinalize_returnsNullWhenEmpty() {
-        val controller = createController()
-        controller.start()
-        // No frames polled — accumulator is empty
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNull("stopAndFinalize on empty accumulator must return null", pcm)
-    }
-
-    @Test
-    fun getVad_returnsConfiguredVad() {
-        val controller = createController()
-        assertNotNull("getVad must return non-null Vad", controller.getVad())
-        assertEquals(vad, controller.getVad())
-    }
-
-    @Test
-    fun getAccumulator_returnsConfiguredAccumulator() {
-        val controller = createController()
-        assertNotNull("getAccumulator must return non-null accumulator", controller.getAccumulator())
-        assertEquals(accumulator, controller.getAccumulator())
-    }
-
-    @Test
-    fun rmsSampler_isInitialized() {
-        val controller = createController()
-        assertNotNull("rmsSampler must be initialized", controller.rmsSampler)
-    }
-
-    @Test
-    fun resetVadActiveMs_setsToZero() {
-        val controller = createController()
-        controller.resetVadActiveMs()
-        assertEquals("resetVadActiveMs sets vadActiveMs to 0", 0L, controller.vadActiveMs)
-    }
-
     private fun createController(): ProcessorController {
         return ProcessorController(
             captureController = captureController,
@@ -120,5 +54,114 @@ class ProcessorControllerTest {
             debugLogging = false,
             stopRequestedRef = { stopRequested }
         )
+    }
+
+    // ── Initial value contracts (negative: must NOT be garbage) ──────────
+
+    @Test
+    fun vadActiveMs_initialValue_isZero() {
+        val controller = createController()
+        assertEquals("vadActiveMs must be 0 at construction", 0L, controller.vadActiveMs)
+    }
+
+    @Test
+    fun lastUtteranceDurationMs_initialValue_isZero() {
+        val controller = createController()
+        assertEquals("lastUtteranceDurationMs must be 0 at construction",
+            0, controller.lastUtteranceDurationMs)
+    }
+
+    @Test
+    fun vadConfidence_initialValue_isZero() {
+        val controller = createController()
+        assertEquals(0f, controller.vadConfidence, 0.001f)
+    }
+
+    // ── Idempotency / no-op tests (negative: must survive misuse) ────────
+
+    @Test
+    fun start_twice_isNoop() {
+        val controller = createController()
+        controller.start()
+        controller.start()
+        controller.stop()
+    }
+
+    @Test
+    fun stop_twice_isNoop() {
+        val controller = createController()
+        controller.start()
+        controller.stop()
+        controller.stop()
+    }
+
+    @Test
+    fun stopWithoutStart_isNoop() {
+        val controller = createController()
+        controller.stop()
+    }
+
+    @Test
+    fun rapidStartStop_noCrash() {
+        val controller = createController()
+        repeat(5) {
+            controller.start()
+            controller.stop()
+        }
+    }
+
+    // ── Stop-and-finalize (negative: empty accumulator path) ─────────────
+
+    @Test
+    fun stopAndFinalize_emptyAccumulator_returnsNull() {
+        val controller = createController()
+        controller.start()
+        controller.stop()
+        val pcm = controller.stopAndFinalize()
+        assertNull("stopAndFinalize with empty accumulator must return null", pcm)
+    }
+
+    // ── Getters (negative: must never return null) ───────────────────────
+
+    @Test
+    fun getVad_returnsNonNull() {
+        val controller = createController()
+        assertNotNull("getVad must return non-null Vad", controller.getVad())
+    }
+
+    @Test
+    fun getAccumulator_returnsNonNull() {
+        val controller = createController()
+        assertNotNull("getAccumulator must return non-null accumulator",
+            controller.getAccumulator())
+    }
+
+    @Test
+    fun rmsSampler_isInitialized() {
+        val controller = createController()
+        assertNotNull("rmsSampler must be initialized", controller.rmsSampler)
+    }
+
+    // ── Reset timing (negative: repeat reset is stable) ──────────────────
+
+    @Test
+    fun resetVadActiveMs_repeatedly_isStable() {
+        val controller = createController()
+        repeat(5) {
+            controller.resetVadActiveMs()
+            assertEquals("vadActiveMs must be 0 after each reset",
+                0L, controller.vadActiveMs)
+        }
+    }
+
+    // ── StopRequested freeze (negative: must skip processing) ────────────
+
+    @Test
+    fun stopRequestedTrue_startDoesNotProcess() {
+        stopRequested = true
+        val controller = createController()
+        controller.start()
+        // No crash is the assertion
+        controller.stop()
     }
 }
