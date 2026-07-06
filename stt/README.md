@@ -78,7 +78,7 @@ implementation(project(":stt"))
 ### 1. Create SpeechToText via the companion factory
 
 ```kotlin
-val stt = SpeechToText.create(
+val config = SttConfig(
     energyThreshold = 0.03f,
     silencePaddingMs = 300,
     preRollMs = 100,
@@ -88,6 +88,7 @@ val stt = SpeechToText.create(
     motionModeSilencePaddingMs = 150,
     modelPath = "/path/to/ggml-tiny.en.bin"
 )
+val stt = SpeechToText.create(config)
 ```
 
 ### 2. Register result listener
@@ -147,16 +148,7 @@ Main class controlling PCM capture, VAD, and Whisper inference.
 
 ```kotlin
 companion object {
-    fun create(
-        energyThreshold: Float,
-        silencePaddingMs: Int,
-        preRollMs: Int,
-        maxUtteranceLengthMs: Int,
-        stableChunkSizeMs: Int,
-        motionModeEnergyThreshold: Float,
-        motionModeSilencePaddingMs: Int,
-        modelPath: String
-    ): SpeechToText
+    fun create(config: SttConfig): SpeechToText
 }
 ```
 
@@ -183,16 +175,18 @@ companion object {
 
 ### SttConfig
 
-Static configuration data class (currently not used by `SpeechToText.create()`; factory takes individual parameters).
+Static configuration data class passed to `SpeechToText.create()`.
 
 ```kotlin
 data class SttConfig(
-    val sampleRate: Int = 16000,
-    val bufferSize: Int = 32000,
-    val modelPath: String? = null,
-    val debugInstrumentation: Boolean = false,
-    val chunkSeconds: Int? = 3,
-    val overlapSeconds: Int? = 1
+    val energyThreshold: Float = 0.03f,
+    val silencePaddingMs: Int = 600,
+    val preRollMs: Int = 100,
+    val maxUtteranceLengthMs: Int = 7000,
+    val stableChunkSizeMs: Int = 500,
+    val motionModeEnergyThreshold: Float = 0.05f,
+    val motionModeSilencePaddingMs: Int = 300,
+    val modelPath: String
 )
 ```
 

@@ -17,7 +17,7 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
 
     @TaskAction
     fun verify() {
-                val expectedPublicApiTypes = setOf(
+                                val expectedPublicApiTypes = setOf(
                     "SpeechToText",
                     "SttConfig",
                     "AudioCapture",
@@ -27,7 +27,8 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
                     "SttErrorListener",
                     "SttErrorCategory",
                     "SttTimingSnapshot",
-                    "SttLifecycleState"
+                    "SttLifecycleState",
+                    "SttReadyListener"
                 )
 
         val sttSources = sourceDir.get().asFile

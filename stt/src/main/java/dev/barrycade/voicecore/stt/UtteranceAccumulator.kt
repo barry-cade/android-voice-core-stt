@@ -59,6 +59,13 @@ internal class UtteranceAccumulator(
     internal var forceTimeout: Boolean = false
 
     /**
+     * Set to true when maxUtteranceLengthMs is exceeded.
+     * ProcessorController checks this after each processChunk() and stops the loop.
+     */
+    @Volatile
+    internal var timeoutFired: Boolean = false
+
+    /**
      * Callback invoked when a new utterance starts (PRE_ROLL → SPEECH transition).
      * Fires before any accumulation for the utterance begins.
      * SttProcessor uses this to reset per-utterance timing counters.
@@ -160,6 +167,7 @@ internal class UtteranceAccumulator(
                     )
                 )
                 sttErrorListener?.onSttError(error)
+                timeoutFired = true
                 return finalizeUtterance()
             }
             return null
@@ -184,6 +192,7 @@ internal class UtteranceAccumulator(
                         context = mapOf("forcedFailure" to "forceTimeout")
                     )
                     sttErrorListener?.onSttError(error)
+                    timeoutFired = true
                     return finalizeUtterance()
                 }
             }
@@ -200,6 +209,7 @@ internal class UtteranceAccumulator(
         totalDurationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
+        timeoutFired = false
     }
 
     /**
@@ -236,6 +246,7 @@ internal class UtteranceAccumulator(
         totalDurationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
+        timeoutFired = false
         SttLogger.pcm("[STREAM] accumulator reset")
     }
 

@@ -13,6 +13,7 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.stt.SttConfig
 import dev.barrycade.voicecore.stt.SttErrorListener
 import java.io.File
 import java.io.FileOutputStream
@@ -108,15 +109,17 @@ class MainActivity : ComponentActivity() {
         try {
             logInfo("STT_INIT", "Constructing STT with modelPath=$modelPath")
             val speechToText = SpeechToText.create(
-                energyThreshold = runtimeConfig.energyThreshold,
-                silencePaddingMs = runtimeConfig.silencePaddingMs,
-                preRollMs = runtimeConfig.preRollMs,
-                maxUtteranceLengthMs = runtimeConfig.maxUtteranceLengthMs,
-                stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
-                motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
-                motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
-                modelPath = modelPath
+                SttConfig(
+                    energyThreshold = runtimeConfig.energyThreshold,
+                    silencePaddingMs = runtimeConfig.silencePaddingMs,
+                    preRollMs = runtimeConfig.preRollMs,
+                    maxUtteranceLengthMs = runtimeConfig.maxUtteranceLengthMs,
+                    stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
+                    motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
+                    motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
+                    modelPath = modelPath
                 )
+            )
 
             // ── Apply test hooks via public API ───────────────────────────
             speechToText.setDebugOptions(

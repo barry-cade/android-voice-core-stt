@@ -24,6 +24,14 @@ internal class ProcessorController(
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
+    /**
+     * Optional callback invoked when the processor stops due to a terminal
+     * timeout (maxUtteranceLengthMs exceeded). The callee should clean up
+     * audio capture and lifecycle state.
+     */
+    @Volatile
+    internal var onTimeoutStop: (() -> Unit)? = null
+
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
     var vadActiveMs: Long = 0L
@@ -107,6 +115,15 @@ internal class ProcessorController(
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
                         listener.onUtteranceReady(utterance)
+
+                        // ── Terminal timeout: stop the processor loop ────────
+                        if (utteranceAccumulator.timeoutFired) {
+                            SttLogger.pcm("[TIMEOUT] max utterance reached — stopping processor")
+                            utteranceAccumulator.timeoutFired = false
+                            isRunning.set(false)
+                            onTimeoutStop?.invoke()
+                            break
+                        }
                     }
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()

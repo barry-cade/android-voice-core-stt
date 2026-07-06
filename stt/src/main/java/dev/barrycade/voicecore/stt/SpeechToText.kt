@@ -8,16 +8,21 @@ class SpeechToText internal constructor(
     private val whisperModel: WhisperModel = WhisperBridge
 ) {
     companion object {
-        fun create(energyThreshold: Float, silencePaddingMs: Int, preRollMs: Int,
-            maxUtteranceLengthMs: Int, stableChunkSizeMs: Int,
-            motionModeEnergyThreshold: Float, motionModeSilencePaddingMs: Int,
-            modelPath: String): SpeechToText {
-            return SpeechToText(RuntimeSttConfig(energyThreshold = energyThreshold,
-                silencePaddingMs = silencePaddingMs, preRollMs = preRollMs,
-                maxUtteranceLengthMs = maxUtteranceLengthMs,
-                stableChunkSizeMs = stableChunkSizeMs,
-                motionMode = MotionModeConfig(energyThreshold = motionModeEnergyThreshold,
-                    silencePaddingMs = motionModeSilencePaddingMs)), modelPath)
+        fun create(config: SttConfig): SpeechToText {
+            return SpeechToText(
+                RuntimeSttConfig(
+                    energyThreshold = config.energyThreshold,
+                    silencePaddingMs = config.silencePaddingMs,
+                    preRollMs = config.preRollMs,
+                    maxUtteranceLengthMs = config.maxUtteranceLengthMs,
+                    stableChunkSizeMs = config.stableChunkSizeMs,
+                    motionMode = MotionModeConfig(
+                        energyThreshold = config.motionModeEnergyThreshold,
+                        silencePaddingMs = config.motionModeSilencePaddingMs
+                    )
+                ),
+                config.modelPath
+            )
         }
     }
 
@@ -169,6 +174,21 @@ class SpeechToText internal constructor(
                     }
                 }, sampleRate = 16000, debugLogging = config.debugLoggingEnabled,
                 stopRequestedRef = { this@SpeechToText.stopRequested })
+            // ── Wire timeout stop callback ──────────────────────────────
+            processor.onTimeoutStop = {
+                synchronized(stateLock) {
+                    SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
+                    audioSource?.stopCapture()
+                    audioSource = null
+                    isRunning.set(false)
+                    // Walk through valid transitions: RECORDING → FINALISING → READY
+                    if (lifecycleManager.currentState is SttLifecycleState.RECORDING) {
+                        transitionTo(SttLifecycleState.FINALISING)
+                    }
+                    transitionTo(SttLifecycleState.READY)
+                    stopRequested = false
+                }
+            }
             // ── Clear stopRequested before starting processor — allows buffered frames to be processed ──
             val hadQueuedStop = stopRequested
             stopRequested = false
@@ -182,6 +202,7 @@ class SpeechToText internal constructor(
                 SttLogger.pcm("[START] stop was queued — triggering stop now")
                 stopAndTranscribe()
             }
+            stopRequested = false
         }
     }
 
@@ -245,6 +266,7 @@ class SpeechToText internal constructor(
                     }
                 } else SttLogger.pcmW("no pcm available from accumulator")
                 transitionTo(SttLifecycleState.READY)
+                stopRequested = false
             } catch (t: Throwable) { dispatchError(t) }
         }
     }

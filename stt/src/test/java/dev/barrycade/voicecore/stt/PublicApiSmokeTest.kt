@@ -8,13 +8,18 @@ import org.junit.Test
 class PublicApiSmokeTest {
     @Test
     fun sttConfigDefaults_areStable() {
-        val config = SttConfig()
-        assertEquals(16000, config.sampleRate)
-        assertEquals(32000, config.bufferSize)
-        assertEquals(null, config.modelPath)
+        val config = SttConfig(modelPath = "/dummy/path")
+        assertEquals(0.03f, config.energyThreshold, 0.001f)
+        assertEquals(600, config.silencePaddingMs)
+        assertEquals(100, config.preRollMs)
+        assertEquals(7000, config.maxUtteranceLengthMs)
+        assertEquals(500, config.stableChunkSizeMs)
+        assertEquals(0.05f, config.motionModeEnergyThreshold, 0.001f)
+        assertEquals(300, config.motionModeSilencePaddingMs)
+        assertEquals("/dummy/path", config.modelPath)
     }
 
-        @Test
+    @Test
     fun speechToTextPublicMethods_exist() {
         val methods = SpeechToText::class.java.methods.map { it.name }.toSet()
         assertTrue(methods.contains("start"))
@@ -46,3 +51,4 @@ class PublicApiSmokeTest {
         assertNotNull(bridgeClass)
     }
 }
+

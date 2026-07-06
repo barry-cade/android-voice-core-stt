@@ -116,7 +116,7 @@ Whisper tiny_en is loaded via JNI:
 ### STT Flow
 
 ``` text
-SpeechToText.create(...)
+SpeechToText.create(config)
   → setOnResultListener(...)
   → start()
       → model warms up (async)
@@ -168,7 +168,7 @@ To use the STT module in your own Android app:
 4. Instantiate and use:
 
 ```kotlin
-val stt = SpeechToText.create(
+val config = SttConfig(
     energyThreshold = 0.03f,
     silencePaddingMs = 300,
     preRollMs = 100,
@@ -178,6 +178,7 @@ val stt = SpeechToText.create(
     motionModeSilencePaddingMs = 150,
     modelPath = "/path/to/ggml-tiny.en.bin"
 )
+val stt = SpeechToText.create(config)
 
 stt.setOnResultListener { text ->
     // handle transcription
