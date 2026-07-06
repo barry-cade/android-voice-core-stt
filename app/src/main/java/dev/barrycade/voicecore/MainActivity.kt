@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
+import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
@@ -42,16 +43,7 @@ class MainActivity : ComponentActivity() {
         runOnUiThread(action)
     }
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        RequestPermission()
-    ) { granted ->
-        if (granted) {
-            updateUi()
-            startRecording()
-        } else {
-            txtOutput.text = "Microphone permission is required"
-        }
-    }
+    private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +71,19 @@ class MainActivity : ComponentActivity() {
 
         btnClear.setOnClickListener {
             txtOutput.text = ""
+        }
+
+        // Permission launcher — initialised after view bindings so the
+        // callback can safely reference lateinit views.
+        requestPermissionLauncher = registerForActivityResult(
+            RequestPermission()
+        ) { granted ->
+            if (granted) {
+                updateUi()
+                startRecording()
+            } else {
+                txtOutput.text = "Microphone permission is required"
+            }
         }
 
         updateUi()
