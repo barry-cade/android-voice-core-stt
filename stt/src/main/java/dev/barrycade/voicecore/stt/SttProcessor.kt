@@ -62,21 +62,19 @@ internal class SttProcessor(
 
         workerThread = Thread({
             while (isRunning.get()) {
-                try {
-                    val frame = audioCapture.frameQueue.poll()
-                    if (frame == null) {
-                        Thread.sleep(10L)
-                        continue
-                    }
+                                try {
+                                    val frame = audioCapture.frameQueue.poll()
+                                    if (frame == null) {
+                                        Thread.sleep(10L)
+                                        continue
+                                    }
 
-                                                            // Drop frames if stop was requested while frame was in transit
-                    if (!isRunning.get()) break
+                                    if (!isRunning.get()) break
 
-                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
-                    if (stopRequestedRef()) {
-                        SttLogger.pcm("[PCM] dropped frame due to stopRequested=true")
-                        continue
-                    }
+                                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
+                                    if (stopRequestedRef()) {
+                                        continue
+                                    }
 
                     SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
@@ -155,7 +153,7 @@ internal class SttProcessor(
         return utterance
     }
 
-    /**
+        /**
      * finaliseUtterance finalises the current utterance and returns the PCM buffer.
      * Called only from the deterministic Stop path, after stopRequested has been set.
      * Delegates to UtteranceAccumulator.finaliseUtterance().

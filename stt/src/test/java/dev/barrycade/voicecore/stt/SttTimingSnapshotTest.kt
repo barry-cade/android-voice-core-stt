@@ -26,7 +26,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 120L,
             utteranceDurationMs = 800L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 340L,
             totalPipelineMs = 1520L
         )
@@ -34,7 +34,7 @@ class SttTimingSnapshotTest {
         assertEquals(120L, snapshot.vadActiveMs)
         assertEquals(800L, snapshot.utteranceDurationMs)
         assertEquals(500L, snapshot.silencePaddingMs)
-        assertEquals(200L, snapshot.preRollMs)
+        assertEquals(100L, snapshot.preRollMs)
         assertEquals(340L, snapshot.inferenceMs)
         assertEquals(1520L, snapshot.totalPipelineMs)
     }
@@ -45,7 +45,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 80L,
             utteranceDurationMs = 600L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 250L,
             totalPipelineMs = 1100L
         )
@@ -59,7 +59,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 100L,
             utteranceDurationMs = 500L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 300L,
             totalPipelineMs = 1100L,
             vadConfidence = 0.85f,
@@ -80,7 +80,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 100L,
             utteranceDurationMs = 500L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 300L,
             totalPipelineMs = 1100L
         )
@@ -104,7 +104,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = measuredVadMs,
             utteranceDurationMs = measuredUtteranceMs,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = measuredInferenceMs,
             totalPipelineMs = measuredTotalMs
         )
@@ -148,7 +148,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = vadMs,
             utteranceDurationMs = utteranceMs,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = inferenceMs,
             totalPipelineMs = totalMs
         )
@@ -162,7 +162,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 0L,
             utteranceDurationMs = 0L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 0L,
             totalPipelineMs = 0L
         )
@@ -183,7 +183,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 120L,
             utteranceDurationMs = 750L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 330L,
             totalPipelineMs = 1400L
         )
@@ -199,7 +199,7 @@ class SttTimingSnapshotTest {
             vadActiveMs = 80L,
             utteranceDurationMs = 400L,
             silencePaddingMs = 500L,
-            preRollMs = 200L,
+            preRollMs = 100L,
             inferenceMs = 280L,
             totalPipelineMs = 960L,
             vadConfidence = 0.92f,

@@ -1,0 +1,302 @@
+2026-07-05 17:38:29.401  2102-2102  STT_FLOW                dev.barrycade.voicecore             dev.barrycade.voicecore              I  startManualMode() called
+2026-07-05 17:38:29.404  2102-2102  STT_INIT                dev.barrycade.voicecore             dev.barrycade.voicecore              I  Constructing STT with modelPath=/data/user/0/dev.barrycade.voicecore/files/model.bin
+2026-07-05 17:38:29.404  2102-2102  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [CONFIG] Validated STT config: RuntimeSttConfig(energyThreshold=0.03, silencePaddingMs=600, preRollMs=200, maxUtteranceLengthMs=7000, stableChunkSizeMs=500, motionMode=MotionModeConfig(energyThreshold=0.05, silencePaddingMs=300), debugLoggingEnabled=false)
+2026-07-05 17:38:29.404  2102-2102  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [CONFIG] Active config: RuntimeSttConfig(energyThreshold=0.03, silencePaddingMs=600, preRollMs=200, maxUtteranceLengthMs=7000, stableChunkSizeMs=500, motionMode=MotionModeConfig(energyThreshold=0.05, silencePaddingMs=300), debugLoggingEnabled=false)
+2026-07-05 17:38:29.406  2102-2422  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [WHISPER] loadModel: /data/user/0/dev.barrycade.voicecore/files/model.bin
+2026-07-05 17:38:29.406  2102-2422  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [WHISPER] Loading model: /data/user/0/dev.barrycade.voicecore/files/model.bin
+2026-07-05 17:38:29.406  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  loadModel called start t=1783269509406
+2026-07-05 17:38:29.439  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Loading model from /data/user/0/dev.barrycade.voicecore/files/model.bin
+2026-07-05 17:38:29.681  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Whisper context loaded
+2026-07-05 17:38:29.681  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  loadModel finished end t=1783269509681 dur=275
+2026-07-05 17:38:29.681  2102-2102  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [LIFECYCLE] state: UNINITIALISED → READY
+2026-07-05 17:38:29.682  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe called start t=1783269509682
+2026-07-05 17:38:29.682  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe called
+2026-07-05 17:38:29.682  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  PCM length: 3200
+2026-07-05 17:38:29.682  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Starting whisper_full
+2026-07-05 17:38:29.717  2102-2102  AudioCapture            dev.barrycade.voicecore             dev.barrycade.voicecore              D  Capture started [Rate: 16000, Frame: 320samples, Buffer: 32000 bytes]
+2026-07-05 17:38:29.717  2102-2102  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [LIFECYCLE] state: READY → RECORDING
+2026-07-05 17:38:29.718  2102-2102  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [LIFECYCLE] VAD-driven transcription pipeline started
+2026-07-05 17:38:29.720  2102-2102  ycade.voicecor          dev.barrycade.voicecore             dev.barrycade.voicecore              I  Starting a blocking GC NativeAlloc
+2026-07-05 17:38:29.790  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.790  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.791  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.810  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.812  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.812  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.830  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.833  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.834  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.5169602915070033E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.850  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.856  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.857  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.501367253794598E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.870  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.879  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.879  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.2947935507970605E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.890  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.900  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.901  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.795818621773092E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.911  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.912  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.913  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.48262024861682E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.930  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.934  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.935  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.7216496714408994E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.950  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.956  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.957  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.499678313451128E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.970  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.978  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:29.978  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.3292241433683507E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:29.978  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [PREROLL] preRollMs=200 complete
+2026-07-05 17:38:29.990  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:29.999  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.000  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=1.8986891425215358E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.010  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.011  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.011  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.692674825026074E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.030  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.033  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.033  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.449098497843879E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.050  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.055  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.055  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=1.824900964877008E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.070  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.077  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.077  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.30308614378741E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.090  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.099  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.099  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.612799280106218E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.110  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.120  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.121  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=6.902852402673139E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.130  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.132  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.133  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=7.888994146952275E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.150  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.154  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.154  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.758046517763879E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.170  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.176  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.176  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.4981238243369985E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.190  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.198  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.198  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.62174320710347E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.210  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.220  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.220  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.2896437075533453E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.230  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.231  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.232  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.949667615983436E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.250  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.253  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.254  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.675469543366587E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.270  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.275  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.276  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.3682450148204274E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.290  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.297  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.298  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.2342781402962506E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.310  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.319  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.320  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.677173075810075E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.330  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.331  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.331  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.165054146945292E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.350  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.352  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.353  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=4.368153246295178E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.370  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.374  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.375  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=8.849463328579133E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.390  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.396  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.397  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=6.200967636491829E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.410  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.418  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.419  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=7.421906069097314E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.430  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.440  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.441  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=8.471291785484503E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.450  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.452  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.453  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0018509372231651383 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.470  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.474  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.474  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.013886631530836843 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.490  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.496  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.496  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.016627221690342794 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.510  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.519  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.520  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.021568938194061547 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.530  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.531  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.532  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02244830255777924 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.550  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.553  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.554  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02070445233896616 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.570  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.575  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.575  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02189067978597173 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.590  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.597  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.597  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.019987643762504042 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.610  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.619  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.619  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02422663178940722 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.630  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.641  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.641  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.022600760391982822 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.650  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.652  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.652  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02692068395932779 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.670  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.674  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.674  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.024343978529803877 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.690  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.696  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.696  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.022770306343142206 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.710  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.718  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.719  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.02581839424040481 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.730  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.730  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.730  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.023455928243159996 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.750  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.752  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.752  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.012140099742842417 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.770  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.773  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.774  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0056582039021269665 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.790  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.795  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.795  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.003192091940580813 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.810  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.817  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.817  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0010472285445996673 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.830  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.839  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.839  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=5.621306273487168E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.850  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.850  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.850  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=4.525083042443761E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.870  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.872  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.873  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.977627036728977E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.890  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.894  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.895  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=0.0012055270009493461 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.910  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.916  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.916  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=7.90215426600922E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.930  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.938  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.938  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=7.64555667167878E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.950  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.959  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.960  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=8.566206389355463E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.970  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.971  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.971  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=8.114010957010044E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:30.990  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:30.993  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:30.993  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=8.71424028479649E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.010  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.014  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.015  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=6.679846605099312E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.030  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.036  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.037  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=5.31153046183922E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.050  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.058  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.059  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=4.1178082141481154E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.070  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.080  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.080  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.9771681919128144E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.090  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.091  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.092  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.642980445492843E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.110  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.113  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.114  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.5671173511799617E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.130  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.135  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.136  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.355442797183431E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.150  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.157  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.158  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.7955383212985935E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.170  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.179  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.179  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.807350390132896E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.190  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.190  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.191  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.423144364275581E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.210  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.212  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.212  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.622972233667831E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.230  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.234  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.234  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.639950293378661E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.250  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.256  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.256  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.182889970388607E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.270  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.277  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.278  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.380966728609245E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.290  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.299  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.300  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=1.9689760860833067E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.312  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.323  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.323  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.9738424017261214E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.330  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.334  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.334  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.73501236219448E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.350  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.355  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.356  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.915827735659255E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.370  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.377  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.377  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.9934986597229146E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.390  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.398  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.399  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.4665302422807543E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.409  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.410  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.410  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.1622288552473459E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.430  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.431  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.432  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=2.3526608866849462E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.450  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.453  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.453  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.460059142325546E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.470  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.471  2102-2102  STT_FLOW                dev.barrycade.voicecore             dev.barrycade.voicecore              I  stopAndTranscribe() called
+2026-07-05 17:38:31.474  2102-2430  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              D  [PCM] dequeue frame for VAD, size=320
+2026-07-05 17:38:31.474  2102-2430  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  frame rms=3.80009826459189E-4 speech=false silenceFrames=0 samples=320
+2026-07-05 17:38:31.485  2102-2434  MainActivity            dev.barrycade.voicecore             dev.barrycade.voicecore              D  STOP pressed → using deterministic stopAndTranscribe()
+2026-07-05 17:38:31.486  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [LIFECYCLE] state: RECORDING → FINALISING
+2026-07-05 17:38:31.486  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [STOP] stopRequested=true
+2026-07-05 17:38:31.490  2102-2429  STT_PCM                 dev.barrycade.voicecore             dev.barrycade.voicecore              D  enqueue frame, size=320
+2026-07-05 17:38:31.496  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [STOP] drained 1 frames into accumulator
+2026-07-05 17:38:31.499  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [STABILISE] preRollMs=200 trailingSilenceMs=250 utteranceLengthMs=1770
+2026-07-05 17:38:31.500  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [PCM] final pcm size=32000
+2026-07-05 17:38:31.500  2102-2434  VadCalibration          dev.barrycade.voicecore             dev.barrycade.voicecore              D  utterance finalized samples=32000 durationMs=2000
+2026-07-05 17:38:31.500  2102-2429  AudioCapture            dev.barrycade.voicecore             dev.barrycade.voicecore              D  Worker thread exiting
+2026-07-05 17:38:31.590  2102-2434  AudioCapture            dev.barrycade.voicecore             dev.barrycade.voicecore              D  Capture stopped
+2026-07-05 17:38:33.627  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  whisper_full returned 0
+2026-07-05 17:38:33.627  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Number of segments: 1
+2026-07-05 17:38:33.627  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe finished end t=1783269513627 dur=3945
+2026-07-05 17:38:33.627  2102-2422  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Result text:  [BLANK_AUDIO]
+2026-07-05 17:38:33.627  2102-2422  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [WHISPER] warmUpMs=3945
+2026-07-05 17:38:33.628  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [WHISPER] [WHISPER] stop inference started
+2026-07-05 17:38:33.629  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe called start t=1783269513629
+2026-07-05 17:38:33.629  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe called
+2026-07-05 17:38:33.629  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  PCM length: 32000
+2026-07-05 17:38:33.637  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Starting whisper_full
+2026-07-05 17:38:38.181  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  whisper_full returned 0
+2026-07-05 17:38:38.181  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Number of segments: 1
+2026-07-05 17:38:38.181  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  transcribe finished end t=1783269518181 dur=4552
+2026-07-05 17:38:38.181  2102-2434  WhisperBridge           dev.barrycade.voicecore             dev.barrycade.voicecore              D  Result text:  Hi, Max.
+2026-07-05 17:38:38.182  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [PCM] [DIAG] timing: SttTiming(vadActiveMs=0, utteranceMs=0, inferenceMs=4554, totalMs=8464)
+2026-07-05 17:38:38.182  2102-2434  STT                     dev.barrycade.voicecore             dev.barrycade.voicecore              I  [LIFECYCLE] state: FINALISING → READY

@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
         if (granted) {
             isStreamingMode = false
             updateUi()
-            startRecording(streamingEnabled = false)
+            startRecording()
         } else {
             txtOutput.text = "Microphone permission is required"
         }
@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
             logInfo("STT_FLOW", "startManualMode() called")
             isStreamingMode = false
             updateUi()
-            if (hasRecordAudioPermission()) startRecording(streamingEnabled = false)
+            if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
             logInfo("STT_FLOW", "startStreamingMode() called")
             isStreamingMode = true
             updateUi()
-            if (hasRecordAudioPermission()) startRecording(streamingEnabled = true)
+            if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startRecording(streamingEnabled: Boolean) {
+    private fun startRecording() {
         val modelPath = getModelPath()
         val runtimeConfig = try {
             AppSttConfigLoader.loadFromAssets(this)
@@ -209,7 +209,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            speechToText.start(streamingEnabled)
+            // ── Start immediately — queued-start handles waiting for READY ─
+            speechToText.start()
             stt = speechToText
 
             // ── Show active config ────────────────────────────────────────
@@ -226,9 +227,8 @@ class MainActivity : ComponentActivity() {
             }
 
             isRecording = true
-            isStreamingMode = streamingEnabled
-            val label = if (streamingEnabled) "Streaming..." else "Recording..."
-            txtOutput.text = label
+            isStreamingMode = false
+            txtOutput.text = "Recording..."
             updateUi()
         } catch (e: IllegalArgumentException) {
             handleConfigError(e)

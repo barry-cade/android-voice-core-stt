@@ -1,0 +1,17 @@
+    private val internalReadyListener = SttReadyListener {
+        SttLogger.pcm("[READY_CALLBACK] internalReadyListener fired — startRequested=$startRequested")
+        // Transition UNINITIALISED → READY now that warm-up is complete
+        synchronized(stateLock) {
+            transitionTo(SttLifecycleState.READY)
+        }
+        // Notify external listener
+        externalReadyListener?.onSttReady()
+        // Auto-start if start() was called before READY
+        if (startRequested) {
+            startRequested = false
+            SttLogger.pcm("[READY_CALLBACK] calling start() from callback")
+            this.start()
+        } else {
+            SttLogger.pcm("[READY_CALLBACK] no queued start request — waiting for UI")
+        }
+    }

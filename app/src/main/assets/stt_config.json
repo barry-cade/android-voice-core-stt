@@ -1,7 +1,7 @@
 {
   "energyThreshold": 0.03,
   "silencePaddingMs": 600,
-  "preRollMs": 200,
+  "preRollMs": 100,
   "maxUtteranceLengthMs": 7000,
   "stableChunkSizeMs": 500,
   "motionMode": {

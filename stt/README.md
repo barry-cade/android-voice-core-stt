@@ -70,7 +70,7 @@ implementation(project(":stt-core"))
 val config = RuntimeSttConfig(
     energyThreshold = 0.03f,
     silencePaddingMs = 300,
-    preRollMs = 200,
+    preRollMs = 100,
     maxUtteranceLengthMs = 4000
 )
 
