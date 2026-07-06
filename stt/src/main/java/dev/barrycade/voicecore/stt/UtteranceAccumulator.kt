@@ -100,9 +100,6 @@ internal class UtteranceAccumulator(
      * Returns a fixed-length array of silence samples (all zeros).
      * Mel-light: zero amplitude, no energy, minimal mel spectrum contribution.
      */
-    private fun createSilenceSamples(count: Int): FloatArray {
-        return FloatArray(count)
-    }
 
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
         if (frame.isEmpty()) return null
@@ -137,7 +134,7 @@ internal class UtteranceAccumulator(
         if (speechActive) {
             silenceFrameCount = if (isSpeechFrame) 0 else silenceFrameCount + 1
 
-            // ── Rule 4: Prevent early VAD finalisation ───────────────────
+            // ── Minimum length guard: prevent early VAD finalisation ─────
             // VAD must not finalise silence until minimum utterance length
             // (700ms) is satisfied. Override early finalisation and continue
             // accumulating PCM until the minimum is met.

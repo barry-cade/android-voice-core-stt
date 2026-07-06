@@ -64,7 +64,7 @@ class SpeechToText internal constructor(
     private var timingPcmStartMs: Long = 0L
     private var timingPcmTotalMs: Long = 0L
     private var timingUtteranceStartMs: Long = 0L
-    private fun rt() { timingPcmStartMs = 0L; timingPcmTotalMs = 0L; timingUtteranceStartMs = 0L }
+    private fun resetTiming() { timingPcmStartMs = 0L; timingPcmTotalMs = 0L; timingUtteranceStartMs = 0L }
 
     init { config.validate(); modelManager.initAsync() }
 
@@ -116,7 +116,8 @@ class SpeechToText internal constructor(
             if (modelManager.initFailed) { dispatchError(RuntimeException("Model initialisation failed")); return }
 
             SttLogger.pcm("[START] beginning capture setup — stopRequested=$stopRequested, startRequested=$startRequested")
-            rt(); dumpConfig();
+            resetTiming()
+            dumpConfig()
             if (forceAudioInitFailure) { dispatchError(RuntimeException("Forced test: AudioCapture init")); return }
 
             // ── Use existing capture controller if started early, or create new ──

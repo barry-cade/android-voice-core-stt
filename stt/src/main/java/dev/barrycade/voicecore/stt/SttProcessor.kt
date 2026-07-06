@@ -15,6 +15,7 @@ internal class SttProcessor(
     private val vad: Vad,
     private val utteranceAccumulator: UtteranceAccumulator,
     private val listener: UtteranceListener,
+    private val sttErrorListener: SttErrorListener? = null,
     private val calibrationLogger: VadCalibrationLogger? = null,
     private val debugLogging: Boolean = false,
     private val sampleRate: Int = 16000,
@@ -33,7 +34,7 @@ internal class SttProcessor(
     internal var lastUtteranceDurationMs: Int = 0
         private set
 
-        /** RMS sampler for diagnostic logging. */
+            /** RMS sampler for diagnostic logging. */
     internal val rmsSampler: RmsSampler = RmsSampler(
         sampleRate = sampleRate,
         debugLogging = debugLogging,
@@ -49,7 +50,7 @@ internal class SttProcessor(
 
     /**
      * Reset per-utterance VAD active time to 0.
-     * Called when UtteranceAccumulator detects a SILENCE → SPEECH transition,
+     * Called when UtteranceAccumulator detects a PRE_ROLL → SPEECH transition,
      * and by SpeechToText.stopAndTranscribe() for manual invocation.
      * Guarantees per-utterance timing, not cumulative.
      */
@@ -57,24 +58,24 @@ internal class SttProcessor(
         vadActiveMs = 0L
     }
 
-    fun start() {
+        fun start() {
         if (isRunning.getAndSet(true)) return
 
         workerThread = Thread({
             while (isRunning.get()) {
-                                try {
-                                    val frame = audioCapture.frameQueue.poll()
-                                    if (frame == null) {
-                                        Thread.sleep(10L)
-                                        continue
-                                    }
+                try {
+                    val frame = audioCapture.frameQueue.poll()
+                    if (frame == null) {
+                        Thread.sleep(10L)
+                        continue
+                    }
 
-                                    if (!isRunning.get()) break
+                    if (!isRunning.get()) break
 
-                                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
-                                    if (stopRequestedRef()) {
-                                        continue
-                                    }
+                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
+                    if (stopRequestedRef()) {
+                        continue
+                    }
 
                     SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
@@ -120,7 +121,7 @@ internal class SttProcessor(
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
-                                } catch (t: Throwable) {
+                } catch (t: Throwable) {
                     SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
                     val error = SttError(
                         category = SttErrorCategory.UNKNOWN,
@@ -137,14 +138,14 @@ internal class SttProcessor(
         }, "SttProcessorThread").apply { start() }
     }
 
-            fun stop() {
+                fun stop() {
         if (!isRunning.getAndSet(false)) return
         workerThread?.join(500)
         workerThread = null
         rmsSampler.reset()
     }
 
-            fun forceFinalize(): FloatArray? {
+    fun forceFinalize(): FloatArray? {
         val utterance = utteranceAccumulator.forceFinalize()
         if (utterance != null) {
             lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
@@ -168,16 +169,12 @@ internal class SttProcessor(
         return pcm
     }
 
-    private fun computeRms(frame: FloatArray): Double {
+        private fun computeRms(frame: FloatArray): Double {
         if (frame.isEmpty()) return 0.0
         var sumSquares = 0.0
         for (sample in frame) {
             sumSquares += sample * sample
         }
         return kotlin.math.sqrt(sumSquares / frame.size)
-    }
-
-    companion object {
-        var sttErrorListener: SttErrorListener? = null
     }
 }
