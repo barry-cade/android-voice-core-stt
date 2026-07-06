@@ -45,13 +45,10 @@ class SpeechToText internal constructor(
 
     private val internalReadyListener = SttReadyListener {
         SttLogger.pcm("[READY_CALLBACK] internalReadyListener fired — startRequested=$startRequested")
-        // Transition UNINITIALISED → READY now that warm-up is complete
         synchronized(stateLock) {
             transitionTo(SttLifecycleState.READY)
         }
-        // Notify external listener
         externalReadyListener?.onSttReady()
-        // Auto-start if start() was called before READY
         if (startRequested) {
             startRequested = false
             SttLogger.pcm("[READY_CALLBACK] calling start() from callback")
@@ -70,220 +67,359 @@ class SpeechToText internal constructor(
     private var timingPcmStartMs: Long = 0L
     private var timingPcmTotalMs: Long = 0L
     private var timingUtteranceStartMs: Long = 0L
-    private fun resetTiming() { timingPcmStartMs = 0L; timingPcmTotalMs = 0L; timingUtteranceStartMs = 0L }
 
-    init { config.validate(); modelManager.initAsync() }
+    private fun resetTiming() {
+        timingPcmStartMs = 0L
+        timingPcmTotalMs = 0L
+        timingUtteranceStartMs = 0L
+    }
 
-    fun setOnResultListener(l: (String) -> Unit) { onResult = l }
-    fun setOnResultWithTimingListener(l: (text: String, timing: SttTimingSnapshot?) -> Unit) { onResultWithTiming = l }
-    fun setOnErrorListener(l: (Throwable) -> Unit) { onError = l }
-    fun setSttErrorListener(l: SttErrorListener) { sttErrorListener = l }
+    init {
+        config.validate()
+        modelManager.initAsync()
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Public API setters
+    // ────────────────────────────────────────────────────────────────────────
+
+    fun setOnResultListener(l: (String) -> Unit) {
+        onResult = l
+    }
+
+    fun setOnResultWithTimingListener(l: (text: String, timing: SttTimingSnapshot?) -> Unit) {
+        onResultWithTiming = l
+    }
+
+    fun setOnErrorListener(l: (Throwable) -> Unit) {
+        onError = l
+    }
+
+    fun setSttErrorListener(l: SttErrorListener) {
+        sttErrorListener = l
+    }
 
     fun setReadyListener(listener: SttReadyListener) {
         externalReadyListener = listener
     }
 
-    fun setDebugOptions(forceAudioInitFailure: Boolean = false,
-        forceWhisperLoadFailure: Boolean = false, forceTimeout: Boolean = false) {
+    fun setDebugOptions(
+        forceAudioInitFailure: Boolean = false,
+        forceWhisperLoadFailure: Boolean = false,
+        forceTimeout: Boolean = false
+    ) {
         this.forceAudioInitFailure = forceAudioInitFailure
         this.forceTimeout = forceTimeout
         modelManager.forceWhisperLoadFailure = forceWhisperLoadFailure
     }
 
+    fun dumpConfig() {
+        SttLogger.config("Active config: $config")
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // start()
+    // ────────────────────────────────────────────────────────────────────────
+
     fun start() {
         synchronized(stateLock) {
-            SttLogger.pcm("[START] entered — isRunning=${isRunning.get()}, state=${lifecycleManager.currentState.javaClass.simpleName}, isReady=${modelManager.isReady}")
+            SttLogger.pcm("[START] entered — isRunning=${isRunning.get()}, " +
+                "state=${lifecycleManager.currentState.javaClass.simpleName}, " +
+                "isReady=${modelManager.isReady}")
             if (isRunning.get()) return
 
-            // ── READY gate: queue if model not yet ready ────────────────
-            val currentState = lifecycleManager.currentState
-            if (currentState is SttLifecycleState.UNINITIALISED || !modelManager.isReady) {
-                SttLogger.lifecycleW("start() called early — queued until READY")
-                // Start AudioCapture NOW so audio is buffered during warm-up
-                if (audioSource == null) {
-                    SttLogger.pcm("[START] starting AudioCapture early for warm-up buffering")
-                    val earlyCapture = CaptureController()
-                    if (earlyCapture.startCapture()) {
-                        audioSource = earlyCapture
-                        SttLogger.pcm("[START] AudioCapture buffering during warm-up")
-                    } else {
-                        SttLogger.pcmE("[START] Early AudioCapture failed — no buffering during warm-up")
-                    }
-                }
-                startRequested = true
+            if (!isReadyOrCanQueue()) return
+            if (modelManager.initFailed) {
+                dispatchError(RuntimeException("Model initialisation failed"))
+                return
+            }
+            if (forceAudioInitFailure) {
+                dispatchError(RuntimeException("Forced test: AudioCapture init"))
                 return
             }
 
-            if (currentState !is SttLifecycleState.READY) {
-                SttLogger.lifecycleW("start() called while in ${currentState.javaClass.simpleName} — ignoring")
-                return
-            }
-
-            if (modelManager.initFailed) { dispatchError(RuntimeException("Model initialisation failed")); return }
-
-            SttLogger.pcm("[START] beginning capture setup — stopRequested=$stopRequested, startRequested=$startRequested")
             resetTiming()
             dumpConfig()
-            if (forceAudioInitFailure) { dispatchError(RuntimeException("Forced test: AudioCapture init")); return }
 
-            // ── Use existing capture controller if started early, or create new ──
-            val capture: AudioSource
-            val existingCapture = audioSource
-            if (existingCapture != null) {
-                capture = existingCapture
-            } else {
-                val newCapture = CaptureController()
-                if (!newCapture.startCapture()) {
-                    dispatchError(RuntimeException("Audio capture failed"))
-                    return
-                }
-                audioSource = newCapture
-                capture = newCapture
+            val capture = ensureCaptureStarted()
+            if (capture == null) return
+
+            if (!transitionTo(SttLifecycleState.RECORDING)) {
+                capture.stopCapture()
+                return
             }
-            if (!transitionTo(SttLifecycleState.RECORDING)) { capture.stopCapture(); return }
+
             timingPcmStartMs = System.currentTimeMillis()
-
-            val processor = ProcessorController(capture,
-                vad = Vad(config).apply { debugLogging = config.debugLoggingEnabled },
-                utteranceAccumulator = UtteranceAccumulator(config).apply {
-                    sttErrorListener = this@SpeechToText.sttErrorListener
-                    if (this@SpeechToText.forceTimeout) this.forceTimeout = true
-                    onSpeechStart = { processorController?.resetVadActiveMs() }
-                },
-                listener = object : UtteranceListener {
-                    override fun onUtteranceReady(pcm: FloatArray) {
-                        if (!isRunning.get()) return
-                        if (!isInferencing.compareAndSet(false, true)) return
-                        try {
-                            val infStartMs = System.currentTimeMillis()
-                            val samples = pcm.toShortArray()
-                            val text = try { modelManager.transcribe(samples).trim() }
-                            catch (t: Throwable) { SttLogger.whisperE("inference failed: ${t.message}"); "" }
-                            if (text.isNotBlank()) {
-                                val whisperMs = System.currentTimeMillis() - infStartMs
-                                val vadMs = processorController?.vadActiveMs ?: 0L
-                                val utterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
-                                val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
-                                val ts = SttTiming(vadMs.toInt(), utterMs.toInt(), whisperMs.toInt(), totalMs.toInt())
-                                lastTranscribedText = text
-                                onTimingCallback?.invoke(ts)
-                                onTimingListener?.invoke(timingPcmTotalMs, vadMs, whisperMs, totalMs)
-                                dispatchResult(text, null)
-                            }
-                        } finally { isInferencing.set(false) }
-                    }
-                }, sampleRate = 16000, debugLogging = config.debugLoggingEnabled,
-                stopRequestedRef = { this@SpeechToText.stopRequested })
-            // ── Wire timeout stop callback ──────────────────────────────
-            processor.onTimeoutStop = {
-                synchronized(stateLock) {
-                    SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
-                    audioSource?.stopCapture()
-                    audioSource = null
-                    isRunning.set(false)
-                    // Walk through valid transitions: RECORDING → FINALISING → READY
-                    if (lifecycleManager.currentState is SttLifecycleState.RECORDING) {
-                        transitionTo(SttLifecycleState.FINALISING)
-                    }
-                    transitionTo(SttLifecycleState.READY)
-                    stopRequested = false
-                }
-            }
-            // ── Clear stopRequested before starting processor — allows buffered frames to be processed ──
             val hadQueuedStop = stopRequested
             stopRequested = false
 
-            processor.start(); processorController = processor
-            timingUtteranceStartMs = System.currentTimeMillis(); isRunning.set(true)
+            val processor = createProcessor(capture)
+            processor.onTimeoutStop = createTimeoutStopCallback()
+
+            processorController = processor
+            processor.start()
+            timingUtteranceStartMs = System.currentTimeMillis()
+            isRunning.set(true)
             SttLogger.pcm("[START] capture running — isRunning=true")
 
-            // ── Consume queued STOP — processor processes buffered frames, then we finalize ──
             if (hadQueuedStop) {
                 SttLogger.pcm("[START] stop was queued — triggering stop now")
                 stopAndTranscribe()
             }
-            stopRequested = false
         }
     }
+
+    /**
+     * Check if the pipeline is ready to start, or queue the request if the
+     * model is still warming up. Returns true if we should continue, false
+     * if the request was queued or rejected.
+     */
+    private fun isReadyOrCanQueue(): Boolean {
+        val currentState = lifecycleManager.currentState
+        if (currentState is SttLifecycleState.UNINITIALISED || !modelManager.isReady) {
+            SttLogger.lifecycleW("start() called early — queued until READY")
+            startEarlyCaptureForWarmup()
+            startRequested = true
+            return false
+        }
+        if (currentState !is SttLifecycleState.READY) {
+            SttLogger.lifecycleW("start() called while in ${currentState.javaClass.simpleName} — ignoring")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Start AudioCapture early so audio is buffered during model warm-up.
+     */
+    private fun startEarlyCaptureForWarmup() {
+        if (audioSource != null) return
+        SttLogger.pcm("[START] starting AudioCapture early for warm-up buffering")
+        val earlyCapture = CaptureController()
+        if (earlyCapture.startCapture()) {
+            audioSource = earlyCapture
+            SttLogger.pcm("[START] AudioCapture buffering during warm-up")
+        } else {
+            SttLogger.pcmE("[START] Early AudioCapture failed — no buffering during warm-up")
+        }
+    }
+
+    /**
+     * Ensure a capture controller is started and return it.
+     * Reuses an existing one if started during warm-up.
+     * Returns null on failure.
+     */
+    private fun ensureCaptureStarted(): AudioSource? {
+        val existingCapture = audioSource
+        if (existingCapture != null) {
+            return existingCapture
+        }
+        val newCapture = CaptureController()
+        if (!newCapture.startCapture()) {
+            dispatchError(RuntimeException("Audio capture failed"))
+            return null
+        }
+        audioSource = newCapture
+        return newCapture
+    }
+
+    /**
+     * Create a ProcessorController wired to [capture] with a named listener.
+     */
+    private fun createProcessor(capture: AudioSource): ProcessorController {
+        val vad = Vad(config)
+        vad.debugLogging = config.debugLoggingEnabled
+
+        val accumulator = UtteranceAccumulator(config)
+        accumulator.sttErrorListener = this@SpeechToText.sttErrorListener
+        if (this@SpeechToText.forceTimeout) {
+            accumulator.forceTimeout = true
+        }
+        accumulator.onSpeechStart = {
+            processorController?.resetVadActiveMs()
+        }
+
+        val utteranceHandler = UtteranceHandler()
+
+        return ProcessorController(
+            audioSource = capture,
+            vad = vad,
+            utteranceAccumulator = accumulator,
+            listener = utteranceHandler,
+            sampleRate = 16000,
+            debugLogging = config.debugLoggingEnabled,
+            stopRequestedRef = { this@SpeechToText.stopRequested }
+        )
+    }
+
+    /**
+     * Create the timeout cleanup callback wired to the processor.
+     */
+    private fun createTimeoutStopCallback(): () -> Unit {
+        return {
+            synchronized(stateLock) {
+                SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
+                audioSource?.stopCapture()
+                audioSource = null
+                isRunning.set(false)
+                if (lifecycleManager.currentState is SttLifecycleState.RECORDING) {
+                    transitionTo(SttLifecycleState.FINALISING)
+                }
+                transitionTo(SttLifecycleState.READY)
+                stopRequested = false
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // stopAndTranscribe()
+    // ────────────────────────────────────────────────────────────────────────
 
     fun stopAndTranscribe() {
         synchronized(stateLock) {
             SttLogger.pcm("[STOP] entered — isRunning=${isRunning.get()}")
-            // ── Queue STOP when not recording — executes once recording begins ──
+
             if (!isRunning.get()) {
                 SttLogger.pcm("[STOP] queued — recording not started yet")
                 stopRequested = true
                 return
             }
+
             isRunning.set(false)
+
             try {
                 if (!transitionTo(SttLifecycleState.FINALISING)) return
 
-                // ── Stop processor thread first — no more frame competition ──
                 processorController?.stop()
                 stopRequested = true
 
-                // ── Drain remaining frames from capture queue into accumulator ──
-                var drainedCount = 0
-                var drainFinalized: FloatArray? = null
-                val capture = audioSource
-                val proc = processorController
-                if (capture != null && proc != null) {
-                    val accumulator = proc.getAccumulator()
-                    val procVad = proc.getVad()
-                    while (true) {
-                        val frame = capture.pollFrame()
-                        if (frame == null) break
-                        val isSpeech = procVad.isSpeech(frame)
-                        val result = accumulator.processChunk(frame, isSpeech)
-                        if (result != null) {
-                            drainFinalized = result
-                        }
-                        drainedCount++
-                    }
-                }
-                SttLogger.pcm("[STOP] drained $drainedCount frames into accumulator")
+                val finalizedPcm = drainFramesAfterStop()
 
                 val procVadMs = processorController?.vadActiveMs ?: 0L
                 val procUtterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
-                val pcm = drainFinalized ?: processorController?.stopAndFinalize()
+                val pcm = finalizedPcm ?: processorController?.stopAndFinalize()
                 SttLogger.pcm("[STOP] stopAndFinalize returned pcm=${pcm != null}")
+
                 processorController = null
-                audioSource?.stopCapture(); audioSource = null
-                val capMs = if (timingPcmStartMs > 0) System.currentTimeMillis() - timingPcmStartMs else 0L
+                audioSource?.stopCapture()
+                audioSource = null
+
+                val capMs = if (timingPcmStartMs > 0) {
+                    System.currentTimeMillis() - timingPcmStartMs
+                } else {
+                    0L
+                }
 
                 if (pcm != null) {
-                    val infStartMs = System.currentTimeMillis()
-                    val text = modelManager.transcribe(pcm.toShortArray()).trim()
-                    val whisperMs = System.currentTimeMillis() - infStartMs
-                    if (text.isNotBlank()) {
-                        val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
-                        val ts = SttTiming(procVadMs.toInt(), procUtterMs.toInt(), whisperMs.toInt(), totalMs.toInt())
-                        lastTranscribedText = text
-                        onTimingCallback?.invoke(ts)
-                        onTimingListener?.invoke(capMs, procVadMs, whisperMs, totalMs)
-                        dispatchResult(text, null)
-                    }
-                } else SttLogger.pcmW("no pcm available from accumulator")
+                    runInferenceAndDispatch(pcm, procVadMs, procUtterMs, capMs)
+                } else {
+                    SttLogger.pcmW("no pcm available from accumulator")
+                }
+
                 transitionTo(SttLifecycleState.READY)
                 stopRequested = false
-            } catch (t: Throwable) { dispatchError(t) }
+            } catch (t: Throwable) {
+                dispatchError(t)
+            }
         }
     }
 
     fun stop() = stopAndTranscribe()
 
+    /**
+     * Drain remaining frames from the capture queue into the accumulator.
+     * Returns the finalized utterance PCM if one is produced during drain.
+     */
+    private fun drainFramesAfterStop(): FloatArray? {
+        var drainFinalized: FloatArray? = null
+        val capture = audioSource
+        val proc = processorController
+
+        if (capture == null || proc == null) {
+            return null
+        }
+
+        val accumulator = proc.getAccumulator()
+        val procVad = proc.getVad()
+        var drainedCount = 0
+
+        while (true) {
+            val frame = capture.pollFrame()
+            if (frame == null) break
+            val isSpeech = procVad.isSpeech(frame)
+            val result = accumulator.processChunk(frame, isSpeech)
+            if (result != null) {
+                drainFinalized = result
+            }
+            drainedCount++
+        }
+        SttLogger.pcm("[STOP] drained $drainedCount frames into accumulator")
+        return drainFinalized
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Shared inference + dispatch
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Single shared method for transcribing PCM and dispatching the result.
+     * Used by both VAD-triggered (UtteranceHandler) and STOP-triggered paths.
+     */
+    private fun runInferenceAndDispatch(
+        pcm: FloatArray,
+        vadActiveMs: Long,
+        utteranceMs: Long,
+        captureMs: Long
+    ) {
+        val infStartMs = System.currentTimeMillis()
+        val text: String
+
+        try {
+            text = modelManager.transcribe(pcm.toShortArray()).trim()
+        } catch (t: Throwable) {
+            SttLogger.whisperE("inference failed: ${t.message}")
+            return
+        }
+
+        if (text.isBlank()) {
+            return
+        }
+
+        val whisperMs = System.currentTimeMillis() - infStartMs
+        val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
+
+        val ts = SttTiming(
+            vadActiveMs = vadActiveMs.toInt(),
+            utteranceMs = utteranceMs.toInt(),
+            inferenceMs = whisperMs.toInt(),
+            totalMs = totalMs.toInt()
+        )
+
+        lastTranscribedText = text
+        onTimingCallback?.invoke(ts)
+        onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
+        dispatchResult(text, null)
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // destroy()
+    // ────────────────────────────────────────────────────────────────────────
+
     fun destroy() {
         synchronized(stateLock) {
-            processorController?.stop(); processorController = null
-            audioSource?.stopCapture(); audioSource = null
+            processorController?.stop()
+            processorController = null
+            audioSource?.stopCapture()
+            audioSource = null
             modelManager.unload()
             lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
         }
         modelManager.shutdown()
     }
 
-    fun dumpConfig() { SttLogger.config("Active config: $config") }
+    // ────────────────────────────────────────────────────────────────────────
+    // Lifecycle helpers
+    // ────────────────────────────────────────────────────────────────────────
 
     private fun transitionTo(newState: SttLifecycleState): Boolean {
         val from = lifecycleManager.currentState
@@ -294,24 +430,58 @@ class SpeechToText internal constructor(
             is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
             is SttLifecycleState.FINALISING -> newState is SttLifecycleState.READY
         }
-        if (valid) { lifecycleManager.currentState = newState; return true }
+        if (valid) {
+            lifecycleManager.currentState = newState
+            return true
+        }
         SttLogger.lifecycleE("illegal transition: ${from.javaClass.simpleName} → ${newState.javaClass.simpleName}")
         return false
     }
 
     private fun dispatchResult(text: String, timing: SttTimingSnapshot?) {
-        lastTranscribedText = text; onResultWithTiming?.invoke(text, timing); onResult?.invoke(text)
+        lastTranscribedText = text
+        onResultWithTiming?.invoke(text, timing)
+        onResult?.invoke(text)
     }
 
     private fun dispatchError(t: Throwable) {
         onError?.invoke(t)
-        sttErrorListener?.onSttError(SttError(SttErrorCategory.UNKNOWN, SttErrorCode.INTERNAL_EXCEPTION,
-            t.message ?: "Unknown error", cause = t))
+        sttErrorListener?.onSttError(
+            SttError(
+                SttErrorCategory.UNKNOWN,
+                SttErrorCode.INTERNAL_EXCEPTION,
+                t.message ?: "Unknown error",
+                cause = t
+            )
+        )
     }
 
     private fun FloatArray.toShortArray(): ShortArray {
         val shorts = ShortArray(size)
-        for (i in indices) shorts[i] = (kotlin.math.max(-1f, kotlin.math.min(1f, this[i])) * Short.MAX_VALUE).toInt().toShort()
+        for (i in indices) {
+            shorts[i] = (kotlin.math.max(-1f, kotlin.math.min(1f, this[i])) * Short.MAX_VALUE)
+                .toInt()
+                .toShort()
+        }
         return shorts
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Named inner listener — replaces the anonymous object in start()
+    // ────────────────────────────────────────────────────────────────────────
+
+    private inner class UtteranceHandler : UtteranceListener {
+        override fun onUtteranceReady(pcm: FloatArray) {
+            if (!isRunning.get()) return
+            if (!isInferencing.compareAndSet(false, true)) return
+
+            try {
+                val vadMs = processorController?.vadActiveMs ?: 0L
+                val utterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
+                runInferenceAndDispatch(pcm, vadMs, utterMs, timingPcmTotalMs)
+            } finally {
+                isInferencing.set(false)
+            }
+        }
     }
 }

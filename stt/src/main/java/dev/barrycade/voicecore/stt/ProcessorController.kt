@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Forbidden: model load, warm-up, AudioCapture start/stop, Whisper inference.
  *
  * @param stopRequestedRef Supplier that returns true when Stop has been requested.
- *        When true, PCM ingestion, VAD processing, and accumulator updates are frozen.
+ *        When true, the processing loop stops polling new frames and exits.
  */
 internal class ProcessorController(
     private val audioSource: AudioSource,
@@ -66,6 +66,12 @@ internal class ProcessorController(
         workerThread = Thread({
             while (isRunning.get()) {
                 try {
+                    // Single guard at loop top: stop requested means skip processing
+                    if (stopRequestedRef()) {
+                        Thread.sleep(10L)
+                        continue
+                    }
+
                     val frame = audioSource.pollFrame()
                     if (frame == null) {
                         Thread.sleep(10L)
@@ -73,11 +79,6 @@ internal class ProcessorController(
                     }
 
                     if (!isRunning.get()) break
-
-                    // ── Section 3: Freeze PCM ingestion when stopRequested ──
-                    if (stopRequestedRef()) {
-                        continue
-                    }
 
                     SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
@@ -88,26 +89,12 @@ internal class ProcessorController(
                         SttLogger.vadD("confidence=$confidence")
                     }
 
-                    // ── Section 4: Freeze VAD processing when stopRequested ──
-                    if (stopRequestedRef()) {
-                        SttLogger.vad("[VAD] skipped frame due to stopRequested=true")
-                        continue
-                    }
-
-                    // ── RMS sampling (every ~200ms) ─────────────────────
                     rmsSampler.feedFrame(frame)
 
-                    // ── Timing: accumulate VAD active duration ────────────
                     if (isSpeechFrame) {
                         SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
                         val frameDurationMs = (frame.size * 1000L) / 16000L
                         vadActiveMs += frameDurationMs
-                    }
-
-                    // ── Section 5: Freeze accumulator updates when stopRequested ──
-                    if (stopRequestedRef()) {
-                        SttLogger.pcm("[ACC] skipped update due to stopRequested=true")
-                        continue
                     }
 
                     val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
