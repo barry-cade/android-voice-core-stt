@@ -4,7 +4,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
-    modelPath: String
+    modelPath: String,
+    private val whisperModel: WhisperModel = WhisperBridge
 ) {
     companion object {
         fun create(energyThreshold: Float, silencePaddingMs: Int, preRollMs: Int,
@@ -55,7 +56,7 @@ class SpeechToText internal constructor(
         }
     }
 
-    private val modelManager = ModelManager(modelPath, null, internalReadyListener)
+    private val modelManager = ModelManager(modelPath, null, internalReadyListener, whisperModel)
 
     private var captureController: CaptureController? = null
     private var processorController: ProcessorController? = null

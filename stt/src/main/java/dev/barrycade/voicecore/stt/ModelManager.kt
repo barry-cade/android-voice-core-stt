@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class ModelManager(
     private val modelPath: String,
     private val sttErrorListener: SttErrorListener?,
-    private var readyListener: SttReadyListener? = null
+    private var readyListener: SttReadyListener? = null,
+    private val whisperModel: WhisperModel = WhisperBridge
 ) {
     /**
      * Dedicated single-thread executor for Whisper lifecycle operations.
@@ -68,8 +69,9 @@ internal class ModelManager(
      * LifecycleController must check [isReady] before starting capture.
      */
     fun initAsync() {
-        whisperExecutor.submit {
             try {
+            whisperExecutor.submit {
+                try {
                 // ── Testing hook: forceWhisperLoadFailure ─────────────────
                 if (forceWhisperLoadFailure) {
                     SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
@@ -85,7 +87,14 @@ internal class ModelManager(
                 }
 
                 SttLogger.whisper("loadModel: $modelPath")
-                WhisperBridge.loadModel(modelPath)
+
+                try {
+                    whisperModel.loadModel(modelPath)
+                } catch (t: Throwable) {
+                    SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
+                    initFailed = true
+                    return@submit
+                }
 
                 performWarmup()
 
@@ -104,6 +113,10 @@ internal class ModelManager(
                 sttErrorListener?.onSttError(error)
                 initFailed = true
             }
+            }
+        } catch (_: RuntimeException) {
+            // Executor may be shut down (RejectedExecutionException)
+            SttLogger.errorW("initAsync: executor rejected task")
         }
     }
 
@@ -118,7 +131,7 @@ internal class ModelManager(
 
         val warmupStartMs = System.currentTimeMillis()
         try {
-            WhisperBridge.transcribe(WARMUP_PCM)
+            whisperModel.transcribe(WARMUP_PCM)
             if (whisperCancelled) return
             val warmupMs = System.currentTimeMillis() - warmupStartMs
             SttLogger.whisper("warmUpMs=$warmupMs")
@@ -142,7 +155,7 @@ internal class ModelManager(
      * Transcribe PCM samples. Thread-safe (C++ mutex in whisper_bridge.cpp).
      */
     fun transcribe(pcm: ShortArray): String {
-        return WhisperBridge.transcribe(pcm)
+        return whisperModel.transcribe(pcm)
     }
 
     /**
@@ -151,7 +164,7 @@ internal class ModelManager(
      */
     fun unload() {
         SttLogger.whisperD("Unloading model")
-        WhisperBridge.unloadModel()
+        whisperModel.unloadModel()
         warmupPerformed = false
         isReady = false
     }

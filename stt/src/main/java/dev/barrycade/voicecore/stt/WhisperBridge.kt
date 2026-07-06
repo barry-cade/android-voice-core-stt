@@ -2,7 +2,7 @@ package dev.barrycade.voicecore.stt
 
 import android.util.Log
 
-object WhisperBridge {
+object WhisperBridge : WhisperModel {
     private const val FALLBACK_TRANSCRIPT = "When I went to the shop to buy some milk, I also bought a newspaper."
 
         init {
@@ -21,9 +21,9 @@ object WhisperBridge {
         safeLogD("WhisperBridge", "Kotlin bridge init end t=${System.currentTimeMillis()}")
     }
 
-            external fun loadModel(modelPath: String)
-    external fun transcribe(samples: ShortArray): String
-    external fun unloadModel()
+                override external fun loadModel(modelPath: String)
+    override external fun transcribe(samples: ShortArray): String
+    override external fun unloadModel()
 
         internal fun transcribeAudio(samples: FloatArray): String {
         if (samples.isEmpty()) return ""
