@@ -67,7 +67,7 @@ Add the module to your project:
 include(":stt")
 ```
 
-3. Add dependency in your app module:
+1. Add dependency in your app module:
 
 ```kotlin
 implementation(project(":stt"))
@@ -163,7 +163,7 @@ companion object {
 **Methods:**
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `start()` | Begins PCM capture and VAD. Safe to call before model is ready — auto-queues. |
 | `stopAndTranscribe()` | Stops capture, drains buffered audio, runs Whisper inference, delivers result. |
 | `stop()` | Alias for `stopAndTranscribe()`. |
@@ -178,7 +178,7 @@ companion object {
 **Properties:**
 
 | Property | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `onTimingListener` | `((Long, Long, Long, Long) -> Unit)?` | Timing diagnostics: PCM, VAD active, Whisper, total (all in ms). |
 
 ### SttConfig
@@ -295,7 +295,7 @@ The `ggml-tiny.en` model is recommended for mobile performance.
 
 ## Lifecycle
 
-```
+``` text
 UNINITIALISED → READY → RECORDING → FINALISING → READY → ...
 ```
 

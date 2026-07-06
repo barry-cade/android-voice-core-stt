@@ -17,7 +17,7 @@ The project is designed for robotics, embedded agents, and voice‑controlled sy
 
 ## Repository Structure
 
-```
+``` text
 android-voice-core-stt/
 ├── stt/                          # Reusable STT library module
 │   ├── src/main/java/.../stt/    # PCM capture, VAD, Whisper JNI, public API
@@ -115,7 +115,7 @@ Whisper tiny_en is loaded via JNI:
 
 ### STT Flow
 
-```
+``` text
 SpeechToText.create(...)
   → setOnResultListener(...)
   → start()
