@@ -17,8 +17,7 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
-    private lateinit var btnStartManual: Button
-    private lateinit var btnStartStreaming: Button
+    private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
     private lateinit var txtOutput: TextView
@@ -28,10 +27,9 @@ class MainActivity : ComponentActivity() {
 
     private var stt: SpeechToText? = null
     private var isRecording = false
-    private var isStreamingMode = false
     private val debugLogging = true
 
-    // ── Debug toggle state ───────────────────────────────────────────────
+    // ── Debug toggle state (no UI controls; set breakpoint to change) ────
     private var debugForceAudioInitFailure = false
     private var debugForceWhisperLoadFailure = false
     private var debugForceTimeout = false
@@ -48,7 +46,6 @@ class MainActivity : ComponentActivity() {
         RequestPermission()
     ) { granted ->
         if (granted) {
-            isStreamingMode = false
             updateUi()
             startRecording()
         } else {
@@ -60,8 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        btnStartManual = findViewById(R.id.btnStartManual)
-        btnStartStreaming = findViewById(R.id.btnStartStreaming)
+        btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
         txtOutput = findViewById(R.id.txtOutput)
@@ -69,25 +65,16 @@ class MainActivity : ComponentActivity() {
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
 
-        btnStartManual.setOnClickListener {
-            logInfo("STT_FLOW", "startManualMode() called")
-            isStreamingMode = false
-            updateUi()
-            if (hasRecordAudioPermission()) startRecording()
-            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-
-        btnStartStreaming.setOnClickListener {
-            logInfo("STT_FLOW", "startStreamingMode() called")
-            isStreamingMode = true
+        btnStart.setOnClickListener {
+            logInfo("STT_FLOW", "Start button pressed")
             updateUi()
             if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         btnStop.setOnClickListener {
-            logInfo("STT_FLOW", "stopAndTranscribe() called")
-            if (isRecording) stopAndTranscribe()
+            logInfo("STT_FLOW", "Stop button pressed")
+            stopAndTranscribe()
         }
 
         btnClear.setOnClickListener {
@@ -227,7 +214,6 @@ class MainActivity : ComponentActivity() {
             }
 
             isRecording = true
-            isStreamingMode = false
             txtOutput.text = "Recording..."
             updateUi()
         } catch (e: IllegalArgumentException) {
@@ -242,7 +228,6 @@ class MainActivity : ComponentActivity() {
             message = "The STT tuning values are invalid:\n${e.message}"
         )
         isRecording = false
-        isStreamingMode = false
         stt = null
         txtErrorBanner.visibility = android.view.View.VISIBLE
         updateUi()
@@ -264,7 +249,6 @@ class MainActivity : ComponentActivity() {
         }
 
         isRecording = false
-        isStreamingMode = false
         txtOutput.text = "Processing..."
         updateUi()
 
@@ -279,9 +263,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        btnStop.visibility = if (isStreamingMode) View.GONE else View.VISIBLE
-        btnStartManual.isEnabled = !isRecording
-        btnStartStreaming.isEnabled = !isRecording
+        btnStart.isEnabled = !isRecording
+        btnStop.isEnabled = isRecording
     }
 
     private fun getModelPath(): String {
