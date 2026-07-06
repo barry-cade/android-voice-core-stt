@@ -1,7 +1,7 @@
 
-# stt-core — Android Speech‑to‑Text Module
+# stt — Android Speech‑to‑Text Module
 
-The **stt-core** module provides offline speech‑to‑text functionality for Android using:
+The **stt** module provides offline speech‑to‑text functionality for Android using:
 
 - Whisper tiny_en (JNI + C++)
 - Deterministic voice activity detection (VAD)
@@ -18,23 +18,23 @@ This module is designed to be reusable and independent of the demo app.
 - Uses Whisper tiny_en model
 - Runs fully offline
 - JNI bindings to C++ Whisper implementation
-- Returns full transcription text and segment metadata
+- Returns full transcription text
 
 ### Deterministic VAD
 
-Energy‑based VAD with configurable parameters:
+Energy‑based voice activity detection with configurable parameters:
 
-- energyThreshold  
-- silencePaddingMs  
-- preRollMs  
-- stableChunkSizeMs  
-- maxUtteranceLengthMs  
-- motionMode overrides  
+- `energyThreshold`
+- `silencePaddingMs`
+- `preRollMs`
+- `stableChunkSizeMs`
+- `maxUtteranceLengthMs`
+- Motion‑mode overrides
 
 ### PCM Capture Pipeline
 
 - 16 kHz mono PCM
-- Dedicated audio thread
+- Dedicated audio capture thread
 - Fixed frame size
 - Pre‑roll buffer
 - Silence padding
@@ -42,120 +42,237 @@ Energy‑based VAD with configurable parameters:
 
 ### Clean Kotlin API
 
-The module exposes:
+The public API surface is strictly enforced — only the following types are exposed:
 
-- startRecording()
-- stopAndTranscribe()
-- setConfig()
-- Listener callbacks for STT events
-- Runtime configuration updates
+- `SpeechToText` — main entry point
+- `SttConfig` — static configuration data class
+- `AudioCapture` — raw microphone capture (primarily for internal use)
+- `WhisperBridge` — JNI bridge for Whisper (primarily for internal use)
+- `SttError`, `SttErrorCode`, `SttErrorCategory` — structured error types
+- `SttErrorListener` — callback interface for structured errors
+- `SttReadyListener` — callback interface for model readiness
+- `SttTimingSnapshot` — timing diagnostics data class
+- `SttLifecycleState` — state machine enum
+
+All other classes are internal.
 
 ## Installation
 
 Add the module to your project:
 
-1. Copy the `stt-core` folder into your Android project.
-2. Add it to `settings.gradle`:
+1. Copy the `stt` folder into your Android project.
+2. Add it to `settings.gradle.kts`:
 
-include(":stt-core")
+```kotlin
+include(":stt")
+```
 
-1. Add dependency in your app module:
+3. Add dependency in your app module:
 
-implementation(project(":stt-core"))
+```kotlin
+implementation(project(":stt"))
+```
 
 ## Basic Usage
 
-### Create configuration
+### 1. Create SpeechToText via the companion factory
 
-val config = RuntimeSttConfig(
+```kotlin
+val stt = SpeechToText.create(
     energyThreshold = 0.03f,
     silencePaddingMs = 300,
     preRollMs = 100,
-    maxUtteranceLengthMs = 4000
+    maxUtteranceLengthMs = 4000,
+    stableChunkSizeMs = 500,
+    motionModeEnergyThreshold = 0.05f,
+    motionModeSilencePaddingMs = 150,
+    modelPath = "/path/to/ggml-tiny.en.bin"
 )
+```
 
-### Instantiate the engine
+### 2. Register result listener
 
-val stt = SttEngine(context, config)
-
-### Start recording
-
-stt.startRecording()
-
-### Stop and transcribe
-
-stt.stopAndTranscribe { result ->
-    val text = result.text
+```kotlin
+stt.setOnResultListener { text ->
     // handle transcription
 }
+```
 
-### Update configuration at runtime
+### 3. Start recording
 
-stt.setConfig(newConfig)
+```kotlin
+stt.start()
+// If the model is still loading, start() queues automatically
+// and executes once the model is ready.
+```
 
-## Public API
+### 4. Stop and transcribe
 
-### SttEngine
+```kotlin
+stt.stopAndTranscribe()
+// Runs blocking on the calling thread — dispatch to background if needed.
+```
 
-Core class controlling PCM capture, VAD, and Whisper inference.
+### 5. Optional: be notified when the model is ready
 
-Methods:
+```kotlin
+stt.setReadyListener(object : SttReadyListener {
+    override fun onSttReady() {
+        // model loaded and warmed up
+    }
+})
+```
 
-- startRecording()  
-  Starts PCM capture and VAD monitoring.
+### 6. Optional: structured error handling
 
-- stopAndTranscribe(callback)  
-  Stops capture and runs Whisper inference.  
-  Returns transcription result via callback.
+```kotlin
+stt.setSttErrorListener(SttErrorListener { error ->
+    Log.e("STT", "${error.category} - ${error.code}: ${error.message}")
+})
+```
 
-- setConfig(config)  
-  Updates runtime configuration.
+### 7. Clean up
 
-- destroy()  
-  Releases audio resources and unloads Whisper model.
+```kotlin
+stt.destroy()
+```
 
-### RuntimeSttConfig
+## Public API Reference
 
-Holds all configurable parameters:
+### SpeechToText
 
-- energyThreshold  
-- silencePaddingMs  
-- preRollMs  
-- stableChunkSizeMs  
-- maxUtteranceLengthMs  
-- motionMode overrides  
+Main class controlling PCM capture, VAD, and Whisper inference.
 
-### MotionModeConfig
+**Factory method:**
 
-Optional overrides for:
+```kotlin
+companion object {
+    fun create(
+        energyThreshold: Float,
+        silencePaddingMs: Int,
+        preRollMs: Int,
+        maxUtteranceLengthMs: Int,
+        stableChunkSizeMs: Int,
+        motionModeEnergyThreshold: Float,
+        motionModeSilencePaddingMs: Int,
+        modelPath: String
+    ): SpeechToText
+}
+```
 
-- walking  
-- running  
-- riding  
-- stationary  
+**Methods:**
 
-Allows tuning VAD thresholds based on robot motion.
+| Method | Description |
+|---|---|
+| `start()` | Begins PCM capture and VAD. Safe to call before model is ready — auto-queues. |
+| `stopAndTranscribe()` | Stops capture, drains buffered audio, runs Whisper inference, delivers result. |
+| `stop()` | Alias for `stopAndTranscribe()`. |
+| `destroy()` | Releases audio resources, unloads Whisper model. |
+| `setOnResultListener(l: (String) -> Unit)` | Registers callback for transcription text. |
+| `setOnResultWithTimingListener(l: (text: String, timing: SttTimingSnapshot?) -> Unit)` | Registers callback with optional timing snapshot. |
+| `setOnErrorListener(l: (Throwable) -> Unit)` | Legacy error callback. |
+| `setSttErrorListener(l: SttErrorListener)` | Structured error callback. |
+| `setReadyListener(l: SttReadyListener)` | Callback when model load completes. |
+| `setDebugOptions(...)` | Test hooks for forced failure scenarios. |
 
-### SttResult
+**Properties:**
 
-Returned by stopAndTranscribe():
+| Property | Type | Description |
+|---|---|---|
+| `onTimingListener` | `((Long, Long, Long, Long) -> Unit)?` | Timing diagnostics: PCM, VAD active, Whisper, total (all in ms). |
 
-- text  
-- segments  
-- inferenceTimeMs  
-- pcmDurationMs  
+### SttConfig
+
+Static configuration data class (currently not used by `SpeechToText.create()`; factory takes individual parameters).
+
+```kotlin
+data class SttConfig(
+    val sampleRate: Int = 16000,
+    val bufferSize: Int = 32000,
+    val modelPath: String? = null,
+    val debugInstrumentation: Boolean = false,
+    val chunkSeconds: Int? = 3,
+    val overlapSeconds: Int? = 1
+)
+```
+
+### AudioCapture
+
+Provides a dedicated microphone thread reading PCM16 mono audio. Publishes `FloatArray` frames into a `ConcurrentLinkedQueue`.
+
+```kotlin
+class AudioCapture(
+    sampleRate: Int = 16000,
+    requestedBufferSizeInBytes: Int
+) {
+    fun start()    // begins capture thread
+    fun stop()     // stops capture and releases AudioRecord
+    val frameQueue: ConcurrentLinkedQueue<FloatArray>
+    fun getQueue(): ConcurrentLinkedQueue<FloatArray>
+}
+```
+
+### WhisperBridge
+
+Object exposing JNI bindings to `whisper.cpp`.
+
+```kotlin
+object WhisperBridge {
+    external fun loadModel(modelPath: String)
+    external fun transcribe(samples: ShortArray): String
+}
+```
+
+### SttErrorListener
+
+```kotlin
+fun interface SttErrorListener {
+    fun onSttError(error: SttError)
+}
+```
+
+### SttReadyListener
+
+```kotlin
+fun interface SttReadyListener {
+    fun onSttReady()
+}
+```
+
+### SttError
+
+```kotlin
+data class SttError(
+    val category: SttErrorCategory,
+    val code: SttErrorCode,
+    val message: String,
+    val lastRms: Float? = null,
+    val lastVadState: Boolean? = null,
+    val timingSnapshotMs: Map<String, Long>? = null,
+    val context: Map<String, Any> = emptyMap(),
+    val cause: Throwable? = null
+)
+```
+
+### SttTimingSnapshot
+
+```kotlin
+data class SttTimingSnapshot(
+    val vadMs: Int,
+    val utteranceMs: Int,
+    val whisperMs: Int,
+    val totalMs: Int
+)
+```
 
 ## VAD Behaviour
 
-The VAD pipeline classifies each PCM frame as:
-
-- speech  
-- silence  
+The VAD pipeline classifies each PCM frame as speech or silence.
 
 Early‑close logic:
 
-- When speech transitions to silence for a configured duration  
-- The command window closes immediately  
+- When speech transitions to silence for the configured `silencePaddingMs` duration
+- The command window closes immediately
 - Whisper receives only the relevant PCM
 
 ## Whisper Backend
@@ -164,30 +281,35 @@ The JNI layer provides:
 
 - Model loading
 - Model unloading
-- Full inference (whisper_full)
+- Full inference (`whisper_full`)
 - Segment extraction
 - Text assembly
 
-The tiny_en model is recommended for mobile performance.
+The `ggml-tiny.en` model is recommended for mobile performance.
 
 ## Threading Model
 
-- Audio capture runs on a dedicated thread
-- Whisper inference runs on a background thread
-- Callbacks are delivered on the main thread
+- Audio capture runs on a dedicated thread (`AudioCaptureThread` with `THREAD_PRIORITY_AUDIO`)
+- Whisper inference runs synchronously on the calling thread (`stopAndTranscribe()`) or on the processor thread (streaming)
+- Callbacks are delivered on whatever thread posted them — use `runOnUiThread` or a handler if UI updates are needed
 
-This prevents UI blocking and ensures deterministic timing.
+## Lifecycle
+
+```
+UNINITIALISED → READY → RECORDING → FINALISING → READY → ...
+```
+
+- `destroy()` returns to `UNINITIALISED`.
 
 ## Error Handling
 
-Possible error cases:
+Errors are surfaced via `SttErrorListener` or `setOnErrorListener`:
 
-- AudioRecord failure  
-- Whisper model missing  
-- JNI load failure  
-- Timeout due to maxUtteranceLengthMs  
-
-Errors are surfaced via callback or logs.
+- AudioRecord failure
+- Whisper model missing / load failure
+- JNI load failure
+- Timeout due to `maxUtteranceLengthMs`
+- Illegal state transitions
 
 ## Testing
 

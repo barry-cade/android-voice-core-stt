@@ -1,13 +1,13 @@
 # Demo App — android-voice-core-stt
 
 This is the demo Android application for the **android-voice-core-stt** project.  
-It showcases how to integrate and use the STT module (`stt-core`) including:
+It showcases how to integrate and use the STT module (`:stt`) including:
 
-- PCM audio capture  
-- Deterministic VAD  
-- Whisper tiny_en transcription  
-- Command window behaviour  
-- Real‑time logging and configuration  
+- PCM audio capture
+- Deterministic VAD
+- Whisper tiny_en transcription
+- Command window behaviour
+- Real‑time diagnostics and configuration display
 
 The demo app is intended as a reference implementation and a testing tool.
 
@@ -81,7 +81,7 @@ The demo shows how to:
 - Receive transcription results  
 - Handle lifecycle events  
 
-Use this app as a reference when integrating `stt-core` into your own Android project.
+Use this app as a reference when integrating `:stt` into your own Android project.
 
 ## Requirements
 
@@ -93,7 +93,7 @@ Use this app as a reference when integrating `stt-core` into your own Android pr
 
 - The demo app is intentionally simple and focused on clarity.  
 - It is not intended as a production UI.  
-- All STT logic lives in the `stt-core` module; the app only demonstrates usage.
+- All STT logic lives in the `:stt` module; the app only demonstrates usage.
 
 ## License
 

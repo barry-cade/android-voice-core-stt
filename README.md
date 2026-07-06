@@ -10,23 +10,28 @@ android-voice-core-stt is a modular offline speech‑to‑text engine for Androi
 - Deterministic voice activity detection (VAD)
 - Configurable command windows
 - Pre‑roll and silence padding
-- A reusable STT module (stt-core)
+- A reusable STT module (`:stt`)
 - A demo Android app showing real‑time logs and usage
 
 The project is designed for robotics, embedded agents, and voice‑controlled systems where deterministic behaviour, low latency, and offline operation are required.
 
 ## Repository Structure
 
+```
 android-voice-core-stt/
-
-- stt-core/  
-  - src/ (PCM capture, VAD, Whisper JNI)  
-  - jni/ (Whisper C++ bindings)  
-  - README.md (API documentation)  
-- app/  
-  - src/ (UI + integration with stt-core)  
-  - README.md (demo usage instructions)  
-- README.md (this file)
+├── stt/                          # Reusable STT library module
+│   ├── src/main/java/.../stt/    # PCM capture, VAD, Whisper JNI, public API
+│   ├── src/main/cpp/             # Whisper C++ bindings (JNI)
+│   ├── README.md                 # Full API documentation
+│   └── build.gradle.kts
+├── app/                          # Demo Android application
+│   ├── src/main/java/.../        # UI + integration with :stt module
+│   ├── src/main/res/             # Layouts and UI resources
+│   ├── README.md                 # Demo usage instructions
+│   └── build.gradle.kts
+├── README.md                     # This file
+└── settings.gradle.kts           # Includes :app and :stt
+```
 
 ## Features
 
@@ -38,11 +43,11 @@ Uses Whisper tiny_en for fast, offline transcription on mobile CPUs.
 
 Energy‑based voice activity detection with configurable parameters:
 
-- energyThreshold  
-- silencePaddingMs  
-- preRollMs  
-- stableChunkSizeMs  
-- maxUtteranceLengthMs  
+- `energyThreshold`
+- `silencePaddingMs`
+- `preRollMs`
+- `stableChunkSizeMs`
+- `maxUtteranceLengthMs`
 - Motion‑mode overrides
 
 ### Command Window Architecture
@@ -55,24 +60,28 @@ Supports deterministic command windows:
 - Silence padding
 - Max utterance length enforcement
 
-### Clean API
+### Clean Public API
 
-The STT module exposes:
+The `:stt` module exposes a strictly enforced public API surface:
 
-- startRecording()
-- stopAndTranscribe()
-- setConfig()
-- Listener callbacks for STT events
+- `SpeechToText` — main entry point with factory `create()`, `start()`, `stopAndTranscribe()`, `destroy()`
+- `SttConfig` — static configuration data class
+- `AudioCapture` — microphone capture
+- `WhisperBridge` — JNI bindings
+- Structured error types (`SttError`, `SttErrorCode`, `SttErrorCategory`, `SttErrorListener`)
+- `SttReadyListener` — model readiness callback
+- `SttTimingSnapshot` — timing diagnostics
+
+All other classes are internal.
 
 ### Demo App Included
 
 Shows:
 
-- Live VAD logs
-- PCM capture behaviour
-- Whisper inference timing
-- Full transcription output
-- Config editing
+- Live transcription output
+- Timing diagnostics (PCM, VAD, Whisper inference)
+- Structured error display
+- Config display (loaded from `stt_config.json`)
 
 ## Architecture
 
@@ -80,8 +89,9 @@ Shows:
 
 A dedicated audio thread captures 16 kHz mono PCM:
 
-- 32000‑byte buffer
-- 16000‑sample frames
+- Configurable buffer size
+- 16 kHz sample rate
+- `FloatArray` frames published to a concurrent queue
 - Continuous stream during active recording
 
 ### VAD
@@ -92,34 +102,48 @@ Each frame is analysed:
 - Speech/silence classification
 - Silence frame counting
 - Early‑close logic
+- Pre‑roll and silence padding
 
 ### Whisper Backend
 
 Whisper tiny_en is loaded via JNI:
 
 - Model load/unload
-- Full inference (whisper_full)
+- Full inference (`whisper_full`)
 - Segment extraction
 - Text output
 
 ### STT Flow
 
-startRecording()  
-→ PCM capture thread starts  
-→ VAD monitors speech  
-→ stopAndTranscribe()  
-→ Whisper inference  
-→ Transcription result
+```
+SpeechToText.create(...)
+  → setOnResultListener(...)
+  → start()
+      → model warms up (async)
+      → audio capture thread starts
+      → VAD monitors speech
+  → stopAndTranscribe()
+      → drains remaining audio
+      → Whisper inference
+      → transcription result delivered to listener
+  → destroy()
+```
+
+The lifecycle follows: `UNINITIALISED → READY → RECORDING → FINALISING → READY → ...`
 
 ## Quick Start
 
 ### Clone
 
+```bash
 git clone --recurse-submodules https://github.com/barry-cade/android-voice-core-stt.git
+```
 
-Or if already cloned, initialize the whisper.cpp submodule:
+If already cloned, initialize the whisper.cpp submodule:
 
+```bash
 git submodule update --init --recursive
+```
 
 ### Build
 
@@ -129,45 +153,51 @@ Open the project in Android Studio and build normally.
 
 Install the demo app on an Android device:
 
-1. Grant microphone permission  
-2. Tap Start to begin recording  
-3. Tap Stop to transcribe  
-4. View logs in Logcat under STT_* tags
+1. Grant microphone permission
+2. Tap **Start** to begin recording
+3. Tap **Stop** to transcribe
+4. View logs in Logcat under `STT_*` tags
 
 ## Integration Guide
 
 To use the STT module in your own Android app:
 
-1. Copy the stt-core module into your project.
-2. Add it to settings.gradle.
-3. Add the dependency in your app’s build.gradle.
-4. Instantiate the STT engine:
+1. Copy the `stt` folder into your project.
+2. Add `include(":stt")` to `settings.gradle.kts`.
+3. Add `implementation(project(":stt"))` in your app's `build.gradle.kts`.
+4. Instantiate and use:
 
-val stt = SttEngine(context, config)
+```kotlin
+val stt = SpeechToText.create(
+    energyThreshold = 0.03f,
+    silencePaddingMs = 300,
+    preRollMs = 100,
+    maxUtteranceLengthMs = 4000,
+    stableChunkSizeMs = 500,
+    motionModeEnergyThreshold = 0.05f,
+    motionModeSilencePaddingMs = 150,
+    modelPath = "/path/to/ggml-tiny.en.bin"
+)
 
-1. Start recording:
-
-stt.startRecording()
-
-1. Stop and transcribe:
-
-stt.stopAndTranscribe { result ->
+stt.setOnResultListener { text ->
     // handle transcription
 }
 
-1. Adjust configuration:
+stt.start()
+// ...
+stt.stopAndTranscribe()
+stt.destroy()
+```
 
-stt.setConfig(newConfig)
-
-Full API documentation will be available in stt-core/README.md.
+Full API documentation is available in [`stt/README.md`](stt/README.md).
 
 ## Roadmap
 
-- Add wake‑word integration examples  
-- Add Vosk grammar example for command recognition  
-- Add dual‑pipeline demo (Rex vs Zip)  
-- Add unit tests for VAD  
-- Add benchmark mode for Whisper inference  
+- Add wake‑word integration examples
+- Add Vosk grammar example for command recognition
+- Add dual‑pipeline demo (Rex vs Zip)
+- Add unit tests for VAD
+- Add benchmark mode for Whisper inference
 
 ## License
 
