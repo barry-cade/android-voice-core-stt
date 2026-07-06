@@ -13,14 +13,14 @@ package dev.barrycade.voicecore.stt
 internal class CaptureController(
     private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int = 32000
-) {
+) : AudioSource {
     private var audioCapture: AudioCapture? = null
 
     /**
      * Start AudioCapture. Returns true on success, false on failure.
      * The capture thread begins enqueuing PCM frames into AudioCapture.frameQueue.
      */
-    fun startCapture(): Boolean {
+    override fun startCapture(): Boolean {
         if (audioCapture != null) return true
 
         return try {
@@ -40,7 +40,7 @@ internal class CaptureController(
     /**
      * Stop AudioCapture and clear the AudioCapture frame queue.
      */
-    fun stopCapture() {
+    override fun stopCapture() {
         audioCapture?.stop()
         audioCapture = null
     }
@@ -49,7 +49,7 @@ internal class CaptureController(
      * Poll the next frame from AudioCapture.frameQueue.
      * Returns null if queue is empty.
      */
-    fun pollFrame(): FloatArray? {
+    override fun pollFrame(): FloatArray? {
         return audioCapture?.frameQueue?.poll()
     }
 }

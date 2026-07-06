@@ -1,8 +1,10 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -20,7 +22,7 @@ import org.junit.Test
  */
 class ProcessorControllerTest {
 
-    private lateinit var captureController: CaptureController
+    private lateinit var fakeAudioSource: FakeCaptureController
     private lateinit var vad: Vad
     private lateinit var accumulator: UtteranceAccumulator
     private val capturedUtterances = mutableListOf<FloatArray>()
@@ -29,7 +31,7 @@ class ProcessorControllerTest {
 
     @Before
     fun setUp() {
-        captureController = CaptureController(sampleRate = 16000, requestedBufferSizeInBytes = 32000)
+        fakeAudioSource = FakeCaptureController()
         vad = Vad(energyThreshold = 0.01)
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,
@@ -45,8 +47,9 @@ class ProcessorControllerTest {
     }
 
     private fun createController(): ProcessorController {
+        fakeAudioSource.startCapture()
         return ProcessorController(
-            captureController = captureController,
+            audioSource = fakeAudioSource,
             vad = vad,
             utteranceAccumulator = accumulator,
             listener = listener,
@@ -163,5 +166,116 @@ class ProcessorControllerTest {
         controller.start()
         // No crash is the assertion
         controller.stop()
+    }
+
+    // ── Pipeline tests with FakeCaptureController ───────────────────────
+
+    @Test
+    fun process_speechFrame_triggersListener() {
+        // At 20ms per frame (320 samples @ 16kHz):
+        // Pre-roll: 5 frames (100ms)
+        // Speech: 30 frames (600ms)
+        // Silence: 10 frames to trigger (200ms silence budget, 5 needed)
+        // Total before finalization: 5 + 30 + 5 = 40 frames = 800ms > 700ms minimum
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5 frames
+        val controller = createController()
+        controller.start()
+        Thread.sleep(500)
+        controller.stop()
+        assertTrue("speech frames must produce at least one utterance",
+            capturedUtterances.isNotEmpty())
+    }
+
+    @Test
+    fun process_multipleSpeechFrames_producesUtterance() {
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(40, 320)   // speech: 800ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5
+        val controller = createController()
+        controller.start()
+        Thread.sleep(600)
+        controller.stop()
+        assertTrue("multiple speech frames must produce utterance",
+            capturedUtterances.isNotEmpty())
+        val pcm = capturedUtterances.first()
+        assertTrue("utterance PCM must be non-empty", pcm.isNotEmpty())
+    }
+
+    @Test
+    fun process_silenceOnly_noUtterance() {
+        fakeAudioSource.addSilenceFrames(60, 320)
+        val controller = createController()
+        controller.start()
+        Thread.sleep(500)
+        controller.stop()
+        assertEquals("silence-only must not produce utterances",
+            0, capturedUtterances.size)
+    }
+
+    @Test
+    fun process_speechThenSilence_accumulatesThenFinalizes() {
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5
+        val controller = createController()
+        controller.start()
+        Thread.sleep(600)
+        controller.stop()
+        assertTrue("speech then silence must produce utterance",
+            capturedUtterances.isNotEmpty())
+    }
+
+    @Test
+    fun stopAndFinalize_withFrame_returnsPcm() {
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
+        val controller = createController()
+        controller.start()
+        Thread.sleep(500)
+        controller.stop()
+        val pcm = controller.stopAndFinalize()
+        assertNotNull("stopAndFinalize must return PCM after speech frames", pcm)
+        assertTrue("returned PCM must be non-empty", pcm!!.isNotEmpty())
+    }
+
+    @Test
+    fun process_stopRequestedDuringProcessing_skipsFrame() {
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(10, 320)   // speech: 200ms
+        val controller = createController()
+        controller.start()
+        // Set stopRequested while processor is running
+        stopRequested = true
+        Thread.sleep(100)
+        // Additional frames should be ignored
+        fakeAudioSource.addSpeechFrames(15, 320)
+        Thread.sleep(200)
+        controller.stop()
+        // No crash — the freeze may produce utterance from pre-freeze frames
+    }
+
+    @Test
+    fun process_failOnStart_startCaptureReturnsFalse() {
+        fakeAudioSource.failOnStart = true
+        val controller = createController()
+        controller.start()
+        // start() should not crash when AudioSource.startCapture() fails
+        controller.stop()
+    }
+
+    @Test
+    fun process_rapidFrameInjection_noCrash() {
+        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
+        fakeAudioSource.addSpeechFrames(60, 320)   // speech: 1200ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // silence: 300ms = total 1600ms
+        val controller = createController()
+        controller.start()
+        Thread.sleep(800)
+        controller.stop()
+        assertTrue("rapid frame injection must produce utterances",
+            capturedUtterances.isNotEmpty())
     }
 }

@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *        When true, PCM ingestion, VAD processing, and accumulator updates are frozen.
  */
 internal class ProcessorController(
-    private val captureController: CaptureController,
+    private val audioSource: AudioSource,
     private val vad: Vad,
     private val utteranceAccumulator: UtteranceAccumulator,
     private val listener: UtteranceListener,
@@ -58,7 +58,7 @@ internal class ProcessorController(
         workerThread = Thread({
             while (isRunning.get()) {
                 try {
-                    val frame = captureController.pollFrame()
+                    val frame = audioSource.pollFrame()
                     if (frame == null) {
                         Thread.sleep(10L)
                         continue

@@ -58,7 +58,7 @@ class SpeechToText internal constructor(
 
     private val modelManager = ModelManager(modelPath, null, internalReadyListener, whisperModel)
 
-    private var captureController: CaptureController? = null
+    private var audioSource: AudioSource? = null
     private var processorController: ProcessorController? = null
     @Volatile private var stopRequested: Boolean = false
     private var lastTranscribedText: String? = null
@@ -95,11 +95,11 @@ class SpeechToText internal constructor(
             if (currentState is SttLifecycleState.UNINITIALISED || !modelManager.isReady) {
                 SttLogger.lifecycleW("start() called early — queued until READY")
                 // Start AudioCapture NOW so audio is buffered during warm-up
-                if (captureController == null) {
+                if (audioSource == null) {
                     SttLogger.pcm("[START] starting AudioCapture early for warm-up buffering")
                     val earlyCapture = CaptureController()
                     if (earlyCapture.startCapture()) {
-                        captureController = earlyCapture
+                        audioSource = earlyCapture
                         SttLogger.pcm("[START] AudioCapture buffering during warm-up")
                     } else {
                         SttLogger.pcmE("[START] Early AudioCapture failed — no buffering during warm-up")
@@ -122,8 +122,8 @@ class SpeechToText internal constructor(
             if (forceAudioInitFailure) { dispatchError(RuntimeException("Forced test: AudioCapture init")); return }
 
             // ── Use existing capture controller if started early, or create new ──
-            val capture: CaptureController
-            val existingCapture = captureController
+            val capture: AudioSource
+            val existingCapture = audioSource
             if (existingCapture != null) {
                 capture = existingCapture
             } else {
@@ -132,7 +132,7 @@ class SpeechToText internal constructor(
                     dispatchError(RuntimeException("Audio capture failed"))
                     return
                 }
-                captureController = newCapture
+                audioSource = newCapture
                 capture = newCapture
             }
             if (!transitionTo(SttLifecycleState.RECORDING)) { capture.stopCapture(); return }
@@ -205,7 +205,7 @@ class SpeechToText internal constructor(
                 // ── Drain remaining frames from capture queue into accumulator ──
                 var drainedCount = 0
                 var drainFinalized: FloatArray? = null
-                val capture = captureController
+                val capture = audioSource
                 val proc = processorController
                 if (capture != null && proc != null) {
                     val accumulator = proc.getAccumulator()
@@ -228,7 +228,7 @@ class SpeechToText internal constructor(
                 val pcm = drainFinalized ?: processorController?.stopAndFinalize()
                 SttLogger.pcm("[STOP] stopAndFinalize returned pcm=${pcm != null}")
                 processorController = null
-                captureController?.stopCapture(); captureController = null
+                audioSource?.stopCapture(); audioSource = null
                 val capMs = if (timingPcmStartMs > 0) System.currentTimeMillis() - timingPcmStartMs else 0L
 
                 if (pcm != null) {
@@ -254,7 +254,7 @@ class SpeechToText internal constructor(
     fun destroy() {
         synchronized(stateLock) {
             processorController?.stop(); processorController = null
-            captureController?.stopCapture(); captureController = null
+            audioSource?.stopCapture(); audioSource = null
             modelManager.unload()
             lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
         }
