@@ -86,28 +86,9 @@ internal class ModelManager(
      */
     private fun runInitSequence() {
         try {
-            if (forceWhisperLoadFailure) {
-                SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
-                val error = SttError(
-                    category = SttErrorCategory.UNKNOWN,
-                    code = SttErrorCode.MODEL_LOAD_FAILED,
-                    message = "Forced test failure: Whisper model load",
-                    context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
-                )
-                sttErrorListener?.onSttError(error)
-                initFailed = true
-                return
-            }
+            if (handleForcedFailure()) return
 
-            SttLogger.whisper("loadModel: $modelPath")
-
-            try {
-                whisperModel.loadModel(modelPath)
-            } catch (t: Throwable) {
-                SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
-                initFailed = true
-                return
-            }
+            if (!loadModel()) return
 
             performWarmup()
 
@@ -125,6 +106,40 @@ internal class ModelManager(
             )
             sttErrorListener?.onSttError(error)
             initFailed = true
+        }
+    }
+
+    /**
+     * If [forceWhisperLoadFailure] is set, report error and return true.
+     * Otherwise return false.
+     */
+    private fun handleForcedFailure(): Boolean {
+        if (!forceWhisperLoadFailure) return false
+
+        SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
+        val error = SttError(
+            category = SttErrorCategory.UNKNOWN,
+            code = SttErrorCode.MODEL_LOAD_FAILED,
+            message = "Forced test failure: Whisper model load",
+            context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
+        )
+        sttErrorListener?.onSttError(error)
+        initFailed = true
+        return true
+    }
+
+    /**
+     * Load the Whisper model. Returns true on success, false on failure.
+     */
+    private fun loadModel(): Boolean {
+        SttLogger.whisper("loadModel: $modelPath")
+        return try {
+            whisperModel.loadModel(modelPath)
+            true
+        } catch (t: Throwable) {
+            SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
+            initFailed = true
+            false
         }
     }
 
