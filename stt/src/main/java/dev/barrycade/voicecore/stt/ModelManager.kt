@@ -69,54 +69,62 @@ internal class ModelManager(
      * LifecycleController must check [isReady] before starting capture.
      */
     fun initAsync() {
-            try {
-            whisperExecutor.submit {
-                try {
-                // ── Testing hook: forceWhisperLoadFailure ─────────────────
-                if (forceWhisperLoadFailure) {
-                    SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
-                    val error = SttError(
-                        category = SttErrorCategory.UNKNOWN,
-                        code = SttErrorCode.MODEL_LOAD_FAILED,
-                        message = "Forced test failure: Whisper model load",
-                        context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
-                    )
-                    sttErrorListener?.onSttError(error)
-                    initFailed = true
-                    return@submit
-                }
+        val runnable = Runnable {
+            runInitSequence()
+        }
 
-                SttLogger.whisper("loadModel: $modelPath")
+        try {
+            whisperExecutor.submit(runnable)
+        } catch (_: RuntimeException) {
+            SttLogger.errorW("initAsync: executor rejected task")
+        }
+    }
 
-                try {
-                    whisperModel.loadModel(modelPath)
-                } catch (t: Throwable) {
-                    SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
-                    initFailed = true
-                    return@submit
-                }
-
-                performWarmup()
-
-                isReady = true
-                SttLogger.lifecycle("ModelManager: model loaded, warm-up complete, isReady=true")
-                readyListener?.onSttReady()
-            } catch (t: Throwable) {
-                SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
+    /**
+     * Core init sequence executed on [whisperExecutor].
+     * Loads model, runs warm-up, and sets [isReady] or [initFailed].
+     */
+    private fun runInitSequence() {
+        try {
+            if (forceWhisperLoadFailure) {
+                SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
                 val error = SttError(
                     category = SttErrorCategory.UNKNOWN,
                     code = SttErrorCode.MODEL_LOAD_FAILED,
-                    message = "Model initialisation failed: ${t.message}",
-                    cause = t,
-                    context = mapOf("exception" to t::class.java.simpleName)
+                    message = "Forced test failure: Whisper model load",
+                    context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
                 )
                 sttErrorListener?.onSttError(error)
                 initFailed = true
+                return
             }
+
+            SttLogger.whisper("loadModel: $modelPath")
+
+            try {
+                whisperModel.loadModel(modelPath)
+            } catch (t: Throwable) {
+                SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
+                initFailed = true
+                return
             }
-        } catch (_: RuntimeException) {
-            // Executor may be shut down (RejectedExecutionException)
-            SttLogger.errorW("initAsync: executor rejected task")
+
+            performWarmup()
+
+            isReady = true
+            SttLogger.lifecycle("ModelManager: model loaded, warm-up complete, isReady=true")
+            readyListener?.onSttReady()
+        } catch (t: Throwable) {
+            SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
+            val error = SttError(
+                category = SttErrorCategory.UNKNOWN,
+                code = SttErrorCode.MODEL_LOAD_FAILED,
+                message = "Model initialisation failed: ${t.message}",
+                cause = t,
+                context = mapOf("exception" to t::class.java.simpleName)
+            )
+            sttErrorListener?.onSttError(error)
+            initFailed = true
         }
     }
 

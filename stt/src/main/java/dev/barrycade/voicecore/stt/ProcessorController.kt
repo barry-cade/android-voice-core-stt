@@ -63,63 +63,74 @@ internal class ProcessorController(
     fun start() {
         if (isRunning.getAndSet(true)) return
 
-        workerThread = Thread({
-            while (isRunning.get()) {
-                try {
-                    // Single guard at loop top: stop requested means skip processing
-                    if (stopRequestedRef()) {
-                        Thread.sleep(10L)
-                        continue
-                    }
+        val runnable = Runnable {
+            runProcessingLoop()
+        }
 
-                    val frame = audioSource.pollFrame()
-                    if (frame == null) {
-                        Thread.sleep(10L)
-                        continue
-                    }
+        val thread = Thread(runnable, "ProcessorControllerThread")
+        workerThread = thread
+        thread.start()
+    }
 
-                    if (!isRunning.get()) break
-
-                    SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
-
-                    val isSpeechFrame = vad.isSpeech(frame)
-                    val confidence = vad.vadConfidence
-                    vadConfidence = confidence
-                    if (debugLogging) {
-                        SttLogger.vadD("confidence=$confidence")
-                    }
-
-                    rmsSampler.feedFrame(frame)
-
-                    if (isSpeechFrame) {
-                        SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
-                        val frameDurationMs = (frame.size * 1000L) / 16000L
-                        vadActiveMs += frameDurationMs
-                    }
-
-                    val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
-                    if (utterance != null) {
-                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                        SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
-                        listener.onUtteranceReady(utterance)
-
-                        // ── Terminal timeout: stop the processor loop ────────
-                        if (utteranceAccumulator.timeoutFired) {
-                            SttLogger.pcm("[TIMEOUT] max utterance reached — stopping processor")
-                            utteranceAccumulator.timeoutFired = false
-                            isRunning.set(false)
-                            onTimeoutStop?.invoke()
-                            break
-                        }
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                } catch (t: Throwable) {
-                    SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
+    /**
+     * Core processing loop, executing on the worker thread.
+     * Polls frames, runs VAD, accumulates utterances, and delivers
+     * finalized PCM via [UtteranceListener].
+     */
+    private fun runProcessingLoop() {
+        while (isRunning.get()) {
+            try {
+                if (stopRequestedRef()) {
+                    Thread.sleep(10L)
+                    continue
                 }
+
+                val frame = audioSource.pollFrame()
+                if (frame == null) {
+                    Thread.sleep(10L)
+                    continue
+                }
+
+                if (!isRunning.get()) break
+
+                SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
+
+                val isSpeechFrame = vad.isSpeech(frame)
+                val confidence = vad.vadConfidence
+                vadConfidence = confidence
+                if (debugLogging) {
+                    SttLogger.vadD("confidence=$confidence")
+                }
+
+                rmsSampler.feedFrame(frame)
+
+                if (isSpeechFrame) {
+                    SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
+                    val frameDurationMs = (frame.size * 1000L) / 16000L
+                    vadActiveMs += frameDurationMs
+                }
+
+                val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
+                if (utterance != null) {
+                    lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+                    SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
+                    listener.onUtteranceReady(utterance)
+
+                    if (utteranceAccumulator.timeoutFired) {
+                        SttLogger.pcm("[TIMEOUT] max utterance reached — stopping processor")
+                        utteranceAccumulator.timeoutFired = false
+                        isRunning.set(false)
+                        onTimeoutStop?.invoke()
+                        break
+                    }
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            } catch (t: Throwable) {
+                SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
             }
-        }, "ProcessorControllerThread").apply { start() }
+        }
     }
 
     /**
