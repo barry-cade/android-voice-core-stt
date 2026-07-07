@@ -13,9 +13,9 @@ object AppSttConfigLoader {
 
         return try {
             parse(json)
-        } catch (t: Throwable) {
-            Log.e(TAG, "Invalid STT configuration", t)
-            throw IllegalStateException("Invalid STT configuration: ${t.message}", t)
+        } catch (e: Exception) {
+            Log.e(TAG, "Invalid STT configuration", e)
+            throw IllegalStateException("Invalid STT configuration: ${e.message}", e)
         }
     }
 

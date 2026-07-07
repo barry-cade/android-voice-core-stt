@@ -56,22 +56,15 @@ class AudioTestService : Service() {
             startForeground(1, notification)
         }
 
-        audioCapture.start()
+                audioCapture.start()
 
         // Poll FloatArray frames from the queue
-        workerThread = Thread({
-            while (true) {
-                val frame = audioCapture.frameQueue.poll()
-                if (frame != null) {
-                    Log.d(
-                        "AudioTest",
-                        "frame=${frame.size} samples, t=${System.currentTimeMillis()}"
-                    )
-                } else {
-                    Thread.sleep(10L)
-                }
-            }
-        }, "AudioTestPollThread").apply { start() }
+        val runnable = Runnable {
+            runAudioPollLoop()
+        }
+        val thread = Thread(runnable, "AudioTestPollThread")
+        workerThread = thread
+        thread.start()
         return START_STICKY
     }
 
@@ -83,6 +76,29 @@ class AudioTestService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * Polls FloatArray frames from the audio capture queue.
+     * Runs on the worker thread. Exits when the thread is interrupted.
+     */
+    private fun runAudioPollLoop() {
+        while (!Thread.currentThread().isInterrupted) {
+            val frame = audioCapture.frameQueue.poll()
+            if (frame != null) {
+                Log.d(
+                    "AudioTest",
+                    "frame=${frame.size} samples, t=${System.currentTimeMillis()}"
+                )
+            } else {
+                try {
+                    Thread.sleep(10L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+        }
+    }
 
     companion object {
         private const val CHANNEL_ID = "audio_test_service"

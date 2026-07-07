@@ -260,14 +260,20 @@ class MainActivity : ComponentActivity() {
         txtOutput.text = "Processing..."
         updateUi()
 
-        Thread {
-            try {
-                Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
-                currentStt.stopAndTranscribe()
-            } catch (t: Throwable) {
-                postToUi { txtOutput.text = "Error: ${t.message}" }
-            }
-        }.start()
+        val runnable = Runnable {
+            runStopAndTranscribe(currentStt)
+        }
+        val thread = Thread(runnable, "StopAndTranscribeThread")
+        thread.start()
+    }
+
+    private fun runStopAndTranscribe(stt: SpeechToText) {
+        try {
+            Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
+            stt.stopAndTranscribe()
+        } catch (t: Throwable) {
+            postToUi { txtOutput.text = "Error: ${t.message}" }
+        }
     }
 
     private fun updateUi() {
