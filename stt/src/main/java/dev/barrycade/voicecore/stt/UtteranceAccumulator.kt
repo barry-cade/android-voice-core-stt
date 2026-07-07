@@ -3,23 +3,38 @@ package dev.barrycade.voicecore.stt
 /**
  * UtteranceAccumulator transforms incoming FloatArray frames into complete utterance buffers.
  *
- * Three deterministic latency-stabilisation rules are enforced for short commands:
+ * ## Architecture
  *
- * 1. Pre-roll (100ms):
- *    PCM is kept and appended to the utterance buffer. Only speech detection
- *    is disabled during pre-roll. This ensures STOP always has real audio to
- *    finalize, even with large (1-second) AudioCapture frames.
+ * The accumulator follows a simple linear flow:
  *
- * 2. Trailing silence clamp (250ms):
- *    After STOP or VAD finalisation, 250ms of synthetic silence is appended.
- *    Always present, always identical, always mel-light.
+ *   preRoll → (speech detection) → speech accumulation → silence accumulation → finalize
  *
- * 3. Minimum utterance length (700ms):
- *    If utterance duration < 700ms after trailing silence, pad with silence
- *    until total duration = 700ms. Mel-light padding appended after trailing silence.
+ * ## Termination Rules
  *
- * These rules guarantee a deterministic mel-shape for short commands regardless
- * of STOP timing.
+ * ### Manual/manual mode (stopStrategy = "manual")
+ * A. User presses STOP → finalizeUtterance() → normal transcription
+ * B. Silence ≥ abnormalSilenceMs → abnormal termination → return reasonMessages.abnormalSilence
+ * C. Duration ≥ maxDurationMs → abnormal termination → return reasonMessages.tooLong
+ *
+ * ### Manual/auto mode (stopStrategy = "autoSilence")
+ * A. Silence ≥ autoSilenceMs → normalize → finalizeUtterance() → normal transcription
+ * B. Duration ≥ maxDurationMs → abnormal termination → return reasonMessages.tooLong
+ * C. No abnormal silence rule in this mode.
+ *
+ * ## Abnormal termination
+ *
+ * When maxDuration or abnormalSilence triggers, the accumulator:
+ * 1. Discards accumulated PCM
+ * 2. Signals [terminationReason] with the reason message
+ * 3. Returns null from processChunk (no PCM delivered)
+ *
+ * The caller (SpeechToText/ProcessorController) must NOT call Whisper when
+ * terminationReason is non-null.
+ *
+ * ## No hysteresis, no minimum speech duration, no timing guards
+ *
+ * SilenceFrameCount is the sole threshold. Speech → silence → threshold → finalize.
+ * No minimum speech duration, no trailing silence padding, no stable-block alignment.
  *
  * Testing hook: internal [forceTimeout] flag causes immediate max-utterance finalization
  * the next time speech is detected.
@@ -27,11 +42,12 @@ package dev.barrycade.voicecore.stt
 internal class UtteranceAccumulator(
     private val sampleRate: Int = 16000,
     private val preRollMs: Int = 100,
-    private val silenceDurationMs: Int = 500,
-    private val maxUtteranceLengthMs: Int = 7000,
-    private val stableBlockMs: Int = 500,
     private val vad: Vad = Vad(),
-    internal var stopTrigger: StopTriggerStrategy? = null
+    internal var stopTrigger: StopTriggerStrategy? = null,
+    // ── Mode-specific config blocks (resolve timing per-mode) ─────────────
+    private val manualManualConfig: ManualManualConfig = ManualManualConfig(),
+    private val manualAutoConfig: ManualAutoConfig = ManualAutoConfig(),
+    private val reasonMessages: ReasonMessages = ReasonMessages()
 ) {
     constructor(
         config: RuntimeSttConfig,
@@ -41,22 +57,16 @@ internal class UtteranceAccumulator(
     ) : this(
         sampleRate = sampleRate,
         preRollMs = config.preRollMs,
-        silenceDurationMs = config.silencePaddingMs,
-        maxUtteranceLengthMs = config.maxUtteranceLengthMs,
-        stableBlockMs = config.stableChunkSizeMs,
         vad = vad,
-        stopTrigger = stopTrigger
+        stopTrigger = stopTrigger,
+        manualManualConfig = config.manualManual,
+        manualAutoConfig = config.manualAuto,
+        reasonMessages = config.reasonMessages
     )
 
     companion object {
         /** Fixed pre-roll window before speech is accepted. */
         private const val PRE_ROLL_MS: Int = 100
-
-        /** Fixed trailing silence appended after STOP or VAD finalisation. */
-        private const val TRAILING_SILENCE_MS: Int = 250
-
-        /** Fixed minimum utterance length (pre-roll + speech + trailing silence). */
-        private const val MIN_UTTERANCE_LENGTH_MS: Int = 700
     }
 
     /** Error listener forwarded from SpeechToText for structured error reporting. */
@@ -66,11 +76,19 @@ internal class UtteranceAccumulator(
     internal var forceTimeout: Boolean = false
 
     /**
-     * Set to true when maxUtteranceLengthMs is exceeded.
+     * Set to true when maxDurationMs is exceeded.
      * ProcessorController checks this after each processChunk() and stops the loop.
      */
     @Volatile
     internal var timeoutFired: Boolean = false
+
+    /**
+     * When non-null, the accumulator has terminated abnormally and the caller
+     * must NOT call Whisper. Instead, the caller should return [terminationReason]
+     * as the error/status message and discard any accumulated PCM.
+     */
+    @Volatile
+    internal var terminationReason: String? = null
 
     /**
      * Callback invoked when a new utterance starts (PRE_ROLL → SPEECH transition).
@@ -79,18 +97,34 @@ internal class UtteranceAccumulator(
      */
     internal var onSpeechStart: (() -> Unit)? = null
 
-    private val silenceFrameDurationMs = 20
-    private val maxSilenceFrames = (silenceDurationMs / silenceFrameDurationMs).coerceAtLeast(1)
-    private val stableBlockSamples = (sampleRate * stableBlockMs / 1000).coerceAtLeast(1)
+    /**
+     * Max utterance length is mode-specific:
+     * - Manual/manual: uses [manualManualConfig.maxDurationMs]
+     * - Manual/auto:   uses [manualAutoConfig.maxDurationMs]
+     */
+    private val effectiveMaxUtteranceLengthMs: Int by lazy {
+        when (stopTrigger) {
+            is ManualStopTrigger -> manualManualConfig.maxDurationMs
+            is AutoSilenceStopTrigger -> manualAutoConfig.maxDurationMs
+            else -> manualManualConfig.maxDurationMs
+        }
+    }
 
-    /** Trailing silence samples at 16kHz. */
-    private val trailingSilenceSamples: Int = (sampleRate * TRAILING_SILENCE_MS / 1000).coerceAtLeast(1)
+    /**
+     * Compute the abnormal silence threshold in frames for the given frame duration.
+     * Used for manual/manual mode: [manualManualConfig.abnormalSilenceMs] / [frameDurationMs].
+     */
+    private fun abnormalSilenceFramesFor(frameDurationMs: Int): Int =
+        (manualManualConfig.abnormalSilenceMs / frameDurationMs).coerceAtLeast(1)
 
-    /** Minimum utterance samples at 16kHz (total PCM duration). */
-    private val minUtteranceSamples: Int = (sampleRate * MIN_UTTERANCE_LENGTH_MS / 1000).coerceAtLeast(1)
+    /**
+     * Compute the auto-silence threshold in frames for the given frame duration.
+     * Used for manual/auto mode: [manualAutoConfig.autoSilenceMs] / [frameDurationMs].
+     */
+    private fun autoSilenceFramesFor(frameDurationMs: Int): Int =
+        (manualAutoConfig.autoSilenceMs / frameDurationMs).coerceAtLeast(1)
 
     // Buffer that accumulates PCM for the current utterance.
-    // Includes pre-roll frames — pre-roll no longer discards PCM.
     private val speechAccumulator = mutableListOf<Float>()
     private var speechActive = false
 
@@ -101,21 +135,50 @@ internal class UtteranceAccumulator(
     private var preRollFrameCount: Int = 0
 
     private var silenceFrameCount = 0
+
+    /**
+     * Duration of speech (speech-detected frames only) for the current utterance, in ms.
+     * Reset when a new utterance starts. Used for the max-duration timeout check.
+     * Only counts frames where speech is detected, so silence during an utterance
+     * does not advance the clock toward maximum utterance duration.
+     */
+    private var speechDurationMs = 0
+
+    /**
+     * Total accumulated duration since utterance start, including both speech and silence ms.
+     * Used only for logging and diagnostics — NOT for termination decisions.
+     */
     private var totalDurationMs = 0
 
     /** Captured utterance duration at last finalization (ms). 0 if no utterance has completed. */
     internal var lastUtteranceDurationMs: Int = 0
         private set
 
-    /** Tracks actual accumulated silence in ms. Accumulated before speech
-     *  detection (pre-speech) and during speech-active (post-speech). */
-    private var accumulatedSilenceMs: Long = 0L
-
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
         if (frame.isEmpty()) return null
 
+        // If abnormal termination already occurred, discard all frames.
+        if (terminationReason != null) return null
+
         val frameDurationMs = frame.size * 1000 / sampleRate
         totalDurationMs += frameDurationMs
+        if (isSpeechFrame || isEnergyAboveThreshold()) {
+            speechDurationMs += frameDurationMs
+        }
+
+        // Resolve abnormal silence threshold based on actual frame duration.
+        val currentAbnormalSilenceFrames = abnormalSilenceFramesFor(frameDurationMs)
+
+        // ── PCM non-zero verification ────────────────────────────────────
+        val hasNonZero = frame.any { it != 0.0f }
+        if (!hasNonZero) {
+            SttLogger.pcm("[PCM] all-zero frame, size=${frame.size}")
+        }
+
+        // ── Speech detection logging ─────────────────────────────────────
+        if (isSpeechFrame) {
+            SttLogger.pcm("[VAD] speech frame, energy=${vad.lastFrameEnergy}")
+        }
 
         if (!preRollComplete) {
             return handlePreRollFrame(frame, frameDurationMs)
@@ -124,51 +187,78 @@ internal class UtteranceAccumulator(
         appendSamples(frame)
 
         if (speechActive) {
-            val trigger = stopTrigger as? AutoSilenceStopTrigger
             val isSpeechOrEnergy = isSpeechFrame || isEnergyAboveThreshold()
 
             if (isSpeechOrEnergy) {
-                // Speech (VAD or energy fallback) resets silence counter.
-                accumulatedSilenceMs = 0L
+                silenceFrameCount = 0
+                val trigger = stopTrigger as? AutoSilenceStopTrigger
                 trigger?.onSpeechDetected()
+                SttLogger.pcm("[SILENCE] speech-active reset: isSpeechFrame=$isSpeechFrame")
             } else {
-                // Post-speech silence — accumulate and notify trigger.
-                accumulatedSilenceMs += frameDurationMs
-                trigger?.onSilenceDetected(accumulatedSilenceMs)
+                silenceFrameCount++
+                val trigger = stopTrigger as? AutoSilenceStopTrigger
+                trigger?.onSilenceDetected(silenceFrameCount.toLong() * frameDurationMs)
+                SttLogger.pcm("[SILENCE] silenceFrameCount=$silenceFrameCount, frameDurationMs=$frameDurationMs")
+
+                // Abnormal silence for manual/manual mode fires before max-duration.
+                if (stopTrigger is ManualStopTrigger && silenceFrameCount >= currentAbnormalSilenceFrames) {
+                    return handleAbnormalSilence()
+                }
             }
 
-            return handleActiveSpeech(isSpeechFrame)
+            // Max-duration check: only fires when speech is detected on the current frame,
+            // so silence time does not advance the clock toward the limit.
+            if (isSpeechOrEnergy && speechDurationMs >= effectiveMaxUtteranceLengthMs) {
+                return handleMaxUtteranceTimeout()
+            }
+
+            return null
         }
 
         // ── Pre-speech path (no speech detected yet, pre-roll complete) ──
         val trigger = stopTrigger as? AutoSilenceStopTrigger
 
         if (isSpeechFrame) {
-            // VAD detected speech — notify trigger and reset silence counter.
+            // VAD detected speech — reset silence counter and start utterance.
+            silenceFrameCount = 0
             trigger?.onSpeechDetected()
-            accumulatedSilenceMs = 0L
-            return handleSpeechStart(isSpeechFrame)
+            return handleSpeechStart()
         }
 
         // ── Pre-speech speech detection fallback ─────────────────────────
-        // When VAD does not fire speech frames (unreliable VAD), detect
-        // speech transitions using frame energy vs. the VAD threshold.
-        // This restores the original behaviour where the accumulator detects
-        // speech transitions even when VAD is below its hysteresis threshold.
+        // When VAD does not fire speech frames, detect speech using frame
+        // energy against a low threshold (0.001f, matching typical Whisper
+        // energy levels). Also detect speech using a PCM non-zero heuristic
+        // for debugging — if PCM has content but energy reads zero, speech
+        // is happening.
         val frameEnergy = vad.lastFrameEnergy
-        val fallbackThreshold = 0.005f  // Matches Vad default energyThreshold
-        val energyDetected = frameEnergy >= fallbackThreshold
+        val energyThreshold = 0.001f
+        val energyDetected = frameEnergy >= energyThreshold
+
+        // Temporary force-speech heuristic: PCM has non-zero samples but
+        // energy is zero — indicates the VAD energy field isn't populated.
+        val frameHasNonZeroPCM = frame.any { it != 0.0f }
+        val forceSpeech = (frameEnergy == 0.0f && frameHasNonZeroPCM)
+
         if (energyDetected) {
-            SttLogger.vadD("fallback speech: energy=$frameEnergy >= threshold=$fallbackThreshold")
+            SttLogger.pcm("[FALLBACK] speech: energy=$frameEnergy >= threshold=$energyThreshold")
+            silenceFrameCount = 0
             trigger?.onSpeechDetected()
-            accumulatedSilenceMs = 0L
-            return handleSpeechStart(true)
+            return handleSpeechStart()
         }
 
-        // Still silence before speech — accumulate duration.
+        if (forceSpeech) {
+            SttLogger.pcm("[FALLBACK] force speech: energy=$frameEnergy but PCM has non-zero content")
+            silenceFrameCount = 0
+            trigger?.onSpeechDetected()
+            return handleSpeechStart()
+        }
+
+        SttLogger.pcm("[FALLBACK] silence: energy=$frameEnergy < threshold=$energyThreshold, hasNonZeroPCM=$frameHasNonZeroPCM")
+
+        // ── Pre-speech silence accumulation ─────────────────────────────
         // Callback is safe: AutoSilenceStopTrigger guards with speechHasOccurred.
-        accumulatedSilenceMs += frameDurationMs
-        trigger?.onSilenceDetected(accumulatedSilenceMs)
+        trigger?.onSilenceDetected(silenceFrameCount.toLong() * frameDurationMs)
         return null
     }
 
@@ -189,45 +279,15 @@ internal class UtteranceAccumulator(
     }
 
     /**
-     * Process a frame while speech is active.
-     * Checks for silence-based finalisation, max utterance timeout,
-     * and minimum length guard.
-     *
-     * Speech detection uses both VAD [isSpeechFrame] and an energy-based
-     * fallback ([vad.lastFrameEnergy] against a threshold) so that utterance
-     * finalization does not depend solely on VAD reliability.
-     */
-    private fun handleActiveSpeech(isSpeechFrame: Boolean): FloatArray? {
-        val isSpeechOrEnergy = isSpeechFrame || isEnergyAboveThreshold()
-        silenceFrameCount = if (isSpeechOrEnergy) 0 else silenceFrameCount + 1
-
-        val canFinalise = (silenceFrameCount >= maxSilenceFrames)
-        val minimumMet = (speechAccumulator.size * 1000 / sampleRate) >= MIN_UTTERANCE_LENGTH_MS
-
-        if (canFinalise && minimumMet) {
-            return finalizeUtterance()
-        }
-
-        if (totalDurationMs >= maxUtteranceLengthMs) {
-            return handleMaxUtteranceTimeout()
-        }
-
-        return null
-    }
-
-    /**
      * Process the first speech frame after silence.
      * Starts a new utterance. May trigger forceTimeout testing hook.
      */
-    private fun handleSpeechStart(isSpeechFrame: Boolean): FloatArray? {
-        if (!isSpeechFrame) {
-            return null
-        }
-
+    private fun handleSpeechStart(): FloatArray? {
         speechActive = true
         silenceFrameCount = 0
         totalDurationMs = 0
-        accumulatedSilenceMs = 0L
+        speechDurationMs = 0
+        SttLogger.pcm("[SPEECH] speechActive=true")
 
         (stopTrigger as? AutoSilenceStopTrigger)?.onSpeechDetected()
 
@@ -262,35 +322,62 @@ internal class UtteranceAccumulator(
 
     /**
      * Energy-based speech detection fallback for when VAD is unreliable.
-     * Returns true when the last frame's RMS energy exceeds the default
-     * VAD energy threshold.
+     * Returns true when the last frame's RMS energy matches typical Whisper
+     * energy levels (>= 0.001f).
      */
     private fun isEnergyAboveThreshold(): Boolean {
         val frameEnergy = vad.lastFrameEnergy
-        val fallbackThreshold = 0.005f
-        return frameEnergy >= fallbackThreshold
+        val energyThreshold = 0.001f
+        val aboveThreshold = frameEnergy >= energyThreshold
+        if (aboveThreshold) {
+            SttLogger.pcm("[FALLBACK] energy fallback: speech energy=$frameEnergy >= threshold=$energyThreshold")
+        }
+        return aboveThreshold
     }
 
     /**
-     * Handle max utterance timeout: report error, set timeout flag, finalise.
+     * Handle max utterance timeout: discard PCM, set terminationReason.
+     * Returns null so no PCM is delivered — Whisper must NOT be called.
+     * This is NOT an error; it is a user-facing termination message.
      */
     private fun handleMaxUtteranceTimeout(): FloatArray? {
-        SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
-        val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
-            code = SttErrorCode.INTERNAL_EXCEPTION,
-            message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
-            lastRms = vad.lastFrameEnergy,
-            lastVadState = true,
-            context = mapOf(
-                "totalDurationMs" to totalDurationMs,
-                "maxUtteranceLengthMs" to maxUtteranceLengthMs,
-                "bufferSize" to speechAccumulator.size
-            )
-        )
-        sttErrorListener?.onSttError(error)
+        SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$effectiveMaxUtteranceLengthMs")
+
+        speechAccumulator.clear()
+        speechActive = false
+        silenceFrameCount = 0
+        speechDurationMs = 0
+        totalDurationMs = 0
+        preRollComplete = false
+        preRollFrameCount = 0
+
+        terminationReason = reasonMessages.tooLong
         timeoutFired = true
-        return finalizeUtterance()
+
+        SttLogger.pcm("[TIMEOUT] abnormal termination: ${reasonMessages.tooLong}")
+        return null
+    }
+
+    /**
+     * Handle abnormal silence (manual/manual mode): discard PCM, set terminationReason.
+     * Returns null so no PCM is delivered — Whisper must NOT be called.
+     * This is NOT an error; it is a user-facing termination message.
+     */
+    private fun handleAbnormalSilence(): FloatArray? {
+        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualConfig.abnormalSilenceMs}")
+
+        speechAccumulator.clear()
+        speechActive = false
+        silenceFrameCount = 0
+        speechDurationMs = 0
+        totalDurationMs = 0
+        preRollComplete = false
+        preRollFrameCount = 0
+
+        terminationReason = reasonMessages.abnormalSilence
+
+        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: ${reasonMessages.abnormalSilence}")
+        return null
     }
 
     fun processFrame(frame: FloatArray): FloatArray? = processChunk(frame, vad.isSpeech(frame))
@@ -299,32 +386,36 @@ internal class UtteranceAccumulator(
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
+        speechDurationMs = 0
         totalDurationMs = 0
-        accumulatedSilenceMs = 0L
         preRollComplete = false
         preRollFrameCount = 0
         timeoutFired = false
-        // Reset trigger state so the next recording starts fresh
+        terminationReason = null
         (stopTrigger as? AutoSilenceStopTrigger)?.reset()
     }
 
     /**
      * forceFinalize returns all buffered PCM, even if VAD never fired.
-     * Returns null only when no frames have ever been buffered.
+     * Returns null when no frames have ever been buffered or when
+     * terminationReason is set (abnormal termination — Whisper must NOT be called).
      */
     fun forceFinalize(): FloatArray? {
-        if (speechAccumulator.isEmpty()) {
-            return null
-        }
+        if (terminationReason != null) return null
+        if (speechAccumulator.isEmpty()) return null
         return finalizeUtterance()
     }
 
     /**
      * finaliseUtterance finalises the current utterance and returns the PCM buffer.
      * Called only from the deterministic Stop path, after stopRequested has been set.
-     * Logs the final PCM size for diagnostic clarity. Delegates to [forceFinalize].
+     * Returns null if terminationReason is set (abnormal termination) or no PCM accumulated.
      */
     fun finaliseUtterance(): FloatArray? {
+        if (terminationReason != null) {
+            SttLogger.pcm("[FINALISE] abnormal termination active, returning null")
+            return null
+        }
         val pcm = forceFinalize()
         if (pcm != null) {
             SttLogger.pcm("[PCM] final pcm size=${pcm.size}")
@@ -344,88 +435,20 @@ internal class UtteranceAccumulator(
 
     internal fun currentDurationMs(): Int = totalDurationMs
 
-    /**
-     * Applies deterministic latency-stabilisation to the utterance PCM:
-     *
-     * 1. Append trailing silence (250ms) — always present, always identical.
-     * 2. Enforce minimum utterance length (700ms) — pad if shorter.
-     * 3. Stable-block pad to align with whisper chunk sizing.
-     *
-     * Logs all three metrics for runtime verification.
-     */
-    private fun applyLatencyStabilisation(utterance: FloatArray): FloatArray {
-        val originalSampleCount = utterance.size
-
-        // Rule 2: Append trailing silence (250ms)
-        val withTrailingSilence = padSilence(utterance, originalSampleCount)
-        val withTrailingDurationMs = withTrailingSilence.size * 1000 / sampleRate
-
-        SttLogger.pcm("[STABILISE] preRollMs=$PRE_ROLL_MS trailingSilenceMs=$TRAILING_SILENCE_MS utteranceLengthMs=$withTrailingDurationMs")
-
-        // Rule 3: Enforce minimum utterance length (700ms)
-        val afterMinLength = enforceMinLength(withTrailingSilence)
-        val resultDurationMs = afterMinLength.size * 1000 / sampleRate
-
-        lastUtteranceDurationMs = resultDurationMs
-
-        // Stable-block pad (existing behaviour)
-        return padToStableBlock(afterMinLength)
-    }
-
-    /**
-     * Append trailing silence to the utterance.
-     */
-    private fun padSilence(utterance: FloatArray, originalSampleCount: Int): FloatArray {
-        val result = FloatArray(originalSampleCount + trailingSilenceSamples)
-        utterance.copyInto(result, 0)
-        return result
-    }
-
-    /**
-     * If utterance is shorter than minimum length, pad with silence.
-     */
-    private fun enforceMinLength(utterance: FloatArray): FloatArray {
-        if (utterance.size >= minUtteranceSamples) {
-            return utterance
-        }
-
-        val paddingSamples = minUtteranceSamples - utterance.size
-        val padded = FloatArray(utterance.size + paddingSamples)
-        utterance.copyInto(padded, 0)
-        val paddedDurationMs = padded.size * 1000 / sampleRate
-        SttLogger.pcm("[STABILISE] clamped utteranceLengthMs=$paddedDurationMs")
-        return padded
-    }
-
-    /**
-     * Pad the utterance to the next stable-block boundary.
-     */
-    private fun padToStableBlock(utterance: FloatArray): FloatArray {
-        if (utterance.size % stableBlockSamples == 0) {
-            return utterance
-        }
-
-        val paddedLength = ((utterance.size / stableBlockSamples) + 1) * stableBlockSamples
-        val padded = FloatArray(paddedLength)
-        utterance.copyInto(padded, 0)
-        return padded
-    }
-
     private fun finalizeUtterance(): FloatArray {
-        if (speechAccumulator.isEmpty()) {
-            SttLogger.pcmW("finalizeUtterance called with empty buffer, returning null")
-            return FloatArray(0)
-        }
-
         val utterance = speechAccumulator.toFloatArray()
+        val durationMs = utterance.size * 1000 / sampleRate
+        lastUtteranceDurationMs = durationMs
+
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
+        speechDurationMs = 0
         totalDurationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
 
-        val stabilised = applyLatencyStabilisation(utterance)
-        return stabilised
+        SttLogger.pcm("[FINALISE] utterance finalized: ${utterance.size} samples, ${durationMs}ms")
+        return utterance
     }
 }

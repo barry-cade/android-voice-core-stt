@@ -10,7 +10,11 @@ class UtteranceAccumulatorTest {
     fun emitsUtteranceAfterSilence() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 40  // 2 frames of 10ms silence to trigger
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 40  // 4 frames of 10ms = finalize
+            )
         )
         val speechFrame = FloatArray(160) { 0.2f }  // 10ms at 16kHz
         val silenceFrame = FloatArray(160) { 0.0f }
@@ -20,30 +24,40 @@ class UtteranceAccumulatorTest {
             accumulator.processFrame(speechFrame)
         }
 
-        // Now speech is active. Feed enough speech to exceed minimum utterance length (700ms).
-        // At 10ms per frame, need 70 frames = 700ms.
-        for (i in 0 until 70) {
+        // Now speech is active. Feed speech frames to accumulate PCM.
+        for (i in 0 until 35) {
             accumulator.processFrame(speechFrame)
         }
 
-        // Two silence frames (40ms total) should trigger finalization:
-        // Frame 1: silenceFrameCount = 1 (< maxSilenceFrames = 2), returns null
-        // Frame 2: silenceFrameCount = 2 >= 2, and minimumMet (700ms) is satisfied
-        accumulator.processFrame(silenceFrame)
+        // Four silence frames (40ms total) should trigger abnormal silence fallback.
+        // Each frame is 10ms, so abnormalSilenceFramesFor(10) = 40 / 10 = 4.
+        // Frame 1: silenceFrameCount = 1 (< 4), returns null
+        // Frame 2: silenceFrameCount = 2 (< 4), returns null
+        // Frame 3: silenceFrameCount = 3 (< 4), returns null
+        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence
+        for (i in 0 until 3) {
+            accumulator.processFrame(silenceFrame)
+        }
+
+        // After handleAbnormalSilence, terminationReason is set and processFrame returns null
         val finalized = accumulator.processFrame(silenceFrame)
-        assertNotNull(finalized)
-        assertTrue(finalized!!.isNotEmpty())
+        assertNull("Abnormal silence must return null (no PCM)", finalized)
+        assertNotNull("terminationReason must be set", accumulator.terminationReason)
     }
 
     @Test
     fun doesNotEmitUtteranceOnSilenceOnly() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 500
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000
+            )
         )
         val silenceFrame = FloatArray(160) { 0.0f }
 
-        // Even after pre-roll (100ms = 10 frames at 10ms), silence should not trigger VAD
+        // Even after pre-roll (100ms = 10 frames at 10ms), silence should not trigger
         for (i in 0 until 100) {
             val result = accumulator.processFrame(silenceFrame)
             assertNull("Must not emit utterance on silence only (frame $i)", result)
@@ -54,9 +68,11 @@ class UtteranceAccumulatorTest {
     fun forceFinalizeReturnsBufferedContent() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 500,
-            maxUtteranceLengthMs = 4000,
-            stableBlockMs = 120
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 4000,
+                abnormalSilenceMs = 5000
+            )
         )
         val speechFrame = FloatArray(160) { 0.2f }
 
@@ -76,7 +92,8 @@ class UtteranceAccumulatorTest {
     fun forceFinalizeReturnsNullWhenEmpty() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 500
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig()
         )
         val result = accumulator.forceFinalize()
         assertNull("forceFinalize must return null when no frames were ever fed", result)
