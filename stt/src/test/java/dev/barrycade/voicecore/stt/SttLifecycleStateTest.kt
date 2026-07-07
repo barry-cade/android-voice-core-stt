@@ -9,8 +9,12 @@ import org.junit.Test
 /**
  * Tests for STT lifecycle state transitions.
  *
- * Validates that [SttLifecycleManager] enforces the legal transition matrix
- * and that illegal transitions are properly rejected with [SttErrorCode.PIPELINE_ILLEGAL_STATE].
+ * Validates that the legal transition matrix (UNINITIALISED -> READY ->
+ * RECORDING -> FINALISING -> READY) is enforced and that illegal
+ * transitions are rejected.
+ *
+ * The transition logic replicates [SpeechToText.transitionTo] as a
+ * pure function over a local [currentState] variable.
  *
  * All tests are PDP-aligned: linear arrange, act, assert.
  * No nested lambdas, no scope-function pyramids, no clever Kotlin.
@@ -20,6 +24,9 @@ class SttLifecycleStateTest {
     private lateinit var capturedErrors: MutableList<SttError>
     private lateinit var capturedLogs: MutableList<String>
 
+    /** Local state holder — replicates SpeechToText.currentState. */
+    private var currentState: SttLifecycleState = SttLifecycleState.UNINITIALISED
+
     private val errorListener = SttErrorListener { error ->
         capturedErrors.add(error)
     }
@@ -28,7 +35,7 @@ class SttLifecycleStateTest {
     fun setUp() {
         capturedErrors = mutableListOf()
         capturedLogs = mutableListOf()
-        // Redirect lifecycle logging to capture
+        currentState = SttLifecycleState.UNINITIALISED
         logCapture = { message -> capturedLogs.add(message) }
     }
 
@@ -36,114 +43,104 @@ class SttLifecycleStateTest {
 
     @Test
     fun legalTransition_uninitialisedToReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.UNINITIALISED
+        currentState = SttLifecycleState.UNINITIALISED
 
-        val result = applyTransition(manager, SttLifecycleState.READY)
+        val result = applyTransition(SttLifecycleState.READY)
 
         assertTrue("UNINITIALISED -> READY must return true", result.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun legalTransition_readyToRecording() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
-        val result = applyTransition(manager, SttLifecycleState.RECORDING)
+        val result = applyTransition(SttLifecycleState.RECORDING)
 
         assertTrue("READY -> RECORDING must return true", result.allowed)
-        assertEquals(SttLifecycleState.RECORDING, manager.currentState)
+        assertEquals(SttLifecycleState.RECORDING, currentState)
     }
 
     @Test
     fun legalTransition_recordingToFinalising() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
+        currentState = SttLifecycleState.RECORDING
 
-        val result = applyTransition(manager, SttLifecycleState.FINALISING)
+        val result = applyTransition(SttLifecycleState.FINALISING)
 
         assertTrue("RECORDING -> FINALISING must return true", result.allowed)
-        assertEquals(SttLifecycleState.FINALISING, manager.currentState)
+        assertEquals(SttLifecycleState.FINALISING, currentState)
     }
 
     @Test
     fun legalTransition_finalisingToReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.FINALISING
+        currentState = SttLifecycleState.FINALISING
 
-        val result = applyTransition(manager, SttLifecycleState.READY)
+        val result = applyTransition(SttLifecycleState.READY)
 
         assertTrue("FINALISING -> READY must return true", result.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     // ── Illegal transitions ─────────────────────────────────────────────
 
     @Test
     fun illegalTransition_readyToFinalising() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
-        val result = applyTransition(manager, SttLifecycleState.FINALISING)
+        val result = applyTransition(SttLifecycleState.FINALISING)
 
         assertFalse("READY -> FINALISING must return false", result.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun illegalTransition_finalisingToRecording() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.FINALISING
+        currentState = SttLifecycleState.FINALISING
 
-        val result = applyTransition(manager, SttLifecycleState.RECORDING)
+        val result = applyTransition(SttLifecycleState.RECORDING)
 
         assertFalse("FINALISING -> RECORDING must return false", result.allowed)
-        assertEquals(SttLifecycleState.FINALISING, manager.currentState)
+        assertEquals(SttLifecycleState.FINALISING, currentState)
     }
 
     @Test
     fun illegalTransition_recordingToReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
+        currentState = SttLifecycleState.RECORDING
 
-        val result = applyTransition(manager, SttLifecycleState.READY)
+        val result = applyTransition(SttLifecycleState.READY)
 
         assertFalse("RECORDING -> READY must return false", result.allowed)
-        assertEquals(SttLifecycleState.RECORDING, manager.currentState)
+        assertEquals(SttLifecycleState.RECORDING, currentState)
     }
 
     @Test
     fun illegalTransition_readyToReadyDuplicate() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
-        val result = applyTransition(manager, SttLifecycleState.READY)
+        val result = applyTransition(SttLifecycleState.READY)
 
         // Duplicate (no-op) transitions are allowed per current code
         assertTrue("READY -> READY (duplicate) must return true", result.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun illegalTransition_uninitialisedToRecording() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.UNINITIALISED
+        currentState = SttLifecycleState.UNINITIALISED
 
-        val result = applyTransition(manager, SttLifecycleState.RECORDING)
+        val result = applyTransition(SttLifecycleState.RECORDING)
 
         assertFalse("UNINITIALISED -> RECORDING must return false", result.allowed)
-        assertEquals(SttLifecycleState.UNINITIALISED, manager.currentState)
+        assertEquals(SttLifecycleState.UNINITIALISED, currentState)
     }
 
     // ── Error emission assertions ───────────────────────────────────────
 
     @Test
     fun illegalTransition_emitsPipelineIllegalState() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
-        applyTransition(manager, SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.FINALISING)
 
         val hasIllegalStateError = capturedErrors.any {
             it.code == SttErrorCode.PIPELINE_ILLEGAL_STATE
@@ -153,10 +150,9 @@ class SttLifecycleStateTest {
 
     @Test
     fun illegalTransition_emitsExactlyOneLog() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
-        applyTransition(manager, SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.FINALISING)
 
         val illegalTransitionLogs = capturedLogs.filter {
             it.contains("illegal transition")
@@ -174,14 +170,13 @@ class SttLifecycleStateTest {
 
     /**
      * Apply a transition using the same logic as [SpeechToText.transitionTo].
-     * This is a pure-function replica of the production transition validation.
+     * Operates on the local [currentState] variable.
      * Returns a [TransitionResult] indicating whether the transition was allowed.
      */
     private fun applyTransition(
-        manager: SttLifecycleManager,
         newState: SttLifecycleState
     ): TransitionResult {
-        val from = manager.currentState
+        val from = currentState
 
         // No-op: already in target state.
         if (from == newState) {
@@ -198,7 +193,7 @@ class SttLifecycleStateTest {
         if (valid) {
             val fromName = from.javaClass.simpleName
             val toName = newState.javaClass.simpleName
-            manager.currentState = newState
+            currentState = newState
             logCapture("[LIFECYCLE] state: $fromName -> $toName")
             return TransitionResult(allowed = true, from = from, to = newState)
         }

@@ -307,7 +307,7 @@ class SpeechToText internal constructor(
                 processorController?.stop()
                 stopRequested = true
 
-                val finalizedPcm = drainFramesAfterStop()
+                val finalizedPcm = processorController?.drainRemainingFrames()
 
                 val procVadMs = processorController?.vadActiveMs ?: 0L
                 val procUtterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
@@ -339,37 +339,6 @@ class SpeechToText internal constructor(
     }
 
     fun stop() = stopAndTranscribe()
-
-    /**
-     * Drain remaining frames from the capture queue into the accumulator.
-     * Returns the finalized utterance PCM if one is produced during drain.
-     */
-    private fun drainFramesAfterStop(): FloatArray? {
-        var drainFinalized: FloatArray? = null
-        val capture = audioSource
-        val proc = processorController
-
-        if (capture == null || proc == null) {
-            return null
-        }
-
-        val accumulator = proc.getAccumulator()
-        val procVad = proc.getVad()
-        var drainedCount = 0
-
-        while (true) {
-            val frame = capture.pollFrame()
-            if (frame == null) break
-            val isSpeech = procVad.isSpeech(frame)
-            val result = accumulator.processChunk(frame, isSpeech)
-            if (result != null) {
-                drainFinalized = result
-            }
-            drainedCount++
-        }
-        SttLogger.pcm("[STOP] drained $drainedCount frames into accumulator")
-        return drainFinalized
-    }
 
     // ────────────────────────────────────────────────────────────────────────
     // Shared inference + dispatch

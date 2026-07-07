@@ -124,19 +124,23 @@ class ProcessorControllerTest {
         assertNull("stopAndFinalize with empty accumulator must return null", pcm)
     }
 
-    // ── Getters (negative: must never return null) ───────────────────────
+    // ── Accessor tests (must never return null / crash) ──────────────────
 
     @Test
-    fun getVad_returnsNonNull() {
+    fun drainRemainingFrames_emptyQueue_returnsNull() {
         val controller = createController()
-        assertNotNull("getVad must return non-null Vad", controller.getVad())
+        val result = controller.drainRemainingFrames()
+        assertNull("drainRemainingFrames with empty queue must return null", result)
     }
 
     @Test
-    fun getAccumulator_returnsNonNull() {
+    fun drainRemainingFrames_withFrames_drainsSuccessfully() {
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(10, 320)
         val controller = createController()
-        assertNotNull("getAccumulator must return non-null accumulator",
-            controller.getAccumulator())
+        // Pre-load some frames without starting the processor
+        val result = controller.drainRemainingFrames()
+        // No crash is the assertion — may or may not produce PCM
     }
 
     @Test

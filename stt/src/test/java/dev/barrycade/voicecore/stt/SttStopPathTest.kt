@@ -13,9 +13,8 @@ import org.junit.Test
  * produces the correct transition sequence and that no warm-up or
  * unexpected inference occurs during stop.
  *
- * Since [SpeechToText] depends on Android framework classes (AudioRecord)
- * and JNI (WhisperBridge), this test verifies the lifecycle transition
- * logic in isolation using a pure-Kotlin state machine replica.
+ * Replicates the transition logic from [SpeechToText.transitionTo] as a
+ * pure function over a local [currentState] variable.
  *
  * All tests are PDP-aligned: linear arrange, act, assert.
  * No nested lambdas, no scope-function pyramids, no clever Kotlin.
@@ -25,6 +24,9 @@ class SttStopPathTest {
     private lateinit var capturedErrors: MutableList<SttError>
     private lateinit var capturedLogs: MutableList<String>
 
+    /** Local state holder — replicates SpeechToText.currentState. */
+    private var currentState: SttLifecycleState = SttLifecycleState.RECORDING
+
     private val errorListener = SttErrorListener { error ->
         capturedErrors.add(error)
     }
@@ -33,39 +35,32 @@ class SttStopPathTest {
     fun setUp() {
         capturedErrors = mutableListOf()
         capturedLogs = mutableListOf()
+        currentState = SttLifecycleState.RECORDING
         SttLifecycleStateTest.logCapture = { message -> capturedLogs.add(message) }
     }
 
     @Test
     fun stopPath_fullCycle_emitsRecordingToFinalising() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
+        val result = applyTransition(SttLifecycleState.FINALISING)
 
-        val transitionResult = applyTransition(manager, SttLifecycleState.FINALISING)
-
-        assertTrue("RECORDING -> FINALISING must succeed", transitionResult.allowed)
-        assertEquals(SttLifecycleState.FINALISING, manager.currentState)
+        assertTrue("RECORDING -> FINALISING must succeed", result.allowed)
+        assertEquals(SttLifecycleState.FINALISING, currentState)
     }
 
     @Test
     fun stopPath_fullCycle_emitsFinalisingToReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.FINALISING
+        currentState = SttLifecycleState.FINALISING
 
-        val transitionResult = applyTransition(manager, SttLifecycleState.READY)
+        val transitionResult = applyTransition(SttLifecycleState.READY)
 
         assertTrue("FINALISING -> READY must succeed", transitionResult.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun stopPath_fullCycle_bothTransitionsEmittedExactlyOnce() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
-
-        // Act: RECORDING -> FINALISING -> READY
-        applyTransition(manager, SttLifecycleState.FINALISING)
-        applyTransition(manager, SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.READY)
 
         val recordingToFinalisingCount = capturedLogs.filter {
             it.contains("state: RECORDING -> FINALISING")
@@ -80,28 +75,24 @@ class SttStopPathTest {
 
     @Test
     fun stopPath_noTransitionsAfterReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.READY
+        currentState = SttLifecycleState.READY
 
         // After reaching READY, no more transitions should occur via stop.
         // Attempting FINALISING from READY should fail.
-        val transitionResult = applyTransition(manager, SttLifecycleState.FINALISING)
+        val transitionResult = applyTransition(SttLifecycleState.FINALISING)
 
         assertFalse("READY -> FINALISING must fail after stop", transitionResult.allowed)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun stopPath_modelUnloadOccursAfterReady() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
-
         // Simulate: RECORDING -> FINALISING -> READY
-        applyTransition(manager, SttLifecycleState.FINALISING)
-        applyTransition(manager, SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.READY)
 
         // After READY state, verify lifecycle state is correct.
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
 
         // No errors should have been emitted during a clean stop cycle.
         assertTrue("no errors during clean stop cycle", capturedErrors.isEmpty())
@@ -109,12 +100,9 @@ class SttStopPathTest {
 
     @Test
     fun stopPath_noWarmupDuringStop() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
-
         // Simulate stop cycle
-        applyTransition(manager, SttLifecycleState.FINALISING)
-        applyTransition(manager, SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.READY)
 
         // Check no warmup-related log lines appear
         val warmupLogs = capturedLogs.filter {
@@ -125,50 +113,36 @@ class SttStopPathTest {
 
     @Test
     fun stopPath_pcmFinalisationOccursBeforeInference() {
-        // This test validates the ordering assertion:
-        // PCM finalisation must occur before inference in the stop path.
-        // In the production code, stopAndTranscribe() calls:
-        //   sttProcessor?.stop()
-        //   pcm = sttProcessor?.forceFinalize()
-        //   text = NativeSession.transcribe(samples)
-        //
-        // We verify the lifecycle ordering constraint here:
-        // FINALISING must be entered before any transition to READY.
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.RECORDING
-
-        applyTransition(manager, SttLifecycleState.FINALISING)
+        applyTransition(SttLifecycleState.FINALISING)
 
         // Simulate PCM finalisation at this point.
         val pcmFinalised = true
 
-        applyTransition(manager, SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.READY)
 
         assertTrue("PCM must be finalised before inference", pcmFinalised)
-        assertEquals(SttLifecycleState.READY, manager.currentState)
+        assertEquals(SttLifecycleState.READY, currentState)
     }
 
     @Test
     fun stopPath_illegalTransitionFromFinalisingToRecording() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.FINALISING
+        currentState = SttLifecycleState.FINALISING
 
-        val transitionResult = applyTransition(manager, SttLifecycleState.RECORDING)
+        val transitionResult = applyTransition(SttLifecycleState.RECORDING)
 
         assertFalse("FINALISING -> RECORDING must fail", transitionResult.allowed)
-        assertEquals(SttLifecycleState.FINALISING, manager.currentState)
+        assertEquals(SttLifecycleState.FINALISING, currentState)
     }
 
     @Test
     fun stopPath_duplicateFinalisingIsNoop() {
-        val manager = SttLifecycleManager()
-        manager.currentState = SttLifecycleState.FINALISING
+        currentState = SttLifecycleState.FINALISING
 
-        val transitionResult = applyTransition(manager, SttLifecycleState.FINALISING)
+        val transitionResult = applyTransition(SttLifecycleState.FINALISING)
 
         // Duplicate transitions are allowed (no-op)
         assertTrue("FINALISING -> FINALISING (duplicate) must be allowed", transitionResult.allowed)
-        assertEquals(SttLifecycleState.FINALISING, manager.currentState)
+        assertEquals(SttLifecycleState.FINALISING, currentState)
     }
 
     // ── Helper: pure-function transition logic ──────────────────────────
@@ -180,10 +154,9 @@ class SttStopPathTest {
     )
 
     private fun applyTransition(
-        manager: SttLifecycleManager,
         newState: SttLifecycleState
     ): TransitionResult {
-        val from = manager.currentState
+        val from = currentState
 
         if (from == newState) {
             return TransitionResult(allowed = true, from = from, to = newState)
@@ -200,7 +173,7 @@ class SttStopPathTest {
             val fromName = from.javaClass.simpleName
             val toName = newState.javaClass.simpleName
             SttLifecycleStateTest.logCapture("[LIFECYCLE] state: $fromName -> $toName")
-            manager.currentState = newState
+            currentState = newState
             return TransitionResult(allowed = true, from = from, to = newState)
         }
 

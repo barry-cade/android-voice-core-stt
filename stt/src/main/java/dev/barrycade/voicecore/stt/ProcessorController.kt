@@ -144,14 +144,29 @@ internal class ProcessorController(
     }
 
     /**
-     * Expose VAD for external frame-level speech detection during STOP drain.
+     * Drain remaining frames from [audioSource] into the accumulator
+     * after the processing loop has stopped. Returns the finalized PCM
+     * if one is produced during drain, or null if no frames were drained.
+     *
+     * Called by SpeechToText on the STOP path after the processor loop exits.
      */
-    fun getVad(): Vad = vad
+    fun drainRemainingFrames(): FloatArray? {
+        var drainFinalized: FloatArray? = null
+        var drainedCount = 0
 
-    /**
-     * Expose accumulator for external frame draining during STOP.
-     */
-    fun getAccumulator(): UtteranceAccumulator = utteranceAccumulator
+        while (true) {
+            val frame = audioSource.pollFrame()
+            if (frame == null) break
+            val isSpeech = vad.isSpeech(frame)
+            val result = utteranceAccumulator.processChunk(frame, isSpeech)
+            if (result != null) {
+                drainFinalized = result
+            }
+            drainedCount++
+        }
+        SttLogger.pcm("[STOP] drained $drainedCount frames into accumulator")
+        return drainFinalized
+    }
 
     /**
      * Finalise the current utterance and return the PCM buffer.
