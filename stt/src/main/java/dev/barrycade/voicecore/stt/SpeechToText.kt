@@ -5,7 +5,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
     modelPath: String,
-    private val whisperModel: WhisperModel = WhisperBridge
+    private val whisperModel: WhisperModel = WhisperBridge,
+    internal val startTrigger: ManualStartTrigger = ManualStartTrigger(),
+    internal val stopTrigger: ManualStopTrigger = ManualStopTrigger()
 ) {
     companion object {
         fun create(config: SttConfig): SpeechToText {
@@ -136,6 +138,8 @@ class SpeechToText internal constructor(
     // ────────────────────────────────────────────────────────────────────────
 
     fun start() {
+        startTrigger.requestStart()
+
         synchronized(stateLock) {
             SttLogger.pcm("[START] entered — isRunning=${isRunning.get()}, " +
                 "state=${currentState.javaClass.simpleName}, " +
@@ -291,6 +295,8 @@ class SpeechToText internal constructor(
     // ────────────────────────────────────────────────────────────────────────
 
     fun stopAndTranscribe() {
+        stopTrigger.requestStop()
+
         synchronized(stateLock) {
             SttLogger.pcm("[STOP] entered — isRunning=${isRunning.get()}")
 
