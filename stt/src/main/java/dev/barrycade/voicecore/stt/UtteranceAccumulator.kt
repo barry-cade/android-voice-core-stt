@@ -103,101 +103,125 @@ internal class UtteranceAccumulator(
     internal var lastUtteranceDurationMs: Int = 0
         private set
 
-    /**
-     * Returns a fixed-length array of silence samples (all zeros).
-     * Mel-light: zero amplitude, no energy, minimal mel spectrum contribution.
-     */
-
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
         if (frame.isEmpty()) return null
 
         val frameDurationMs = frame.size * 1000 / sampleRate
         totalDurationMs += frameDurationMs
 
-        // ── Pre-roll: delay speech detection, but KEEP the PCM ──────────
-        // Pre-roll frames are appended to the accumulator so STOP always has
-        // real audio to finalize. Only the "speech started" transition is
-        // delayed until pre-roll completes.
         if (!preRollComplete) {
-            preRollFrameCount += 1
-            // Keep the PCM — append every sample unconditionally
-            for (sample in frame) {
-                speechAccumulator.add(sample)
-            }
-            val preRollFrameTarget = (PRE_ROLL_MS / frameDurationMs).coerceAtLeast(1)
-            if (preRollFrameCount >= preRollFrameTarget) {
-                preRollComplete = true
-                SttLogger.pcm("[PREROLL] preRollMs=$PRE_ROLL_MS complete")
-            }
-            // Return null — speech detection is delayed, but PCM is preserved.
+            return handlePreRollFrame(frame, frameDurationMs)
+        }
+
+        appendSamples(frame)
+
+        if (speechActive) {
+            return handleActiveSpeech(isSpeechFrame)
+        }
+
+        return handleSpeechStart(isSpeechFrame)
+    }
+
+    /**
+     * Process a frame during pre-roll. PCM is saved but speech detection
+     * is delayed until pre-roll completes.
+     */
+    private fun handlePreRollFrame(frame: FloatArray, frameDurationMs: Int): FloatArray? {
+        preRollFrameCount += 1
+        appendSamples(frame)
+
+        val preRollFrameTarget = (PRE_ROLL_MS / frameDurationMs).coerceAtLeast(1)
+        if (preRollFrameCount >= preRollFrameTarget) {
+            preRollComplete = true
+            SttLogger.pcm("[PREROLL] preRollMs=$PRE_ROLL_MS complete")
+        }
+        return null
+    }
+
+    /**
+     * Process a frame while speech is active.
+     * Checks for silence-based finalisation, max utterance timeout,
+     * and minimum length guard.
+     */
+    private fun handleActiveSpeech(isSpeechFrame: Boolean): FloatArray? {
+        silenceFrameCount = if (isSpeechFrame) 0 else silenceFrameCount + 1
+
+        val canFinalise = (silenceFrameCount >= maxSilenceFrames)
+        val minimumMet = (speechAccumulator.size * 1000 / sampleRate) >= MIN_UTTERANCE_LENGTH_MS
+
+        if (canFinalise && minimumMet) {
+            return finalizeUtterance()
+        }
+
+        if (totalDurationMs >= maxUtteranceLengthMs) {
+            return handleMaxUtteranceTimeout()
+        }
+
+        return null
+    }
+
+    /**
+     * Process the first speech frame after silence.
+     * Starts a new utterance. May trigger forceTimeout testing hook.
+     */
+    private fun handleSpeechStart(isSpeechFrame: Boolean): FloatArray? {
+        if (!isSpeechFrame) {
             return null
         }
 
-        // Append every frame unconditionally — append-only, no removals.
+        speechActive = true
+        silenceFrameCount = 0
+        totalDurationMs = 0
+
+        onSpeechStart?.invoke()
+
+        if (forceTimeout) {
+            SttLogger.error("forcedFailure: PIPELINE_ILLEGAL_STATE")
+            val error = SttError(
+                category = SttErrorCategory.UNKNOWN,
+                code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
+                message = "Forced test failure: max utterance timeout",
+                lastRms = vad.lastFrameEnergy,
+                lastVadState = true,
+                context = mapOf("forcedFailure" to "forceTimeout")
+            )
+            sttErrorListener?.onSttError(error)
+            timeoutFired = true
+            return finalizeUtterance()
+        }
+
+        return null
+    }
+
+    /**
+     * Append frame samples to the accumulator.
+     */
+    private fun appendSamples(frame: FloatArray) {
         for (sample in frame) {
             speechAccumulator.add(sample)
         }
+    }
 
-        if (speechActive) {
-            silenceFrameCount = if (isSpeechFrame) 0 else silenceFrameCount + 1
-
-            // ── Minimum length guard: prevent early VAD finalisation ─────
-            // VAD must not finalise silence until minimum utterance length
-            // (700ms) is satisfied. Override early finalisation and continue
-            // accumulating PCM until the minimum is met.
-            val canFinalise = (silenceFrameCount >= maxSilenceFrames)
-            val minimumMet = (speechAccumulator.size * 1000 / sampleRate) >= MIN_UTTERANCE_LENGTH_MS
-
-            if (canFinalise && minimumMet) {
-                return finalizeUtterance()
-            }
-
-            if (totalDurationMs >= maxUtteranceLengthMs) {
-                SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
-                val error = SttError(
-                    category = SttErrorCategory.UNKNOWN,
-                    code = SttErrorCode.INTERNAL_EXCEPTION,
-                    message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
-                    lastRms = vad.lastFrameEnergy,
-                    lastVadState = true,
-                    context = mapOf(
-                        "totalDurationMs" to totalDurationMs,
-                        "maxUtteranceLengthMs" to maxUtteranceLengthMs,
-                        "bufferSize" to speechAccumulator.size
-                    )
-                )
-                sttErrorListener?.onSttError(error)
-                timeoutFired = true
-                return finalizeUtterance()
-            }
-            return null
-        } else {
-            if (isSpeechFrame) {
-                speechActive = true
-                silenceFrameCount = 0
-                totalDurationMs = 0
-
-                // ── Notify SttProcessor to reset per-utterance counters ──
-                onSpeechStart?.invoke()
-
-                // ── Testing hook: forceTimeout on first speech frame ──────
-                if (forceTimeout) {
-                    SttLogger.error("forcedFailure: PIPELINE_ILLEGAL_STATE")
-                    val error = SttError(
-                        category = SttErrorCategory.UNKNOWN,
-                        code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
-                        message = "Forced test failure: max utterance timeout",
-                        lastRms = vad.lastFrameEnergy,
-                        lastVadState = true,
-                        context = mapOf("forcedFailure" to "forceTimeout")
-                    )
-                    sttErrorListener?.onSttError(error)
-                    timeoutFired = true
-                    return finalizeUtterance()
-                }
-            }
-            return null
-        }
+    /**
+     * Handle max utterance timeout: report error, set timeout flag, finalise.
+     */
+    private fun handleMaxUtteranceTimeout(): FloatArray? {
+        SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$maxUtteranceLengthMs")
+        val error = SttError(
+            category = SttErrorCategory.UNKNOWN,
+            code = SttErrorCode.INTERNAL_EXCEPTION,
+            message = "Max utterance length exceeded: ${totalDurationMs}ms > ${maxUtteranceLengthMs}ms",
+            lastRms = vad.lastFrameEnergy,
+            lastVadState = true,
+            context = mapOf(
+                "totalDurationMs" to totalDurationMs,
+                "maxUtteranceLengthMs" to maxUtteranceLengthMs,
+                "bufferSize" to speechAccumulator.size
+            )
+        )
+        sttErrorListener?.onSttError(error)
+        timeoutFired = true
+        return finalizeUtterance()
     }
 
     fun processFrame(frame: FloatArray): FloatArray? = processChunk(frame, vad.isSpeech(frame))
@@ -239,26 +263,14 @@ internal class UtteranceAccumulator(
     /**
      * resetForNextUtterance clears all state for the next utterance cycle.
      * Used in Streaming Mode after an utterance has been transcribed and dispatched.
-     * Must not leak any PCM between utterances.
+     * Delegates to [reset] then logs the stream reset.
      */
     fun resetForNextUtterance() {
-        speechAccumulator.clear()
-        speechActive = false
-        silenceFrameCount = 0
-        totalDurationMs = 0
-        preRollComplete = false
-        preRollFrameCount = 0
-        timeoutFired = false
+        reset()
         SttLogger.pcm("[STREAM] accumulator reset")
     }
 
     internal fun currentDurationMs(): Int = totalDurationMs
-
-    /**
-     * Returns the total duration of the current utterance in milliseconds.
-     * Same as [currentDurationMs] but named for clarity at finalization time.
-     */
-    internal fun utteranceDurationMs(): Int = totalDurationMs
 
     /**
      * Applies deterministic latency-stabilisation to the utterance PCM:

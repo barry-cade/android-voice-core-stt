@@ -425,6 +425,8 @@ class SpeechToText internal constructor(
             audioSource?.stopCapture()
             audioSource = null
             modelManager.unload()
+            // Hard reset — bypasses transitionTo validation since this is
+            // a full teardown, not a lifecycle step.
             currentState = SttLifecycleState.UNINITIALISED
         }
         modelManager.shutdown()
