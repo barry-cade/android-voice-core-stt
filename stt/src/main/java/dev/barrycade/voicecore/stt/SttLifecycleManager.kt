@@ -5,7 +5,7 @@ package dev.barrycade.voicecore.stt
  * Transition validation and enforcement is performed by
  * [SpeechToText.transitionTo].
  *
- * Thread safety is delegated to the caller (SpeechToText uses [stateLock]).
+ * Thread safety is delegated to the caller.
  */
 internal class SttLifecycleManager {
     @Volatile

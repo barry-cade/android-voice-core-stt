@@ -115,25 +115,6 @@ class SttTimingSnapshotTest {
         assertEquals(measuredTotalMs, snapshot.totalPipelineMs)
     }
 
-    // ── SttTiming (internal) mirror test ────────────────────────────────
-
-    @Test
-    fun sttTiming_toStringContainsAllValues() {
-        val timing = SttTiming(
-            vadActiveMs = 130,
-            utteranceMs = 700,
-            inferenceMs = 310,
-            totalMs = 1140
-        )
-
-        val str = timing.toString()
-
-        assertTrue("toString must contain vadActiveMs", str.contains("vadActiveMs=130"))
-        assertTrue("toString must contain utteranceMs", str.contains("utteranceMs=700"))
-        assertTrue("toString must contain inferenceMs", str.contains("inferenceMs=310"))
-        assertTrue("toString must contain totalMs", str.contains("totalMs=1140"))
-    }
-
     // ── Pipeline timing consistency ─────────────────────────────────────
 
     @Test

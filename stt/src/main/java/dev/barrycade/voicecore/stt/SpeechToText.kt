@@ -40,28 +40,32 @@ class SpeechToText internal constructor(
     private var onResult: ((String) -> Unit)? = null
     private var onResultWithTiming: ((text: String, timing: SttTimingSnapshot?) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
-    internal var onTimingCallback: ((SttTiming) -> Unit)? = null
     var onTimingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
 
     private val isRunning = AtomicBoolean(false)
     private val isInferencing = AtomicBoolean(false)
     private val stateLock = Any()
-    private val lifecycleManager = SttLifecycleManager()
+
+    @Volatile
+    private var currentState: SttLifecycleState = SttLifecycleState.UNINITIALISED
+
     @Volatile private var startRequested = false
     private var externalReadyListener: SttReadyListener? = null
 
-    private val internalReadyListener = SttReadyListener {
-        SttLogger.pcm("[READY_CALLBACK] internalReadyListener fired — startRequested=$startRequested")
-        synchronized(stateLock) {
-            transitionTo(SttLifecycleState.READY)
-        }
-        externalReadyListener?.onSttReady()
-        if (startRequested) {
-            startRequested = false
-            SttLogger.pcm("[READY_CALLBACK] calling start() from callback")
-            this.start()
-        } else {
-            SttLogger.pcm("[READY_CALLBACK] no queued start request — waiting for UI")
+    private val internalReadyListener: SttReadyListener = object : SttReadyListener {
+        override fun onSttReady() {
+            SttLogger.pcm("[READY_CALLBACK] internalReadyListener fired — startRequested=$startRequested")
+            synchronized(stateLock) {
+                transitionTo(SttLifecycleState.READY)
+            }
+            externalReadyListener?.onSttReady()
+            if (startRequested) {
+                startRequested = false
+                SttLogger.pcm("[READY_CALLBACK] calling start() from callback")
+                this@SpeechToText.start()
+            } else {
+                SttLogger.pcm("[READY_CALLBACK] no queued start request — waiting for UI")
+            }
         }
     }
 
@@ -133,7 +137,7 @@ class SpeechToText internal constructor(
     fun start() {
         synchronized(stateLock) {
             SttLogger.pcm("[START] entered — isRunning=${isRunning.get()}, " +
-                "state=${lifecycleManager.currentState.javaClass.simpleName}, " +
+                "state=${currentState.javaClass.simpleName}, " +
                 "isReady=${modelManager.isReady}")
             if (isRunning.get()) return
 
@@ -184,7 +188,6 @@ class SpeechToText internal constructor(
      * if the request was queued or rejected.
      */
     private fun isReadyOrCanQueue(): Boolean {
-        val currentState = lifecycleManager.currentState
         if (currentState is SttLifecycleState.UNINITIALISED || !modelManager.isReady) {
             SttLogger.lifecycleW("start() called early — queued until READY")
             startEarlyCaptureForWarmup()
@@ -271,7 +274,7 @@ class SpeechToText internal constructor(
                 audioSource?.stopCapture()
                 audioSource = null
                 isRunning.set(false)
-                if (lifecycleManager.currentState is SttLifecycleState.RECORDING) {
+                if (currentState is SttLifecycleState.RECORDING) {
                     transitionTo(SttLifecycleState.FINALISING)
                 }
                 transitionTo(SttLifecycleState.READY)
@@ -397,17 +400,18 @@ class SpeechToText internal constructor(
         val whisperMs = System.currentTimeMillis() - infStartMs
         val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
 
-        val ts = SttTiming(
-            vadActiveMs = vadActiveMs.toInt(),
-            utteranceMs = utteranceMs.toInt(),
-            inferenceMs = whisperMs.toInt(),
-            totalMs = totalMs.toInt()
+        val snapshot = SttTimingSnapshot(
+            vadActiveMs = vadActiveMs,
+            utteranceDurationMs = utteranceMs,
+            silencePaddingMs = config.silencePaddingMs.toLong(),
+            preRollMs = config.preRollMs.toLong(),
+            inferenceMs = whisperMs,
+            totalPipelineMs = totalMs
         )
 
         lastTranscribedText = text
-        onTimingCallback?.invoke(ts)
         onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
-        dispatchResult(text, null)
+        dispatchResult(text, snapshot)
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -421,7 +425,7 @@ class SpeechToText internal constructor(
             audioSource?.stopCapture()
             audioSource = null
             modelManager.unload()
-            lifecycleManager.currentState = SttLifecycleState.UNINITIALISED
+            currentState = SttLifecycleState.UNINITIALISED
         }
         modelManager.shutdown()
     }
@@ -431,7 +435,7 @@ class SpeechToText internal constructor(
     // ────────────────────────────────────────────────────────────────────────
 
     private fun transitionTo(newState: SttLifecycleState): Boolean {
-        val from = lifecycleManager.currentState
+        val from = currentState
         if (from == newState) return true
         val valid = when (from) {
             is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
@@ -440,7 +444,7 @@ class SpeechToText internal constructor(
             is SttLifecycleState.FINALISING -> newState is SttLifecycleState.READY
         }
         if (valid) {
-            lifecycleManager.currentState = newState
+            currentState = newState
             return true
         }
         SttLogger.lifecycleE("illegal transition: ${from.javaClass.simpleName} → ${newState.javaClass.simpleName}")
