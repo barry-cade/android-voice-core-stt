@@ -28,7 +28,9 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
                     "SttErrorCategory",
                     "SttTimingSnapshot",
                     "SttLifecycleState",
-                    "SttReadyListener"
+                    "SttReadyListener",
+                    "StartTriggerStrategy",
+                    "StopTriggerStrategy"
                 )
 
         val sttSources = sourceDir.get().asFile

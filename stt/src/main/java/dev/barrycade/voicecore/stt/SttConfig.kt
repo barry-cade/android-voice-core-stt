@@ -38,7 +38,7 @@ data class SttConfig(
      *
      * Allowed values:
      *   "manual"      → [ManualStopTrigger] (explicit caller request)
-     *   "autoSilence" → reserved for future use
+     *   "autoSilence" → [AutoSilenceStopTrigger] (stop on silence exceeding VAD threshold)
      *   "wakeWord"    → reserved for future use
      *
      * @throws IllegalArgumentException if the value is not recognised.
@@ -46,9 +46,12 @@ data class SttConfig(
     fun resolveStopTrigger(): StopTriggerStrategy {
         return when (stopStrategy.lowercase()) {
             "manual" -> ManualStopTrigger()
+            "autosilence" -> AutoSilenceStopTrigger(
+                silenceThresholdMs = this.silencePaddingMs.toLong()
+            )
             else -> throw IllegalArgumentException(
                 "stopStrategy='$stopStrategy' is not a valid value. " +
-                    "Allowed: manual"
+                    "Allowed: manual, autoSilence"
             )
         }
     }

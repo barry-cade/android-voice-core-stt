@@ -6,6 +6,7 @@
   "stableChunkSizeMs": 500,
   "startStrategy": "manual",
   "stopStrategy": "manual",
+  "_comment_stopStrategy": "Allowed: manual, autoSilence",
   "motionMode": {
     "energyThreshold": 0.05,
     "silencePaddingMs": 300

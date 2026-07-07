@@ -248,7 +248,10 @@ class SpeechToText internal constructor(
         val vad = Vad(config)
         vad.debugLogging = config.debugLoggingEnabled
 
-        val accumulator = UtteranceAccumulator(config)
+        val accumulator = UtteranceAccumulator(
+            config,
+            stopTrigger = this@SpeechToText.stopTrigger
+        )
         accumulator.sttErrorListener = this@SpeechToText.sttErrorListener
         if (debugOptions.forceTimeout) {
             accumulator.forceTimeout = true
@@ -259,15 +262,24 @@ class SpeechToText internal constructor(
 
         val utteranceHandler = UtteranceHandler()
 
-        return ProcessorController(
+        val processor = ProcessorController(
             audioSource = capture,
             vad = vad,
             utteranceAccumulator = accumulator,
             listener = utteranceHandler,
             sampleRate = 16000,
             debugLogging = config.debugLoggingEnabled,
-            stopRequestedRef = { this@SpeechToText.stopRequested }
+            stopRequestedRef = { this@SpeechToText.stopRequested },
+            autoStopRequestedRef = {
+                // Only auto-stop when the trigger is an AutoSilenceStopTrigger.
+                // ManualStopTrigger.shouldStop() always returns true, which would
+                // cause the processing loop to exit after the first frame.
+                val autoTrigger = this@SpeechToText.stopTrigger as? AutoSilenceStopTrigger
+                autoTrigger?.shouldStop() ?: false
+            }
         )
+        processor.onAutoStop = createAutoStopCallback()
+        return processor
     }
 
     /**
@@ -282,6 +294,44 @@ class SpeechToText internal constructor(
             SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
             audioSource?.stopCapture()
             audioSource = null
+            isRunning.set(false)
+            if (currentState is SttLifecycleState.RECORDING) {
+                transitionTo(SttLifecycleState.FINALISING)
+            }
+            transitionTo(SttLifecycleState.READY)
+            stopRequested = false
+        }
+    }
+
+    /**
+     * Returns the auto-stop cleanup callback. Delegates to [handleAutoStop].
+     */
+    private fun createAutoStopCallback(): () -> Unit {
+        return ::handleAutoStop
+    }
+
+    private fun handleAutoStop() {
+        synchronized(stateLock) {
+            SttLogger.pcm("[AUTOSTOP] cleaning up pipeline")
+
+            val proc = processorController
+            if (proc != null) {
+                val remainingPcm = proc.stopAndFinalize()
+                if (remainingPcm != null) {
+                    val vadMs = proc.vadActiveMs
+                    val utterMs = (proc.lastUtteranceDurationMs ?: 0).toLong()
+                    val capMs = if (timingPcmStartMs > 0) {
+                        System.currentTimeMillis() - timingPcmStartMs
+                    } else {
+                        0L
+                    }
+                    runInferenceAndDispatch(remainingPcm, vadMs, utterMs, capMs)
+                }
+            }
+
+            audioSource?.stopCapture()
+            audioSource = null
+            processorController = null
             isRunning.set(false)
             if (currentState is SttLifecycleState.RECORDING) {
                 transitionTo(SttLifecycleState.FINALISING)

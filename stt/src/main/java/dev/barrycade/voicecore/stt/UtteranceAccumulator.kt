@@ -30,15 +30,22 @@ internal class UtteranceAccumulator(
     private val silenceDurationMs: Int = 500,
     private val maxUtteranceLengthMs: Int = 7000,
     private val stableBlockMs: Int = 500,
-    private val vad: Vad = Vad()
+    private val vad: Vad = Vad(),
+    internal var stopTrigger: StopTriggerStrategy? = null
 ) {
-    constructor(config: RuntimeSttConfig, sampleRate: Int = 16000, vad: Vad = Vad(config)) : this(
+    constructor(
+        config: RuntimeSttConfig,
+        sampleRate: Int = 16000,
+        vad: Vad = Vad(config),
+        stopTrigger: StopTriggerStrategy? = null
+    ) : this(
         sampleRate = sampleRate,
         preRollMs = config.preRollMs,
         silenceDurationMs = config.silencePaddingMs,
         maxUtteranceLengthMs = config.maxUtteranceLengthMs,
         stableBlockMs = config.stableChunkSizeMs,
-        vad = vad
+        vad = vad,
+        stopTrigger = stopTrigger
     )
 
     companion object {
@@ -100,6 +107,10 @@ internal class UtteranceAccumulator(
     internal var lastUtteranceDurationMs: Int = 0
         private set
 
+    /** Tracks actual accumulated silence in ms. Accumulated before speech
+     *  detection (pre-speech) and during speech-active (post-speech). */
+    private var accumulatedSilenceMs: Long = 0L
+
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
         if (frame.isEmpty()) return null
 
@@ -113,10 +124,52 @@ internal class UtteranceAccumulator(
         appendSamples(frame)
 
         if (speechActive) {
+            val trigger = stopTrigger as? AutoSilenceStopTrigger
+            val isSpeechOrEnergy = isSpeechFrame || isEnergyAboveThreshold()
+
+            if (isSpeechOrEnergy) {
+                // Speech (VAD or energy fallback) resets silence counter.
+                accumulatedSilenceMs = 0L
+                trigger?.onSpeechDetected()
+            } else {
+                // Post-speech silence — accumulate and notify trigger.
+                accumulatedSilenceMs += frameDurationMs
+                trigger?.onSilenceDetected(accumulatedSilenceMs)
+            }
+
             return handleActiveSpeech(isSpeechFrame)
         }
 
-        return handleSpeechStart(isSpeechFrame)
+        // ── Pre-speech path (no speech detected yet, pre-roll complete) ──
+        val trigger = stopTrigger as? AutoSilenceStopTrigger
+
+        if (isSpeechFrame) {
+            // VAD detected speech — notify trigger and reset silence counter.
+            trigger?.onSpeechDetected()
+            accumulatedSilenceMs = 0L
+            return handleSpeechStart(isSpeechFrame)
+        }
+
+        // ── Pre-speech speech detection fallback ─────────────────────────
+        // When VAD does not fire speech frames (unreliable VAD), detect
+        // speech transitions using frame energy vs. the VAD threshold.
+        // This restores the original behaviour where the accumulator detects
+        // speech transitions even when VAD is below its hysteresis threshold.
+        val frameEnergy = vad.lastFrameEnergy
+        val fallbackThreshold = 0.005f  // Matches Vad default energyThreshold
+        val energyDetected = frameEnergy >= fallbackThreshold
+        if (energyDetected) {
+            SttLogger.vadD("fallback speech: energy=$frameEnergy >= threshold=$fallbackThreshold")
+            trigger?.onSpeechDetected()
+            accumulatedSilenceMs = 0L
+            return handleSpeechStart(true)
+        }
+
+        // Still silence before speech — accumulate duration.
+        // Callback is safe: AutoSilenceStopTrigger guards with speechHasOccurred.
+        accumulatedSilenceMs += frameDurationMs
+        trigger?.onSilenceDetected(accumulatedSilenceMs)
+        return null
     }
 
     /**
@@ -139,9 +192,14 @@ internal class UtteranceAccumulator(
      * Process a frame while speech is active.
      * Checks for silence-based finalisation, max utterance timeout,
      * and minimum length guard.
+     *
+     * Speech detection uses both VAD [isSpeechFrame] and an energy-based
+     * fallback ([vad.lastFrameEnergy] against a threshold) so that utterance
+     * finalization does not depend solely on VAD reliability.
      */
     private fun handleActiveSpeech(isSpeechFrame: Boolean): FloatArray? {
-        silenceFrameCount = if (isSpeechFrame) 0 else silenceFrameCount + 1
+        val isSpeechOrEnergy = isSpeechFrame || isEnergyAboveThreshold()
+        silenceFrameCount = if (isSpeechOrEnergy) 0 else silenceFrameCount + 1
 
         val canFinalise = (silenceFrameCount >= maxSilenceFrames)
         val minimumMet = (speechAccumulator.size * 1000 / sampleRate) >= MIN_UTTERANCE_LENGTH_MS
@@ -169,6 +227,9 @@ internal class UtteranceAccumulator(
         speechActive = true
         silenceFrameCount = 0
         totalDurationMs = 0
+        accumulatedSilenceMs = 0L
+
+        (stopTrigger as? AutoSilenceStopTrigger)?.onSpeechDetected()
 
         onSpeechStart?.invoke()
 
@@ -200,6 +261,17 @@ internal class UtteranceAccumulator(
     }
 
     /**
+     * Energy-based speech detection fallback for when VAD is unreliable.
+     * Returns true when the last frame's RMS energy exceeds the default
+     * VAD energy threshold.
+     */
+    private fun isEnergyAboveThreshold(): Boolean {
+        val frameEnergy = vad.lastFrameEnergy
+        val fallbackThreshold = 0.005f
+        return frameEnergy >= fallbackThreshold
+    }
+
+    /**
      * Handle max utterance timeout: report error, set timeout flag, finalise.
      */
     private fun handleMaxUtteranceTimeout(): FloatArray? {
@@ -228,9 +300,12 @@ internal class UtteranceAccumulator(
         speechActive = false
         silenceFrameCount = 0
         totalDurationMs = 0
+        accumulatedSilenceMs = 0L
         preRollComplete = false
         preRollFrameCount = 0
         timeoutFired = false
+        // Reset trigger state so the next recording starts fresh
+        (stopTrigger as? AutoSilenceStopTrigger)?.reset()
     }
 
     /**

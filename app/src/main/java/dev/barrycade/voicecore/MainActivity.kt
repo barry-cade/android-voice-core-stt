@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
@@ -26,6 +27,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtErrorBanner: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
+    private lateinit var radioGroupStartStrategy: RadioGroup
+    private lateinit var radioGroupStopStrategy: RadioGroup
+
+    private var selectedStartStrategy: String = "manual"
+    private var selectedStopStrategy: String = "manual"
 
     private var stt: SpeechToText? = null
     private var isRecording = false
@@ -57,6 +63,19 @@ class MainActivity : ComponentActivity() {
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
+        radioGroupStartStrategy = findViewById(R.id.radioGroupStartStrategy)
+        radioGroupStopStrategy = findViewById(R.id.radioGroupStopStrategy)
+
+        // ── Strategy radio listeners ─────────────────────────────────────
+        radioGroupStartStrategy.setOnCheckedChangeListener { _, _ ->
+            updateSelectedStrategies()
+            updateUi()
+        }
+
+        radioGroupStopStrategy.setOnCheckedChangeListener { _, _ ->
+            updateSelectedStrategies()
+            updateUi()
+        }
 
         btnStart.setOnClickListener {
             logInfo("STT_FLOW", "Start button pressed")
@@ -87,7 +106,26 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        updateSelectedStrategies()
         updateUi()
+    }
+
+    /**
+     * Read the currently selected radio button values and store them.
+     */
+    private fun updateSelectedStrategies() {
+        val startId = radioGroupStartStrategy.checkedRadioButtonId
+        selectedStartStrategy = when (startId) {
+            R.id.radioStartManual -> "manual"
+            else -> "manual"
+        }
+
+        val stopId = radioGroupStopStrategy.checkedRadioButtonId
+        selectedStopStrategy = when (stopId) {
+            R.id.radioStopManual -> "manual"
+            R.id.radioStopAutoSilence -> "autoSilence"
+            else -> "manual"
+        }
     }
 
     private fun hasRecordAudioPermission(): Boolean {
@@ -118,8 +156,8 @@ class MainActivity : ComponentActivity() {
                     motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
                     motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                     modelPath = modelPath,
-                    startStrategy = runtimeConfig.startStrategy,
-                    stopStrategy = runtimeConfig.stopStrategy
+                    startStrategy = selectedStartStrategy,
+                    stopStrategy = selectedStopStrategy
                 )
             )
 
@@ -138,6 +176,7 @@ class MainActivity : ComponentActivity() {
             // ── Timing callback ───────────────────────────────────────────
             val timingListener: (Long, Long, Long, Long) -> Unit = { pcmMs, vadActiveMs, whisperMs, totalMs ->
                 postToUi {
+                    isRecording = false
                     txtDiagnostics.visibility = android.view.View.VISIBLE
                     txtDiagnostics.text = buildString {
                         appendLine("=== Timing Diagnostics ===")
@@ -145,7 +184,11 @@ class MainActivity : ComponentActivity() {
                         appendLine("VAD active:      ${vadActiveMs}ms")
                         appendLine("Whisper inf:     ${whisperMs}ms")
                         appendLine("Total duration:  ${totalMs}ms")
+                        if (selectedStopStrategy == "autoSilence") {
+                            appendLine("Stop: auto-silence")
+                        }
                     }
+                    updateUi()
                 }
             }
             speechToText.onTimingListener = timingListener
@@ -221,8 +264,11 @@ class MainActivity : ComponentActivity() {
                 appendLine("stableChunkSizeMs:      ${runtimeConfig.stableChunkSizeMs}")
                 appendLine("motionMode.energyThreshold:   ${runtimeConfig.motionMode.energyThreshold}")
                 appendLine("motionMode.silencePaddingMs:  ${runtimeConfig.motionMode.silencePaddingMs}")
-                appendLine("startStrategy:          ${runtimeConfig.startStrategy}")
-                appendLine("stopStrategy:           ${runtimeConfig.stopStrategy}")
+                appendLine("startStrategy:          ${selectedStartStrategy}")
+                appendLine("stopStrategy:           ${selectedStopStrategy}")
+                if (selectedStopStrategy == "autoSilence") {
+                    appendLine("  └ threshold: ${runtimeConfig.silencePaddingMs}ms")
+                }
             }
 
             isRecording = true
@@ -280,9 +326,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Update button states according to current recording state and strategy.
+     *
+     * Rules:
+     *   - Start enabled when not recording (always, since manual start is the only option)
+     *   - Stop enabled only when recording AND stop strategy is "manual"
+     *   - Clear always enabled
+     *   - Radio groups disabled while recording (cannot change strategy mid-recording)
+     */
     private fun updateUi() {
+        val isManualStop = selectedStopStrategy == "manual"
+
         btnStart.isEnabled = !isRecording
-        btnStop.isEnabled = isRecording
+        btnStop.isEnabled = isRecording && isManualStop
+        btnClear.isEnabled = true
+
+        radioGroupStartStrategy.isEnabled = !isRecording
+        radioGroupStopStrategy.isEnabled = !isRecording
     }
 
     private fun getModelPath(): String {

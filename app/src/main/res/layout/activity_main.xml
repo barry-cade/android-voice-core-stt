@@ -17,11 +17,63 @@
         android:visibility="gone"
         android:text="STT is unavailable due to invalid configuration.\nCheck stt_config.json and restart the app." />
 
+    <!-- Start Strategy selection -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+        android:text="Start Strategy"
+        android:textStyle="bold"
+        android:layout_marginTop="8dp" />
+
+    <RadioGroup
+        android:id="@+id/radioGroupStartStrategy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/radioStartManual"
+            android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+            android:text="Manual"
+            android:checked="true" />
+    </RadioGroup>
+
+    <!-- Stop Strategy selection -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Stop Strategy"
+        android:textStyle="bold"
+        android:layout_marginTop="8dp" />
+
+    <RadioGroup
+        android:id="@+id/radioGroupStopStrategy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/radioStopManual"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Manual"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/radioStopAutoSilence"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Auto Silence" />
+    </RadioGroup>
+
+    <!-- Action Buttons -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
 
         <Button
             android:id="@+id/btnStart"
@@ -43,15 +95,13 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
             android:text="Clear" />
-    </LinearLayout>
-
+        </LinearLayout>
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:layout_marginTop="16dp"
         android:fillViewport="true">
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -92,3 +142,4 @@
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
+

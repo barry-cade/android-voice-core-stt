@@ -11,6 +11,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * @param stopRequestedRef Supplier that returns true when Stop has been requested.
  *        When true, the processing loop stops polling new frames and exits.
+ * @param autoStopRequestedRef Supplier that returns true when an automatic stop
+ *        trigger (e.g. auto-silence) has fired. When true, the processing loop
+ *        exits immediately (either after the current utterance is finalized, or
+ *        during a silence period if no utterance was produced).
  */
 internal class ProcessorController(
     private val audioSource: AudioSource,
@@ -19,7 +23,8 @@ internal class ProcessorController(
     private val listener: UtteranceListener,
     private val sampleRate: Int = 16000,
     private val debugLogging: Boolean = false,
-    private val stopRequestedRef: () -> Boolean
+    private val stopRequestedRef: () -> Boolean,
+    private val autoStopRequestedRef: () -> Boolean = { false }
 ) {
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -31,6 +36,14 @@ internal class ProcessorController(
      */
     @Volatile
     internal var onTimeoutStop: (() -> Unit)? = null
+
+    /**
+     * Optional callback invoked when the processor stops due to an automatic
+     * stop trigger (e.g. auto-silence). The callee should clean up audio
+     * capture and lifecycle state.
+     */
+    @Volatile
+    internal var onAutoStop: (() -> Unit)? = null
 
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
@@ -123,6 +136,13 @@ internal class ProcessorController(
                         onTimeoutStop?.invoke()
                         break
                     }
+                }
+
+                if (autoStopRequestedRef()) {
+                    SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
+                    isRunning.set(false)
+                    onAutoStop?.invoke()
+                    break
                 }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()

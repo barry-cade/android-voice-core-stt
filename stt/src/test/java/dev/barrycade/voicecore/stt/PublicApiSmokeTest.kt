@@ -56,6 +56,40 @@ class PublicApiSmokeTest {
     }
 
     @Test
+    fun sttConfig_resolveStopTrigger_autoSilence_returnsAutoSilenceStopTrigger() {
+        val config = SttConfig(
+            modelPath = "/dummy/path",
+            stopStrategy = "autoSilence",
+            silencePaddingMs = 600
+        )
+        val trigger = config.resolveStopTrigger()
+        assertTrue("Expected AutoSilenceStopTrigger, got ${trigger::class.simpleName}",
+            trigger is AutoSilenceStopTrigger)
+    }
+
+    @Test
+    fun sttConfig_resolveStopTrigger_autoSilence_caseInsensitive() {
+        val config = SttConfig(
+            modelPath = "/dummy/path",
+            stopStrategy = "AUTOSILENCE",
+            silencePaddingMs = 600
+        )
+        val trigger = config.resolveStopTrigger()
+        assertTrue(trigger is AutoSilenceStopTrigger)
+    }
+
+    @Test
+    fun sttConfig_resolveStopTrigger_autoSilence_usesSilencePaddingMs() {
+        val config = SttConfig(
+            modelPath = "/dummy/path",
+            stopStrategy = "autoSilence",
+            silencePaddingMs = 300
+        )
+        val trigger = config.resolveStopTrigger()
+        assertTrue(trigger is AutoSilenceStopTrigger)
+    }
+
+    @Test
     fun speechToTextPublicMethods_exist() {
         val methods = SpeechToText::class.java.methods.map { it.name }.toSet()
         assertTrue(methods.contains("start"))
