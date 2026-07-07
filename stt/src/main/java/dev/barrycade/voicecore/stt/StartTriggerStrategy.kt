@@ -9,7 +9,7 @@ package dev.barrycade.voicecore.stt
  *
  * @see ManualStartTrigger Explicit caller-requested start.
  */
-internal interface StartTriggerStrategy {
+interface StartTriggerStrategy {
     /**
      * Returns true when the engine should begin recording.
      *

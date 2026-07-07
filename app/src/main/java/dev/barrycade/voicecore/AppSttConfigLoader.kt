@@ -31,7 +31,9 @@ object AppSttConfigLoader {
             motionMode = AppMotionModeConfig(
                 energyThreshold = motionMode.getDouble("energyThreshold").toFloat(),
                 silencePaddingMs = motionMode.getInt("silencePaddingMs")
-            )
+            ),
+            startStrategy = root.optString("startStrategy", "manual"),
+            stopStrategy = root.optString("stopStrategy", "manual")
         )
     }
 }

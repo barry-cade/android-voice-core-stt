@@ -6,8 +6,8 @@ class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
     modelPath: String,
     private val whisperModel: WhisperModel = WhisperBridge,
-    internal val startTrigger: ManualStartTrigger = ManualStartTrigger(),
-    internal val stopTrigger: ManualStopTrigger = ManualStopTrigger()
+    private val startTrigger: StartTriggerStrategy = ManualStartTrigger(),
+    private val stopTrigger: StopTriggerStrategy = ManualStopTrigger()
 ) {
     companion object {
         fun create(config: SttConfig): SpeechToText {
@@ -24,7 +24,9 @@ class SpeechToText internal constructor(
                     ),
                     debugLoggingEnabled = config.debugLoggingEnabled
                 ),
-                config.modelPath
+                config.modelPath,
+                startTrigger = config.resolveStartTrigger(),
+                stopTrigger = config.resolveStopTrigger()
             )
         }
     }
@@ -138,14 +140,13 @@ class SpeechToText internal constructor(
     // ────────────────────────────────────────────────────────────────────────
 
     fun start() {
-        startTrigger.requestStart()
-
         synchronized(stateLock) {
             SttLogger.pcm("[START] entered — isRunning=${isRunning.get()}, " +
                 "state=${currentState.javaClass.simpleName}, " +
                 "isReady=${modelManager.isReady}")
             if (isRunning.get()) return
 
+            if (!startTrigger.shouldStart()) return
             if (!isReadyOrCanQueue()) return
             if (modelManager.initFailed) {
                 dispatchError(RuntimeException("Model initialisation failed"))
@@ -295,10 +296,9 @@ class SpeechToText internal constructor(
     // ────────────────────────────────────────────────────────────────────────
 
     fun stopAndTranscribe() {
-        stopTrigger.requestStop()
-
         synchronized(stateLock) {
             SttLogger.pcm("[STOP] entered — isRunning=${isRunning.get()}")
+            if (!stopTrigger.shouldStop()) return
 
             if (!isRunning.get()) {
                 SttLogger.pcm("[STOP] queued — recording not started yet")

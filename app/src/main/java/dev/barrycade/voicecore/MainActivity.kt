@@ -117,7 +117,9 @@ class MainActivity : ComponentActivity() {
                     stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
                     motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
                     motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
-                    modelPath = modelPath
+                    modelPath = modelPath,
+                    startStrategy = runtimeConfig.startStrategy,
+                    stopStrategy = runtimeConfig.stopStrategy
                 )
             )
 
@@ -219,6 +221,8 @@ class MainActivity : ComponentActivity() {
                 appendLine("stableChunkSizeMs:      ${runtimeConfig.stableChunkSizeMs}")
                 appendLine("motionMode.energyThreshold:   ${runtimeConfig.motionMode.energyThreshold}")
                 appendLine("motionMode.silencePaddingMs:  ${runtimeConfig.motionMode.silencePaddingMs}")
+                appendLine("startStrategy:          ${runtimeConfig.startStrategy}")
+                appendLine("stopStrategy:           ${runtimeConfig.stopStrategy}")
             }
 
             isRecording = true

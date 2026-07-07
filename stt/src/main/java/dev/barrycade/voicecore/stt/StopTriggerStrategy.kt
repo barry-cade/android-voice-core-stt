@@ -10,7 +10,7 @@ package dev.barrycade.voicecore.stt
  *
  * @see ManualStopTrigger Explicit caller-requested stop.
  */
-internal interface StopTriggerStrategy {
+interface StopTriggerStrategy {
     /**
      * Returns true when the engine should stop recording and transcribe.
      *

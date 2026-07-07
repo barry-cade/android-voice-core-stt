@@ -2,6 +2,7 @@ package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,12 +19,40 @@ class PublicApiSmokeTest {
         assertEquals(300, config.motionModeSilencePaddingMs)
         assertEquals(false, config.debugLoggingEnabled)
         assertEquals("/dummy/path", config.modelPath)
+        assertEquals("manual", config.startStrategy)
+        assertEquals("manual", config.stopStrategy)
     }
 
     @Test
     fun sttConfig_create_mapsDebugLoggingEnabled() {
         val config = SttConfig(modelPath = "/dummy/path", debugLoggingEnabled = true)
         assertEquals(true, config.debugLoggingEnabled)
+    }
+
+    @Test
+    fun sttConfig_resolveStartTrigger_manual_returnsManualStartTrigger() {
+        val config = SttConfig(modelPath = "/dummy/path", startStrategy = "manual")
+        val trigger = config.resolveStartTrigger()
+        assertTrue(trigger is ManualStartTrigger)
+    }
+
+    @Test
+    fun sttConfig_resolveStopTrigger_manual_returnsManualStopTrigger() {
+        val config = SttConfig(modelPath = "/dummy/path", stopStrategy = "manual")
+        val trigger = config.resolveStopTrigger()
+        assertTrue(trigger is ManualStopTrigger)
+    }
+
+    @Test
+    fun sttConfig_resolveStartTrigger_invalid_throws() {
+        val config = SttConfig(modelPath = "/dummy/path", startStrategy = "unknown")
+        assertThrows(IllegalArgumentException::class.java) { config.resolveStartTrigger() }
+    }
+
+    @Test
+    fun sttConfig_resolveStopTrigger_invalid_throws() {
+        val config = SttConfig(modelPath = "/dummy/path", stopStrategy = "bogus")
+        assertThrows(IllegalArgumentException::class.java) { config.resolveStopTrigger() }
     }
 
     @Test
