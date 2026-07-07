@@ -26,8 +26,15 @@ class SpeechToText internal constructor(
         }
     }
 
-    internal var forceAudioInitFailure: Boolean = false
-    internal var forceTimeout: Boolean = false
+    /**
+     * Debug/test options. Set via [setDebugOptions].
+     */
+    internal data class DebugOptions(
+        val forceAudioInitFailure: Boolean = false,
+        val forceTimeout: Boolean = false
+    )
+
+    internal var debugOptions: DebugOptions = DebugOptions()
 
     private var sttErrorListener: SttErrorListener? = null
     private var onResult: ((String) -> Unit)? = null
@@ -108,8 +115,10 @@ class SpeechToText internal constructor(
         forceWhisperLoadFailure: Boolean = false,
         forceTimeout: Boolean = false
     ) {
-        this.forceAudioInitFailure = forceAudioInitFailure
-        this.forceTimeout = forceTimeout
+        this.debugOptions = DebugOptions(
+            forceAudioInitFailure = forceAudioInitFailure,
+            forceTimeout = forceTimeout
+        )
         modelManager.forceWhisperLoadFailure = forceWhisperLoadFailure
     }
 
@@ -133,7 +142,7 @@ class SpeechToText internal constructor(
                 dispatchError(RuntimeException("Model initialisation failed"))
                 return
             }
-            if (forceAudioInitFailure) {
+            if (debugOptions.forceAudioInitFailure) {
                 dispatchError(RuntimeException("Forced test: AudioCapture init"))
                 return
             }
@@ -232,7 +241,7 @@ class SpeechToText internal constructor(
 
         val accumulator = UtteranceAccumulator(config)
         accumulator.sttErrorListener = this@SpeechToText.sttErrorListener
-        if (this@SpeechToText.forceTimeout) {
+        if (debugOptions.forceTimeout) {
             accumulator.forceTimeout = true
         }
         accumulator.onSpeechStart = {

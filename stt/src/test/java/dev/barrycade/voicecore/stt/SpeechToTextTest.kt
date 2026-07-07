@@ -122,13 +122,13 @@ class SpeechToTextTest {
     @Test
     fun setDebugOptions_forceTimeout_setsFlag() {
         speechToText.setDebugOptions(forceTimeout = true)
-        assertTrue("forceTimeout must be set", speechToText.forceTimeout)
+        assertTrue("forceTimeout must be set", speechToText.debugOptions.forceTimeout)
     }
 
     @Test
     fun setDebugOptions_forceAudioInitFailure_setsFlag() {
         speechToText.setDebugOptions(forceAudioInitFailure = true)
-        assertTrue("forceAudioInitFailure must be set", speechToText.forceAudioInitFailure)
+        assertTrue("forceAudioInitFailure must be set", speechToText.debugOptions.forceAudioInitFailure)
     }
 
     @Test

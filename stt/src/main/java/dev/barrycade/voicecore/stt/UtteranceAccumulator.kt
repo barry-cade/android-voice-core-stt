@@ -217,14 +217,16 @@ internal class UtteranceAccumulator(
      * Returns null only when no frames have ever been buffered.
      */
     fun forceFinalize(): FloatArray? {
-        if (speechAccumulator.isEmpty()) return null
+        if (speechAccumulator.isEmpty()) {
+            return null
+        }
         return finalizeUtterance()
     }
 
     /**
      * finaliseUtterance finalises the current utterance and returns the PCM buffer.
      * Called only from the deterministic Stop path, after stopRequested has been set.
-     * Logs the final PCM size for diagnostic clarity.
+     * Logs the final PCM size for diagnostic clarity. Delegates to [forceFinalize].
      */
     fun finaliseUtterance(): FloatArray? {
         val pcm = forceFinalize()

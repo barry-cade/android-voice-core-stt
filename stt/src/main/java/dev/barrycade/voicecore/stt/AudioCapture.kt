@@ -104,7 +104,10 @@ class AudioCapture(
                     floatBuffer!![index] = shortBuffer!![index].toFloat() / Short.MAX_VALUE
                 }
                 val floatFrame = floatBuffer!!.copyOf(readCount)
-                if (isRunning) {
+                // Use a local snapshot of isRunning to avoid a stale read after
+                // stop() has returned and cleared the queue.
+                val running = isRunning
+                if (running) {
                     frameQueue.offer(floatFrame)
                     Log.d("STT_PCM", "enqueue frame, size=${floatFrame.size}")
                 }
