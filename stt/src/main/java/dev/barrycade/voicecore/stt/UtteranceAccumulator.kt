@@ -280,43 +280,60 @@ internal class UtteranceAccumulator(
      */
     private fun applyLatencyStabilisation(utterance: FloatArray): FloatArray {
         val originalSampleCount = utterance.size
-        val originalDurationMs = originalSampleCount * 1000 / sampleRate
 
         // Rule 2: Append trailing silence (250ms)
-        val withTrailingSilence = FloatArray(originalSampleCount + trailingSilenceSamples)
-        utterance.copyInto(withTrailingSilence, 0)
-        // Remaining elements are already 0.0f (default float value = silence)
+        val withTrailingSilence = padSilence(utterance, originalSampleCount)
         val withTrailingDurationMs = withTrailingSilence.size * 1000 / sampleRate
 
         SttLogger.pcm("[STABILISE] preRollMs=$PRE_ROLL_MS trailingSilenceMs=$TRAILING_SILENCE_MS utteranceLengthMs=$withTrailingDurationMs")
 
         // Rule 3: Enforce minimum utterance length (700ms)
-        var result = withTrailingSilence
-        var resultDurationMs = withTrailingDurationMs
-        if (resultDurationMs < MIN_UTTERANCE_LENGTH_MS) {
-            val paddingSamples = minUtteranceSamples - result.size
-            if (paddingSamples > 0) {
-                val padded = FloatArray(result.size + paddingSamples)
-                result.copyInto(padded, 0)
-                // Remaining elements are 0.0f (mel-light silence padding)
-                result = padded
-                resultDurationMs = result.size * 1000 / sampleRate
-                SttLogger.pcm("[STABILISE] clamped utteranceLengthMs=$resultDurationMs")
-            }
-        }
+        val afterMinLength = enforceMinLength(withTrailingSilence)
+        val resultDurationMs = afterMinLength.size * 1000 / sampleRate
 
         lastUtteranceDurationMs = resultDurationMs
 
         // Stable-block pad (existing behaviour)
-        val paddedLength = if (result.size % stableBlockSamples == 0) {
-            result.size
-        } else {
-            ((result.size / stableBlockSamples) + 1) * stableBlockSamples
+        return padToStableBlock(afterMinLength)
+    }
+
+    /**
+     * Append trailing silence to the utterance.
+     */
+    private fun padSilence(utterance: FloatArray, originalSampleCount: Int): FloatArray {
+        val result = FloatArray(originalSampleCount + trailingSilenceSamples)
+        utterance.copyInto(result, 0)
+        return result
+    }
+
+    /**
+     * If utterance is shorter than minimum length, pad with silence.
+     */
+    private fun enforceMinLength(utterance: FloatArray): FloatArray {
+        if (utterance.size >= minUtteranceSamples) {
+            return utterance
         }
 
-        val finalPadded = FloatArray(paddedLength)
-        result.copyInto(finalPadded, 0)
-        return finalPadded
+        val paddingSamples = minUtteranceSamples - utterance.size
+        val padded = FloatArray(utterance.size + paddingSamples)
+        utterance.copyInto(padded, 0)
+        val paddedDurationMs = padded.size * 1000 / sampleRate
+        SttLogger.pcm("[STABILISE] clamped utteranceLengthMs=$paddedDurationMs")
+        return padded
+    }
+
+    /**
+     * Pad the utterance to the next stable-block boundary.
+     */
+    private fun padToStableBlock(utterance: FloatArray): FloatArray {
+        if (utterance.size % stableBlockSamples == 0) {
+            return utterance
+        }
+
+        val paddedLength = ((utterance.size / stableBlockSamples) + 1) * stableBlockSamples
+        val padded = FloatArray(paddedLength)
+        utterance.copyInto(padded, 0)
+        return padded
     }
 
     private fun finalizeUtterance(): FloatArray {
