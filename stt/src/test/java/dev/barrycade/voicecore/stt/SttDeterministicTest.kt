@@ -1,18 +1,22 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Deterministic test for [UtteranceAccumulator] with pre-roll, trailing silence,
- * and minimum utterance length enforcement.
+ * Deterministic test for [UtteranceAccumulator] with pre-roll and
+ * silence-based finalization.
  *
  * Tests generate synthetic PCM (constant-amplitude or silence), feed it through
  * the pipeline with a configured [Vad], and verify that accumulator finalization
  * produces a non-null utterance buffer.
  *
  * All tests are PDP-aligned: linear arrange, act, assert.
+ *
+ * Note: Since abnormal silence now returns null (no PCM), tests that rely on
+ * silence-triggered finalization must use forceFinalize() or STOP instead.
  */
 class SttDeterministicTest {
 
@@ -29,7 +33,14 @@ class SttDeterministicTest {
             speechFrames
         }
 
-        val accumulator = UtteranceAccumulator(sampleRate = 16000, silenceDurationMs = 500)
+        val accumulator = UtteranceAccumulator(
+            sampleRate = 16000,
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000
+            )
+        )
         var finalizedUtterance: FloatArray? = null
 
         // Pass pre-roll (100ms = 5 frames of 20ms silence) before speech
@@ -44,11 +55,8 @@ class SttDeterministicTest {
         }
 
         if (finalizedUtterance == null) {
-            // Feed trailing silence if VAD didn't finalize
-            val paddingFrames = List(25) { FloatArray(frameSize) { 0.0f } }
-            paddingFrames.forEach { frame ->
-                finalizedUtterance = accumulator.processChunk(frame, false)
-            }
+            // Use forceFinalize to get the PCM (since silence no longer returns PCM)
+            finalizedUtterance = accumulator.forceFinalize()
         }
 
         assertNotNull(finalizedUtterance)
@@ -61,9 +69,11 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             preRollMs = 100,
-            silenceDurationMs = 250,
-            maxUtteranceLengthMs = 4000,
-            stableBlockMs = 120,
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 4000,
+                abnormalSilenceMs = 5000
+            )
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -85,15 +95,16 @@ class SttDeterministicTest {
         val vad = Vad(energyThreshold = 0.01)
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 500,
-            maxUtteranceLengthMs = 4000,
-            stableBlockMs = 120,
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 4000,
+                abnormalSilenceMs = 5000
+            )
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
 
-        // Pre-roll is 100ms = 5 frames of 20ms. Send enough frames to pass pre-roll
-        // and accumulate speech for finalization.
+        // Send enough frames to pass pre-roll and accumulate speech
         for (i in 0 until 15) {
             accumulator.processChunk(speechFrame, true)
         }
@@ -104,13 +115,15 @@ class SttDeterministicTest {
     }
 
     @Test
-    fun deterministicUtterance_WithSilenceFinalization_EmitsNonEmpty() {
+    fun deterministicUtterance_WithSilenceFinalization_ReturnsNull() {
         val vad = Vad(energyThreshold = 0.01)
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 40, // 2 silence frames (20ms each) = finalize
-            maxUtteranceLengthMs = 10000,
-            stableBlockMs = 120,
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 10000,
+                abnormalSilenceMs = 40  // 2 silence frames (20ms each) = abnormal silence
+            )
         )
 
         val speechFrame = FloatArray(320) { 0.2f } // 20ms at 16kHz
@@ -121,18 +134,18 @@ class SttDeterministicTest {
             accumulator.processChunk(speechFrame, false)
         }
 
-        // Feed enough speech to exceed minimum utterance length (700ms).
-        // At 20ms per frame, need 35 frames = 700ms.
+        // Feed speech to accumulate PCM
         for (i in 0 until 35) {
             accumulator.processChunk(speechFrame, true)
         }
 
-        // Two silence frames (40ms total silence) should trigger finalization
+        // Two silence frames (40ms total silence) should trigger abnormal silence
+        // which returns null and sets terminationReason
         accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 1
         val utterance = accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 2 >= maxSilenceFrames
 
-        assertNotNull("utterance must be non-null after silence frames", utterance)
-        assertTrue("utterance must not be empty", utterance!!.isNotEmpty())
+        assertNull("Abnormal silence must return null (no PCM)", utterance)
+        assertNotNull("terminationReason must be set", accumulator.terminationReason)
     }
 
     /**

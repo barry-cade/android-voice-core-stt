@@ -1,19 +1,19 @@
 package dev.barrycade.voicecore.stt
 
+/**
+ * Full runtime configuration for the STT pipeline.
+ *
+ * Timing fields are mode-specific to prevent cross-mode interference.
+ * Use [manualManual] or [manualAuto] depending on the active stop strategy.
+ */
 internal data class RuntimeSttConfig(
     val energyThreshold: Float = 0.03f,
-    val silencePaddingMs: Int = 600,
-
     val preRollMs: Int = 100,
-    val maxUtteranceLengthMs: Int = 7000,
     val stableChunkSizeMs: Int = 500,
-    val motionMode: MotionModeConfig = MotionModeConfig(),
+    val manualManual: ManualManualConfig = ManualManualConfig(),
+    val manualAuto: ManualAutoConfig = ManualAutoConfig(),
+    val reasonMessages: ReasonMessages = ReasonMessages(),
     val debugLoggingEnabled: Boolean = false
-)
-
-internal data class MotionModeConfig(
-    val energyThreshold: Float = 0.05f,
-    val silencePaddingMs: Int = 300
 )
 
 internal fun RuntimeSttConfig.validate() {
@@ -21,27 +21,27 @@ internal fun RuntimeSttConfig.validate() {
         "energyThreshold=$energyThreshold must be in [0.0001, 1]"
     }
 
-    require(silencePaddingMs in 50..5000) {
-        "silencePaddingMs=$silencePaddingMs must be in [50, 5000] ms"
-    }
-
     require(preRollMs in 0..2000) {
         "preRollMs=$preRollMs must be in [0, 2000] ms"
-    }
-
-    require(maxUtteranceLengthMs in 1000..20000) {
-        "maxUtteranceLengthMs=$maxUtteranceLengthMs must be in [1000, 20000] ms"
     }
 
     require(stableChunkSizeMs in 50..2000) {
         "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
     }
 
-    require(motionMode.energyThreshold in 0.0001f..1f) {
-        "motionMode.energyThreshold=${motionMode.energyThreshold} must be in [0.0001, 1]"
+    require(manualManual.maxDurationMs in 1000..60000) {
+        "manualManual.maxDurationMs=${manualManual.maxDurationMs} must be in [1000, 60000] ms"
     }
 
-    require(motionMode.silencePaddingMs in 50..5000) {
-        "motionMode.silencePaddingMs=${motionMode.silencePaddingMs} must be in [50, 5000] ms"
+    require(manualManual.abnormalSilenceMs in 50..30000) {
+        "manualManual.abnormalSilenceMs=${manualManual.abnormalSilenceMs} must be in [50, 30000] ms"
+    }
+
+    require(manualAuto.maxDurationMs in 1000..60000) {
+        "manualAuto.maxDurationMs=${manualAuto.maxDurationMs} must be in [1000, 60000] ms"
+    }
+
+    require(manualAuto.autoSilenceMs in 50..10000) {
+        "manualAuto.autoSilenceMs=${manualAuto.autoSilenceMs} must be in [50, 10000] ms"
     }
 }

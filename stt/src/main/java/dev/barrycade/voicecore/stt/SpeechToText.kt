@@ -14,13 +14,19 @@ class SpeechToText internal constructor(
             return SpeechToText(
                 RuntimeSttConfig(
                     energyThreshold = config.energyThreshold,
-                    silencePaddingMs = config.silencePaddingMs,
                     preRollMs = config.preRollMs,
-                    maxUtteranceLengthMs = config.maxUtteranceLengthMs,
                     stableChunkSizeMs = config.stableChunkSizeMs,
-                    motionMode = MotionModeConfig(
-                        energyThreshold = config.motionModeEnergyThreshold,
-                        silencePaddingMs = config.motionModeSilencePaddingMs
+                    manualManual = ManualManualConfig(
+                        maxDurationMs = config.manualManual.maxDurationMs,
+                        abnormalSilenceMs = config.manualManual.abnormalSilenceMs
+                    ),
+                    manualAuto = ManualAutoConfig(
+                        maxDurationMs = config.manualAuto.maxDurationMs,
+                        autoSilenceMs = config.manualAuto.autoSilenceMs
+                    ),
+                    reasonMessages = ReasonMessages(
+                        tooLong = config.reasonMessages.tooLong,
+                        abnormalSilence = config.reasonMessages.abnormalSilence
                     ),
                     debugLoggingEnabled = config.debugLoggingEnabled
                 ),
@@ -173,7 +179,6 @@ class SpeechToText internal constructor(
             stopRequested = false
 
             val processor = createProcessor(capture)
-            processor.onTimeoutStop = createTimeoutStopCallback()
 
             processorController = processor
             processor.start()
@@ -279,27 +284,34 @@ class SpeechToText internal constructor(
             }
         )
         processor.onAutoStop = createAutoStopCallback()
+        processor.onAbnormalTermination = handleAbnormalTermination()
         return processor
     }
 
     /**
-     * Returns the timeout cleanup callback. Delegates to [handleTimeoutStop].
+     * Returns the abnormal termination callback. Dispatches the reason
+     * as a normal user-facing message — NOT an error. Whisper is NOT called.
      */
-    private fun createTimeoutStopCallback(): () -> Unit {
-        return ::handleTimeoutStop
-    }
+    private fun handleAbnormalTermination(): (reason: String) -> Unit {
+        return { reason ->
+            synchronized(stateLock) {
+                SttLogger.pcm("[ABNORMAL] abnormal termination: $reason")
 
-    private fun handleTimeoutStop() {
-        synchronized(stateLock) {
-            SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
-            audioSource?.stopCapture()
-            audioSource = null
-            isRunning.set(false)
-            if (currentState is SttLifecycleState.RECORDING) {
-                transitionTo(SttLifecycleState.FINALISING)
+                audioSource?.stopCapture()
+                audioSource = null
+                processorController = null
+                isRunning.set(false)
+                stopRequested = false
+
+                if (currentState is SttLifecycleState.RECORDING) {
+                    transitionTo(SttLifecycleState.FINALISING)
+                }
+                transitionTo(SttLifecycleState.READY)
+
+                // Dispatch the reason as a normal result (no timing snapshot).
+                // Whisper must NOT be called — there is no PCM to transcribe.
+                dispatchResult(reason, null)
             }
-            transitionTo(SttLifecycleState.READY)
-            stopRequested = false
         }
     }
 
@@ -428,10 +440,14 @@ class SpeechToText internal constructor(
         val whisperMs = System.currentTimeMillis() - infStartMs
         val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
 
+        val effectiveSilenceMs = when (stopTrigger) {
+            is AutoSilenceStopTrigger -> config.manualAuto.autoSilenceMs
+            else -> config.manualManual.abnormalSilenceMs
+        }
         val snapshot = SttTimingSnapshot(
             vadActiveMs = vadActiveMs,
             utteranceDurationMs = utteranceMs,
-            silencePaddingMs = config.silencePaddingMs.toLong(),
+            silencePaddingMs = effectiveSilenceMs.toLong(),
             preRollMs = config.preRollMs.toLong(),
             inferenceMs = whisperMs,
             totalPipelineMs = totalMs

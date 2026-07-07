@@ -9,6 +9,9 @@ import org.junit.Test
  *
  * Every [require] assertion in [RuntimeSttConfig.validate] must be
  * tested for both acceptance and rejection.
+ *
+ * Deprecated global timing fields (silencePaddingMs, maxUtteranceLengthMs,
+ * motionMode) have been removed — all timing is now mode-specific.
  */
 class RuntimeSttConfigTest {
 
@@ -43,30 +46,6 @@ class RuntimeSttConfigTest {
     }
 
     @Test
-    fun validate_silencePaddingMsLowBound_succeeds() {
-        val config = RuntimeSttConfig(silencePaddingMs = 50)
-        config.validate()
-    }
-
-    @Test
-    fun validate_silencePaddingMsHighBound_succeeds() {
-        val config = RuntimeSttConfig(silencePaddingMs = 5000)
-        config.validate()
-    }
-
-    @Test
-    fun validate_silencePaddingMsBelowMinimum_throws() {
-        val config = RuntimeSttConfig(silencePaddingMs = 49)
-        assertThrows(IllegalArgumentException::class.java) { config.validate() }
-    }
-
-    @Test
-    fun validate_silencePaddingMsAboveMaximum_throws() {
-        val config = RuntimeSttConfig(silencePaddingMs = 5001)
-        assertThrows(IllegalArgumentException::class.java) { config.validate() }
-    }
-
-    @Test
     fun validate_preRollMsLowBound_succeeds() {
         val config = RuntimeSttConfig(preRollMs = 0)
         config.validate()
@@ -85,18 +64,6 @@ class RuntimeSttConfigTest {
     }
 
     @Test
-    fun validate_maxUtteranceLengthMsLowBound_succeeds() {
-        val config = RuntimeSttConfig(maxUtteranceLengthMs = 1000)
-        config.validate()
-    }
-
-    @Test
-    fun validate_maxUtteranceLengthMsAboveMaximum_throws() {
-        val config = RuntimeSttConfig(maxUtteranceLengthMs = 20001)
-        assertThrows(IllegalArgumentException::class.java) { config.validate() }
-    }
-
-    @Test
     fun validate_stableChunkSizeMsLowBound_succeeds() {
         val config = RuntimeSttConfig(stableChunkSizeMs = 50)
         config.validate()
@@ -108,34 +75,134 @@ class RuntimeSttConfigTest {
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
+    // ── ManualManual validation ───────────────────────────────────────────
+
     @Test
-    fun validate_motionModeEnergyThresholdLowBound_succeeds() {
+    fun validate_manualManualMaxDurationMsLowBound_succeeds() {
         val config = RuntimeSttConfig(
-            motionMode = MotionModeConfig(energyThreshold = 0.0001f, silencePaddingMs = 300)
+            manualManual = ManualManualConfig(maxDurationMs = 1000)
         )
         config.validate()
     }
 
     @Test
-    fun validate_motionModeEnergyThresholdAboveMaximum_throws() {
+    fun validate_manualManualMaxDurationMsHighBound_succeeds() {
         val config = RuntimeSttConfig(
-            motionMode = MotionModeConfig(energyThreshold = 1.1f, silencePaddingMs = 300)
+            manualManual = ManualManualConfig(maxDurationMs = 60000)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualManualMaxDurationMsBelowMinimum_throws() {
+        val config = RuntimeSttConfig(
+            manualManual = ManualManualConfig(maxDurationMs = 999)
         )
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
     @Test
-    fun validate_motionModeSilencePaddingMsLowBound_succeeds() {
+    fun validate_manualManualMaxDurationMsAboveMaximum_throws() {
         val config = RuntimeSttConfig(
-            motionMode = MotionModeConfig(energyThreshold = 0.05f, silencePaddingMs = 50)
+            manualManual = ManualManualConfig(maxDurationMs = 60001)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    @Test
+    fun validate_manualManualAbnormalSilenceMsLowBound_succeeds() {
+        val config = RuntimeSttConfig(
+            manualManual = ManualManualConfig(abnormalSilenceMs = 50)
         )
         config.validate()
     }
 
     @Test
-    fun validate_motionModeSilencePaddingMsAboveMaximum_throws() {
+    fun validate_manualManualAbnormalSilenceMsHighBound_succeeds() {
         val config = RuntimeSttConfig(
-            motionMode = MotionModeConfig(energyThreshold = 0.05f, silencePaddingMs = 5001)
+            manualManual = ManualManualConfig(abnormalSilenceMs = 30000)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualManualAbnormalSilenceMsBelowMinimum_throws() {
+        val config = RuntimeSttConfig(
+            manualManual = ManualManualConfig(abnormalSilenceMs = 49)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    @Test
+    fun validate_manualManualAbnormalSilenceMsAboveMaximum_throws() {
+        val config = RuntimeSttConfig(
+            manualManual = ManualManualConfig(abnormalSilenceMs = 30001)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    // ── ManualAuto validation ─────────────────────────────────────────────
+
+    @Test
+    fun validate_manualAutoMaxDurationMsLowBound_succeeds() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(maxDurationMs = 1000)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualAutoMaxDurationMsHighBound_succeeds() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(maxDurationMs = 60000)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualAutoMaxDurationMsBelowMinimum_throws() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(maxDurationMs = 999)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    @Test
+    fun validate_manualAutoMaxDurationMsAboveMaximum_throws() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(maxDurationMs = 60001)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    @Test
+    fun validate_manualAutoAutoSilenceMsLowBound_succeeds() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(autoSilenceMs = 50)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualAutoAutoSilenceMsHighBound_succeeds() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(autoSilenceMs = 10000)
+        )
+        config.validate()
+    }
+
+    @Test
+    fun validate_manualAutoAutoSilenceMsBelowMinimum_throws() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(autoSilenceMs = 49)
+        )
+        assertThrows(IllegalArgumentException::class.java) { config.validate() }
+    }
+
+    @Test
+    fun validate_manualAutoAutoSilenceMsAboveMaximum_throws() {
+        val config = RuntimeSttConfig(
+            manualAuto = ManualAutoConfig(autoSilenceMs = 10001)
         )
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }

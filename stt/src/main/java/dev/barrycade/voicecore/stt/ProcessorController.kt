@@ -31,11 +31,12 @@ internal class ProcessorController(
 
     /**
      * Optional callback invoked when the processor stops due to a terminal
-     * timeout (maxUtteranceLengthMs exceeded). The callee should clean up
-     * audio capture and lifecycle state.
+     * timeout (maxUtteranceLengthMs exceeded) or abnormal silence.
+     * The callee should clean up audio capture and lifecycle state.
+     * The [reason] parameter contains the termination reason message.
      */
     @Volatile
-    internal var onTimeoutStop: (() -> Unit)? = null
+    internal var onAbnormalTermination: ((reason: String) -> Unit)? = null
 
     /**
      * Optional callback invoked when the processor stops due to an automatic
@@ -128,14 +129,19 @@ internal class ProcessorController(
                     lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                     SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
                     listener.onUtteranceReady(utterance)
+                }
 
-                    if (utteranceAccumulator.timeoutFired) {
-                        SttLogger.pcm("[TIMEOUT] max utterance reached — stopping processor")
-                        utteranceAccumulator.timeoutFired = false
-                        isRunning.set(false)
-                        onTimeoutStop?.invoke()
-                        break
-                    }
+                // Check for abnormal termination (timeout or abnormal silence).
+                // When terminationReason is set, processChunk returned null and
+                // Whisper must NOT be called. Stop the processor and notify the
+                // callback with the reason message.
+                val termReason = utteranceAccumulator.terminationReason
+                if (termReason != null) {
+                    SttLogger.pcm("[TERMINATION] abnormal termination: $termReason")
+                    isRunning.set(false)
+                    utteranceAccumulator.timeoutFired = false
+                    onAbnormalTermination?.invoke(termReason)
+                    break
                 }
 
                 if (autoStopRequestedRef()) {

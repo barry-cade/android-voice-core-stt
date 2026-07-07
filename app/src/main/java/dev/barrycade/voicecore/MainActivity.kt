@@ -149,15 +149,23 @@ class MainActivity : ComponentActivity() {
             val speechToText = SpeechToText.create(
                 SttConfig(
                     energyThreshold = runtimeConfig.energyThreshold,
-                    silencePaddingMs = runtimeConfig.silencePaddingMs,
                     preRollMs = runtimeConfig.preRollMs,
-                    maxUtteranceLengthMs = runtimeConfig.maxUtteranceLengthMs,
                     stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
-                    motionModeEnergyThreshold = runtimeConfig.motionMode.energyThreshold,
-                    motionModeSilencePaddingMs = runtimeConfig.motionMode.silencePaddingMs,
                     modelPath = modelPath,
                     startStrategy = selectedStartStrategy,
-                    stopStrategy = selectedStopStrategy
+                    stopStrategy = selectedStopStrategy,
+                    manualManual = dev.barrycade.voicecore.stt.ManualManualConfig(
+                        maxDurationMs = runtimeConfig.manualManual.maxDurationMs,
+                        abnormalSilenceMs = runtimeConfig.manualManual.abnormalSilenceMs
+                    ),
+                    manualAuto = dev.barrycade.voicecore.stt.ManualAutoConfig(
+                        maxDurationMs = runtimeConfig.manualAuto.maxDurationMs,
+                        autoSilenceMs = runtimeConfig.manualAuto.autoSilenceMs
+                    ),
+                    reasonMessages = dev.barrycade.voicecore.stt.ReasonMessages(
+                        tooLong = runtimeConfig.reasonMessages.tooLong,
+                        abnormalSilence = runtimeConfig.reasonMessages.abnormalSilence
+                    )
                 )
             )
 
@@ -170,7 +178,11 @@ class MainActivity : ComponentActivity() {
 
             // ── Result callback ───────────────────────────────────────────
             speechToText.setOnResultListener { result ->
-                postToUi { txtOutput.text = result }
+                postToUi {
+                    isRecording = false
+                    txtOutput.text = result
+                    updateUi()
+                }
             }
 
             // ── Timing callback ───────────────────────────────────────────
@@ -258,17 +270,16 @@ class MainActivity : ComponentActivity() {
             txtConfigDisplay.text = buildString {
                 appendLine("=== Active Config ===")
                 appendLine("energyThreshold:        ${runtimeConfig.energyThreshold}")
-                appendLine("silencePaddingMs:       ${runtimeConfig.silencePaddingMs}")
                 appendLine("preRollMs:              ${runtimeConfig.preRollMs}")
-                appendLine("maxUtteranceLengthMs:   ${runtimeConfig.maxUtteranceLengthMs}")
                 appendLine("stableChunkSizeMs:      ${runtimeConfig.stableChunkSizeMs}")
-                appendLine("motionMode.energyThreshold:   ${runtimeConfig.motionMode.energyThreshold}")
-                appendLine("motionMode.silencePaddingMs:  ${runtimeConfig.motionMode.silencePaddingMs}")
                 appendLine("startStrategy:          ${selectedStartStrategy}")
                 appendLine("stopStrategy:           ${selectedStopStrategy}")
-                if (selectedStopStrategy == "autoSilence") {
-                    appendLine("  └ threshold: ${runtimeConfig.silencePaddingMs}ms")
-                }
+                appendLine("manualManual.maxDurationMs:      ${runtimeConfig.manualManual.maxDurationMs}")
+                appendLine("manualManual.abnormalSilenceMs:  ${runtimeConfig.manualManual.abnormalSilenceMs}")
+                appendLine("manualAuto.maxDurationMs:        ${runtimeConfig.manualAuto.maxDurationMs}")
+                appendLine("manualAuto.autoSilenceMs:        ${runtimeConfig.manualAuto.autoSilenceMs}")
+                appendLine("reasonMessages.tooLong:          ${runtimeConfig.reasonMessages.tooLong}")
+                appendLine("reasonMessages.abnormalSilence:  ${runtimeConfig.reasonMessages.abnormalSilence}")
             }
 
             isRecording = true

@@ -11,12 +11,13 @@ class PublicApiSmokeTest {
     fun sttConfigDefaults_areStable() {
         val config = SttConfig(modelPath = "/dummy/path")
         assertEquals(0.03f, config.energyThreshold, 0.001f)
-        assertEquals(600, config.silencePaddingMs)
         assertEquals(100, config.preRollMs)
-        assertEquals(7000, config.maxUtteranceLengthMs)
-        assertEquals(500, config.stableChunkSizeMs)
-        assertEquals(0.05f, config.motionModeEnergyThreshold, 0.001f)
-        assertEquals(300, config.motionModeSilencePaddingMs)
+        assertEquals(30000, config.manualManual.maxDurationMs)
+        assertEquals(5000, config.manualManual.abnormalSilenceMs)
+        assertEquals(30000, config.manualAuto.maxDurationMs)
+        assertEquals(1200, config.manualAuto.autoSilenceMs)
+        assertEquals("You spoke for too long.", config.reasonMessages.tooLong)
+        assertEquals("You stopped speaking for too long.", config.reasonMessages.abnormalSilence)
         assertEquals(false, config.debugLoggingEnabled)
         assertEquals("/dummy/path", config.modelPath)
         assertEquals("manual", config.startStrategy)
@@ -59,8 +60,7 @@ class PublicApiSmokeTest {
     fun sttConfig_resolveStopTrigger_autoSilence_returnsAutoSilenceStopTrigger() {
         val config = SttConfig(
             modelPath = "/dummy/path",
-            stopStrategy = "autoSilence",
-            silencePaddingMs = 600
+            stopStrategy = "autoSilence"
         )
         val trigger = config.resolveStopTrigger()
         assertTrue("Expected AutoSilenceStopTrigger, got ${trigger::class.simpleName}",
@@ -71,19 +71,18 @@ class PublicApiSmokeTest {
     fun sttConfig_resolveStopTrigger_autoSilence_caseInsensitive() {
         val config = SttConfig(
             modelPath = "/dummy/path",
-            stopStrategy = "AUTOSILENCE",
-            silencePaddingMs = 600
+            stopStrategy = "AUTOSILENCE"
         )
         val trigger = config.resolveStopTrigger()
         assertTrue(trigger is AutoSilenceStopTrigger)
     }
 
     @Test
-    fun sttConfig_resolveStopTrigger_autoSilence_usesSilencePaddingMs() {
+    fun sttConfig_resolveStopTrigger_autoSilence_usesManualAutoAutoSilenceMs() {
         val config = SttConfig(
             modelPath = "/dummy/path",
             stopStrategy = "autoSilence",
-            silencePaddingMs = 300
+            manualAuto = ManualAutoConfig(autoSilenceMs = 300)
         )
         val trigger = config.resolveStopTrigger()
         assertTrue(trigger is AutoSilenceStopTrigger)

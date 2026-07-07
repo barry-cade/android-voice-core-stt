@@ -21,17 +21,40 @@ object AppSttConfigLoader {
 
     private fun parse(json: String): AppRuntimeSttConfig {
         val root = JSONObject(json)
-        val motionMode = root.getJSONObject("motionMode")
+
+        // Mode-specific blocks (optional — defaults apply if missing)
+        val manualManualObj = root.optJSONObject("manualManual")
+        val manualAutoObj = root.optJSONObject("manualAuto")
+        val reasonMessagesObj = root.optJSONObject("reasonMessages")
+
         return AppRuntimeSttConfig(
             energyThreshold = root.getDouble("energyThreshold").toFloat(),
-            silencePaddingMs = root.getInt("silencePaddingMs"),
             preRollMs = root.getInt("preRollMs"),
-            maxUtteranceLengthMs = root.getInt("maxUtteranceLengthMs"),
             stableChunkSizeMs = root.getInt("stableChunkSizeMs"),
-            motionMode = AppMotionModeConfig(
-                energyThreshold = motionMode.getDouble("energyThreshold").toFloat(),
-                silencePaddingMs = motionMode.getInt("silencePaddingMs")
-            ),
+            manualManual = if (manualManualObj != null) {
+                AppManualManualConfig(
+                    maxDurationMs = manualManualObj.optInt("maxDurationMs", 30000),
+                    abnormalSilenceMs = manualManualObj.optInt("abnormalSilenceMs", 5000)
+                )
+            } else {
+                AppManualManualConfig()
+            },
+            manualAuto = if (manualAutoObj != null) {
+                AppManualAutoConfig(
+                    maxDurationMs = manualAutoObj.optInt("maxDurationMs", 30000),
+                    autoSilenceMs = manualAutoObj.optInt("autoSilenceMs", 1200)
+                )
+            } else {
+                AppManualAutoConfig()
+            },
+            reasonMessages = if (reasonMessagesObj != null) {
+                AppReasonMessages(
+                    tooLong = reasonMessagesObj.optString("tooLong", "You spoke for too long."),
+                    abnormalSilence = reasonMessagesObj.optString("abnormalSilence", "You stopped speaking for too long.")
+                )
+            } else {
+                AppReasonMessages()
+            },
             startStrategy = root.optString("startStrategy", "manual"),
             stopStrategy = root.optString("stopStrategy", "manual")
         )

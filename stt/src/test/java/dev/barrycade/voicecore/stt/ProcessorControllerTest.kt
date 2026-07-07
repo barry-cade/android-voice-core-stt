@@ -35,7 +35,11 @@ class ProcessorControllerTest {
         vad = Vad(energyThreshold = 0.01)
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            silenceDurationMs = 100
+            stopTrigger = ManualStopTrigger(),
+            manualManualConfig = ManualManualConfig(
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000  // high so silence doesn't trigger abnormal termination
+            )
         )
         capturedUtterances.clear()
         listener = object : UtteranceListener {
@@ -176,35 +180,33 @@ class ProcessorControllerTest {
 
     @Test
     fun process_speechFrame_triggersListener() {
-        // At 20ms per frame (320 samples @ 16kHz):
-        // Pre-roll: 5 frames (100ms)
-        // Speech: 30 frames (600ms)
-        // Silence: 10 frames to trigger (200ms silence budget, 5 needed)
-        // Total before finalization: 5 + 30 + 5 = 40 frames = 800ms > 700ms minimum
         fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
         fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5 frames
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
         val controller = createController()
         controller.start()
         Thread.sleep(500)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
-        assertTrue("speech frames must produce at least one utterance",
-            capturedUtterances.isNotEmpty())
+        val pcm = controller.stopAndFinalize()
+        assertNotNull("stopAndFinalize must return PCM after speech", pcm)
     }
 
     @Test
     fun process_multipleSpeechFrames_producesUtterance() {
         fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
         fakeAudioSource.addSpeechFrames(40, 320)   // speech: 800ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
         val controller = createController()
         controller.start()
         Thread.sleep(600)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
-        assertTrue("multiple speech frames must produce utterance",
-            capturedUtterances.isNotEmpty())
-        val pcm = capturedUtterances.first()
-        assertTrue("utterance PCM must be non-empty", pcm.isNotEmpty())
+        val pcm = controller.stopAndFinalize()
+        assertNotNull("stopAndFinalize must return PCM after speech", pcm)
+        assertTrue("utterance PCM must be non-empty", pcm!!.isNotEmpty())
     }
 
     @Test
@@ -213,22 +215,29 @@ class ProcessorControllerTest {
         val controller = createController()
         controller.start()
         Thread.sleep(500)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
-        assertEquals("silence-only must not produce utterances",
-            0, capturedUtterances.size)
+        val pcm = controller.stopAndFinalize()
+        // Pre-roll accumulates silence samples, so stopAndFinalize returns PCM
+        // even for silence-only recording. This is expected: user presses STOP
+        // and gets whatever was accumulated.
+        assertNotNull("silence-only must still return PCM from stopAndFinalize (pre-roll accumulates)", pcm)
     }
 
     @Test
     fun process_speechThenSilence_accumulatesThenFinalizes() {
         fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
         fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence, finalizes after ~5
+        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
         val controller = createController()
         controller.start()
         Thread.sleep(600)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
-        assertTrue("speech then silence must produce utterance",
-            capturedUtterances.isNotEmpty())
+        val pcm = controller.stopAndFinalize()
+        assertNotNull("stopAndFinalize must return PCM after speech then silence", pcm)
     }
 
     @Test
@@ -239,6 +248,8 @@ class ProcessorControllerTest {
         val controller = createController()
         controller.start()
         Thread.sleep(500)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
         assertNotNull("stopAndFinalize must return PCM after speech frames", pcm)
@@ -274,12 +285,14 @@ class ProcessorControllerTest {
     fun process_rapidFrameInjection_noCrash() {
         fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
         fakeAudioSource.addSpeechFrames(60, 320)   // speech: 1200ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // silence: 300ms = total 1600ms
+        fakeAudioSource.addSilenceFrames(15, 320)  // silence: 300ms
         val controller = createController()
         controller.start()
         Thread.sleep(800)
+        stopRequested = true
+        Thread.sleep(200)
         controller.stop()
-        assertTrue("rapid frame injection must produce utterances",
-            capturedUtterances.isNotEmpty())
+        val pcm = controller.stopAndFinalize()
+        assertNotNull("rapid frame injection must produce PCM", pcm)
     }
 }

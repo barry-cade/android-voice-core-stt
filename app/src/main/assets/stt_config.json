@@ -1,14 +1,20 @@
 {
   "energyThreshold": 0.03,
-  "silencePaddingMs": 600,
   "preRollMs": 100,
-  "maxUtteranceLengthMs": 7000,
   "stableChunkSizeMs": 500,
   "startStrategy": "manual",
   "stopStrategy": "manual",
   "_comment_stopStrategy": "Allowed: manual, autoSilence",
-  "motionMode": {
-    "energyThreshold": 0.05,
-    "silencePaddingMs": 300
+  "manualManual": {
+    "maxDurationMs": 30000,
+    "abnormalSilenceMs": 5000
+  },
+  "manualAuto": {
+    "maxDurationMs": 30000,
+    "autoSilenceMs": 1200
+  },
+  "reasonMessages": {
+    "tooLong": "You spoke for more than 30 seconds.",
+    "abnormalSilence": "You stopped speaking for 5 seconds."
   }
 }
