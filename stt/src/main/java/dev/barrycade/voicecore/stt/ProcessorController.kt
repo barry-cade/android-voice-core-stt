@@ -43,7 +43,7 @@ internal class ProcessorController(
         private set
 
     /** RMS sampler for diagnostic logging. */
-    val rmsSampler: RmsSampler = RmsSampler(
+    internal val rmsSampler: RmsSampler = RmsSampler(
         sampleRate = sampleRate,
         debugLogging = debugLogging,
         onSample = { avg, peak, floor ->

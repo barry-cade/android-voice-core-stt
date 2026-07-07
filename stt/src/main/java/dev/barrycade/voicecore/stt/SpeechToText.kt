@@ -265,7 +265,7 @@ class SpeechToText internal constructor(
     }
 
     /**
-     * Create the timeout cleanup callback wired to the processor.
+     * Returns the timeout cleanup callback. Delegates to [handleTimeoutStop].
      */
     private fun createTimeoutStopCallback(): () -> Unit {
         return ::handleTimeoutStop
