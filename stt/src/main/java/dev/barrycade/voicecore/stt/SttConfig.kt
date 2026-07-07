@@ -8,6 +8,7 @@ data class SttConfig(
     val stableChunkSizeMs: Int = 500,
     val motionModeEnergyThreshold: Float = 0.05f,
     val motionModeSilencePaddingMs: Int = 300,
+    val debugLoggingEnabled: Boolean = false,
     val modelPath: String
 )
 

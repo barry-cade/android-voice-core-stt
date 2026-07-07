@@ -19,7 +19,8 @@ class SpeechToText internal constructor(
                     motionMode = MotionModeConfig(
                         energyThreshold = config.motionModeEnergyThreshold,
                         silencePaddingMs = config.motionModeSilencePaddingMs
-                    )
+                    ),
+                    debugLoggingEnabled = config.debugLoggingEnabled
                 ),
                 config.modelPath
             )

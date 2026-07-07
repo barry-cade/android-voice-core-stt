@@ -16,7 +16,14 @@ class PublicApiSmokeTest {
         assertEquals(500, config.stableChunkSizeMs)
         assertEquals(0.05f, config.motionModeEnergyThreshold, 0.001f)
         assertEquals(300, config.motionModeSilencePaddingMs)
+        assertEquals(false, config.debugLoggingEnabled)
         assertEquals("/dummy/path", config.modelPath)
+    }
+
+    @Test
+    fun sttConfig_create_mapsDebugLoggingEnabled() {
+        val config = SttConfig(modelPath = "/dummy/path", debugLoggingEnabled = true)
+        assertEquals(true, config.debugLoggingEnabled)
     }
 
     @Test
