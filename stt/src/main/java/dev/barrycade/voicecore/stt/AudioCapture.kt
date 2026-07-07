@@ -79,12 +79,13 @@ class AudioCapture(
             isRunning = true
 
             val readBufferSamples = finalBufferSizeInBytes / 2
-            workerThread = Thread({
+            val runnable = Runnable {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
                 captureLoop(readBufferSamples)
-            }, "AudioCaptureThread").apply {
-                start()
             }
+            val thread = Thread(runnable, "AudioCaptureThread")
+            workerThread = thread
+            thread.start()
 
             Log.d("AudioCapture", "Capture started [Rate: $sampleRate, Buffer: $finalBufferSizeInBytes bytes]")
         }
@@ -135,10 +136,9 @@ class AudioCapture(
             isRunning = false
 
             try {
-                audioRecord?.let {
-                    if (it.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                        it.stop()
-                    }
+                val ar = audioRecord
+                if (ar != null && ar.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    ar.stop()
                 }
             } catch (e: Exception) {
                 Log.e("AudioCapture", "Error stopping AudioRecord", e)

@@ -76,9 +76,6 @@ internal class UtteranceAccumulator(
     private val maxSilenceFrames = (silenceDurationMs / silenceFrameDurationMs).coerceAtLeast(1)
     private val stableBlockSamples = (sampleRate * stableBlockMs / 1000).coerceAtLeast(1)
 
-    /** Pre-roll samples at 16kHz. */
-    private val preRollSamples: Int = (sampleRate * PRE_ROLL_MS / 1000).coerceAtLeast(1)
-
     /** Trailing silence samples at 16kHz. */
     private val trailingSilenceSamples: Int = (sampleRate * TRAILING_SILENCE_MS / 1000).coerceAtLeast(1)
 

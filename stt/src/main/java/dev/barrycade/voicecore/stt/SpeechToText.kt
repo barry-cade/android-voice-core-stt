@@ -268,18 +268,20 @@ class SpeechToText internal constructor(
      * Create the timeout cleanup callback wired to the processor.
      */
     private fun createTimeoutStopCallback(): () -> Unit {
-        return {
-            synchronized(stateLock) {
-                SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
-                audioSource?.stopCapture()
-                audioSource = null
-                isRunning.set(false)
-                if (currentState is SttLifecycleState.RECORDING) {
-                    transitionTo(SttLifecycleState.FINALISING)
-                }
-                transitionTo(SttLifecycleState.READY)
-                stopRequested = false
+        return ::handleTimeoutStop
+    }
+
+    private fun handleTimeoutStop() {
+        synchronized(stateLock) {
+            SttLogger.pcm("[TIMEOUT] cleaning up pipeline")
+            audioSource?.stopCapture()
+            audioSource = null
+            isRunning.set(false)
+            if (currentState is SttLifecycleState.RECORDING) {
+                transitionTo(SttLifecycleState.FINALISING)
             }
+            transitionTo(SttLifecycleState.READY)
+            stopRequested = false
         }
     }
 
