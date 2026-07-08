@@ -28,11 +28,10 @@ internal class ProcessorController(
      * Optional callback invoked when the processor stops due to a terminal
      * timeout (maxUtteranceLengthMs exceeded) or abnormal silence.
      * The callee should clean up audio capture and lifecycle state.
-     * The [reason] parameter contains the termination reason message.
      * The [code] parameter contains the [SttReturnCode] categorising the outcome.
      */
     @Volatile
-    internal var onAbnormalTermination: ((reason: String, code: SttReturnCode) -> Unit)? = null
+    internal var onAbnormalTermination: ((code: SttReturnCode) -> Unit)? = null
 
     /**
      * Optional callback invoked when the processor stops due to an automatic
@@ -150,9 +149,9 @@ internal class ProcessorController(
                     }
 
                     is FrameResult.AbnormalTerminate -> {
-                        SttLogger.pcm("[TERMINATION] abnormal termination: ${result.reason} code=${result.code}")
+                        SttLogger.pcm("[TERMINATION] abnormal termination: code=${result.code}")
                         isRunning.set(false)
-                        onAbnormalTermination?.invoke(result.reason, result.code)
+                        onAbnormalTermination?.invoke(result.code)
                         break
                     }
                 }

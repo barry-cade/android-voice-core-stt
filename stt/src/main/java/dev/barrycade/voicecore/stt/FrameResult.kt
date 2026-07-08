@@ -22,8 +22,8 @@ internal sealed class FrameResult {
 
     /**
      * Utterance terminated abnormally (max duration or abnormal silence).
-     * [reason] is the user-facing message. Do NOT call Whisper.
+     * Do NOT call Whisper — the PCM has been discarded.
      * [code] is the [SttReturnCode] categorising the termination.
      */
-    data class AbnormalTerminate(val reason: String, val code: SttReturnCode = SttReturnCode.ERROR) : FrameResult()
+    data class AbnormalTerminate(val code: SttReturnCode) : FrameResult()
 }

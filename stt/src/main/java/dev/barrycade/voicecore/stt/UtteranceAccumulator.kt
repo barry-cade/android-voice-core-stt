@@ -13,12 +13,12 @@ package dev.barrycade.voicecore.stt
  *
  * ### Manual/manual mode (stopStrategy = "manual")
  * A. User presses STOP → finalizeUtterance() → FrameResult.NormalFinalize
- * B. Silence ≥ abnormalSilenceMs → FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence)
- * C. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(reasonMessages.tooLong)
+ * B. Silence ≥ abnormalSilenceMs → FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
+ * C. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
  *
  * ### Manual/auto mode (stopStrategy = "autoSilence")
  * A. Silence ≥ autoSilenceMs → normalize → FrameResult.AutoStop(pcm)
- * B. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(reasonMessages.tooLong)
+ * B. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
  * C. No abnormal silence rule in this mode.
  *
  * ## FrameResult
@@ -47,7 +47,6 @@ internal class UtteranceAccumulator(
     // ── Mode-specific config blocks (resolve timing per-mode) ─────────────
     private val manualManualConfig: ManualManualConfig = ManualManualConfig(),
     private val manualAutoConfig: ManualAutoConfig = ManualAutoConfig(),
-    private val reasonMessages: ReasonMessages = ReasonMessages(),
     private val debugLoggingEnabled: Boolean = false
 ) {
     constructor(
@@ -62,7 +61,6 @@ internal class UtteranceAccumulator(
         stopTrigger = stopTrigger,
         manualManualConfig = config.manualManual,
         manualAutoConfig = config.manualAuto,
-        reasonMessages = config.reasonMessages,
         debugLoggingEnabled = config.debugLoggingEnabled
     )
 
@@ -305,8 +303,8 @@ internal class UtteranceAccumulator(
         preRollComplete = false
         preRollFrameCount = 0
 
-        SttLogger.pcm("[TIMEOUT] abnormal termination: ${reasonMessages.tooLong}")
-        return FrameResult.AbnormalTerminate(reasonMessages.tooLong, SttReturnCode.UTTERANCE_TOO_LONG)
+        SttLogger.pcm("[TIMEOUT] abnormal termination: UTTERANCE_TOO_LONG")
+        return FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
     }
 
     /**
@@ -324,8 +322,8 @@ internal class UtteranceAccumulator(
         preRollComplete = false
         preRollFrameCount = 0
 
-        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: ${reasonMessages.abnormalSilence}")
-        return FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence, SttReturnCode.SILENCE_TIMEOUT)
+        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: SILENCE_TIMEOUT")
+        return FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
     }
 
     fun processFrame(frame: FloatArray): FrameResult = processChunk(frame, vad.isSpeech(frame))

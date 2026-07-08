@@ -42,8 +42,7 @@ data class SttConfig(
                 debugLoggingEnabled = debugLoggingEnabled
             ),
             manualManual = manualManual,
-            manualAuto = manualAuto,
-            reasonMessages = reasonMessages
+            manualAuto = manualAuto
         )
     }
     /**

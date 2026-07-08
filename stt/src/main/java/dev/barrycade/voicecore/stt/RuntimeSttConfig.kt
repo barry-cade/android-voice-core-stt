@@ -10,8 +10,7 @@ package dev.barrycade.voicecore.stt
 internal data class RuntimeSttConfig(
     val shared: SharedSttConfig = SharedSttConfig(),
     val manualManual: ManualManualConfig = ManualManualConfig(),
-    val manualAuto: ManualAutoConfig = ManualAutoConfig(),
-    val reasonMessages: ReasonMessages = ReasonMessages()
+    val manualAuto: ManualAutoConfig = ManualAutoConfig()
 ) {
     /** Convenience accessors for shared fields. */
     val energyThreshold: Float get() = shared.energyThreshold

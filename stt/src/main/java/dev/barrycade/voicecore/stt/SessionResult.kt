@@ -28,8 +28,7 @@ internal sealed class SessionResult {
      * - Abnormal silence (manual/manual mode) → [SttReturnCode.SILENCE_TIMEOUT]
      * - Max duration exceeded (both modes) → [SttReturnCode.UTTERANCE_TOO_LONG]
      *
-     * @property message User-facing reason string.
      * @property code The [SttReturnCode] categorising this outcome.
      */
-    data class Reason(val message: String, val code: SttReturnCode) : SessionResult()
+    data class Reason(val code: SttReturnCode) : SessionResult()
 }

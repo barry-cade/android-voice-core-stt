@@ -140,8 +140,9 @@ class SttDeterministicTest {
 
         assertTrue("Abnormal silence must return AbnormalTerminate",
             result is FrameResult.AbnormalTerminate)
-        assertTrue("Reason must contain abnormal silence message",
-            (result as FrameResult.AbnormalTerminate).reason.contains("stopped speaking"))
+        val terminate = result as FrameResult.AbnormalTerminate
+        assertTrue("Code must be SILENCE_TIMEOUT",
+            terminate.code == SttReturnCode.SILENCE_TIMEOUT)
     }
 
     /**

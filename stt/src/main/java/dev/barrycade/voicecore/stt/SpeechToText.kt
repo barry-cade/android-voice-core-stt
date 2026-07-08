@@ -266,9 +266,9 @@ class SpeechToText internal constructor(
                 shutdownPipeline(SessionResult.Transcribe(accumulator.forceFinalize() ?: floatArrayOf(), SttReturnCode.OK))
             }
         }
-        processor.onAbnormalTermination = { reason, code ->
+        processor.onAbnormalTermination = { code ->
             synchronized(stateLock) {
-                shutdownPipeline(SessionResult.Reason(reason, code))
+                shutdownPipeline(SessionResult.Reason(code))
             }
         }
         return processor
@@ -327,7 +327,8 @@ class SpeechToText internal constructor(
      * to READY, and dispatches the appropriate result based on [SessionResult].
      *
      * - [SessionResult.Transcribe]: runs Whisper inference and dispatches text.
-     * - [SessionResult.Reason]: dispatches the reason message directly (no Whisper).
+     * - [SessionResult.Reason]: non-transcription outcome — do NOT call Whisper.
+     *   Dispatch is skipped; the caller can use [SttReturnCode] for messaging.
      */
     private fun shutdownPipeline(result: SessionResult) {
         processorController?.stop()
@@ -356,7 +357,8 @@ class SpeechToText internal constructor(
                 }
             }
             is SessionResult.Reason -> {
-                dispatchResult(result.message, null)
+                // Non-transcription outcome — no Whisper inference.
+                // The caller handles messaging based on [SttReturnCode].
             }
         }
     }
