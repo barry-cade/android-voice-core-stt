@@ -67,8 +67,8 @@ internal class UtteranceAccumulator(
     )
 
     companion object {
-        /** Fixed pre-roll window before speech is accepted. */
-        private const val PRE_ROLL_MS: Int = 100
+        /** Default pre-roll window before speech is accepted. */
+        private const val DEFAULT_PRE_ROLL_MS: Int = 100
     }
 
     /** Error listener forwarded from SpeechToText for structured error reporting. */
@@ -237,10 +237,10 @@ internal class UtteranceAccumulator(
         preRollFrameCount += 1
         appendSamples(frame)
 
-        val preRollFrameTarget = (PRE_ROLL_MS / frameDurationMs).coerceAtLeast(1)
+        val preRollFrameTarget = (preRollMs / frameDurationMs).coerceAtLeast(1)
         if (preRollFrameCount >= preRollFrameTarget) {
             preRollComplete = true
-            SttLogger.pcm("[PREROLL] preRollMs=$PRE_ROLL_MS complete")
+            SttLogger.pcm("[PREROLL] preRollMs=$preRollMs complete")
         }
         return FrameResult.Continue
     }
