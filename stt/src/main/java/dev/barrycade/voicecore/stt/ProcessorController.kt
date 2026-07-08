@@ -11,10 +11,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * @param stopRequestedRef Supplier that returns true when Stop has been requested.
  *        When true, the processing loop stops polling new frames and exits.
- * @param autoStopRequestedRef Supplier that returns true when an automatic stop
- *        trigger (e.g. auto-silence) has fired. When true, the processing loop
- *        exits immediately (either after the current utterance is finalized, or
- *        during a silence period if no utterance was produced).
  */
 internal class ProcessorController(
     private val audioSource: AudioSource,
@@ -23,8 +19,7 @@ internal class ProcessorController(
     private val listener: UtteranceListener,
     private val sampleRate: Int = 16000,
     private val debugLogging: Boolean = false,
-    private val stopRequestedRef: () -> Boolean,
-    private val autoStopRequestedRef: () -> Boolean = { false }
+    private val stopRequestedRef: () -> Boolean
 ) {
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -90,6 +85,12 @@ internal class ProcessorController(
      * Core processing loop, executing on the worker thread.
      * Polls frames, runs VAD, accumulates utterances, and delivers
      * finalized PCM via [UtteranceListener].
+     *
+     * ProcessChunk return values and side-channels determine flow:
+     * - Non-null utterance + autoStopFired → deliver PCM, break (auto-silence)
+     * - Non-null utterance + !autoStopFired → deliver PCM, continue (manual stop path)
+     * - null + terminationReason set → stop, invoke onAbnormalTermination, break
+     * - null + neither → continue processing
      */
     private fun runProcessingLoop() {
         while (isRunning.get()) {
@@ -125,16 +126,8 @@ internal class ProcessorController(
                 }
 
                 val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
-                if (utterance != null) {
-                    lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                    SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
-                    listener.onUtteranceReady(utterance)
-                }
 
-                // Check for abnormal termination (timeout or abnormal silence).
-                // When terminationReason is set, processChunk returned null and
-                // Whisper must NOT be called. Stop the processor and notify the
-                // callback with the reason message.
+                // ── Abnormal termination (timeout or abnormal silence) ──
                 val termReason = utteranceAccumulator.terminationReason
                 if (termReason != null) {
                     SttLogger.pcm("[TERMINATION] abnormal termination: $termReason")
@@ -144,11 +137,19 @@ internal class ProcessorController(
                     break
                 }
 
-                if (autoStopRequestedRef()) {
-                    SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
-                    isRunning.set(false)
-                    onAutoStop?.invoke()
-                    break
+                // ── Utterance finalized ──────────────────────────────────
+                if (utterance != null) {
+                    lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+                    SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
+                    listener.onUtteranceReady(utterance)
+
+                    // Auto-silence: break after delivering PCM
+                    if (utteranceAccumulator.autoStopFired) {
+                        SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
+                        isRunning.set(false)
+                        onAutoStop?.invoke()
+                        break
+                    }
                 }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()

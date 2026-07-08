@@ -274,14 +274,7 @@ class SpeechToText internal constructor(
             listener = utteranceHandler,
             sampleRate = 16000,
             debugLogging = config.debugLoggingEnabled,
-            stopRequestedRef = { this@SpeechToText.stopRequested },
-            autoStopRequestedRef = {
-                // Only auto-stop when the trigger is an AutoSilenceStopTrigger.
-                // ManualStopTrigger.shouldStop() always returns true, which would
-                // cause the processing loop to exit after the first frame.
-                val autoTrigger = this@SpeechToText.stopTrigger as? AutoSilenceStopTrigger
-                autoTrigger?.shouldStop() ?: false
-            }
+            stopRequestedRef = { this@SpeechToText.stopRequested }
         )
         processor.onAutoStop = createAutoStopCallback()
         processor.onAbnormalTermination = handleAbnormalTermination()
@@ -324,26 +317,13 @@ class SpeechToText internal constructor(
 
     private fun handleAutoStop() {
         synchronized(stateLock) {
-            SttLogger.pcm("[AUTOSTOP] cleaning up pipeline")
+            SttLogger.pcm("[AUTOSTOP] cleaning up pipeline after auto-silence")
 
-            val proc = processorController
-            if (proc != null) {
-                val remainingPcm = proc.stopAndFinalize()
-                if (remainingPcm != null) {
-                    val vadMs = proc.vadActiveMs
-                    val utterMs = (proc.lastUtteranceDurationMs ?: 0).toLong()
-                    val capMs = if (timingPcmStartMs > 0) {
-                        System.currentTimeMillis() - timingPcmStartMs
-                    } else {
-                        0L
-                    }
-                    runInferenceAndDispatch(remainingPcm, vadMs, utterMs, capMs)
-                }
-            }
-
+            // PCM was already delivered via UtteranceHandler.onUtteranceReady.
+            // Just clean up the pipeline — no need to finalize again.
+            processorController = null
             audioSource?.stopCapture()
             audioSource = null
-            processorController = null
             isRunning.set(false)
             if (currentState is SttLifecycleState.RECORDING) {
                 transitionTo(SttLifecycleState.FINALISING)

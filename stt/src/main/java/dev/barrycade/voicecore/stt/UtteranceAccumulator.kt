@@ -91,6 +91,14 @@ internal class UtteranceAccumulator(
     internal var terminationReason: String? = null
 
     /**
+     * Set to true when auto-silence has fired (manual/auto mode) and the
+     * accumulator has returned PCM. The caller must stop the processing loop
+     * after dispatching the PCM to Whisper.
+     */
+    @Volatile
+    internal var autoStopFired: Boolean = false
+
+    /**
      * Callback invoked when a new utterance starts (PRE_ROLL → SPEECH transition).
      * Fires before any accumulation for the utterance begins.
      * SttProcessor uses this to reset per-utterance timing counters.
@@ -137,18 +145,11 @@ internal class UtteranceAccumulator(
     private var silenceFrameCount = 0
 
     /**
-     * Duration of speech (speech-detected frames only) for the current utterance, in ms.
-     * Reset when a new utterance starts. Used for the max-duration timeout check.
-     * Only counts frames where speech is detected, so silence during an utterance
-     * does not advance the clock toward maximum utterance duration.
-     */
-    private var speechDurationMs = 0
-
-    /**
      * Total accumulated duration since utterance start, including both speech and silence ms.
-     * Used only for logging and diagnostics — NOT for termination decisions.
+     * Incremented every frame — used for the max-duration termination check.
+     * Duration starts counting when speech is first detected (speechActive = true).
      */
-    private var totalDurationMs = 0
+    private var durationMs = 0
 
     /** Captured utterance duration at last finalization (ms). 0 if no utterance has completed. */
     internal var lastUtteranceDurationMs: Int = 0
@@ -161,13 +162,9 @@ internal class UtteranceAccumulator(
         if (terminationReason != null) return null
 
         val frameDurationMs = frame.size * 1000 / sampleRate
-        totalDurationMs += frameDurationMs
-        if (isSpeechFrame || isEnergyAboveThreshold()) {
-            speechDurationMs += frameDurationMs
-        }
 
-        // Resolve abnormal silence threshold based on actual frame duration.
-        val currentAbnormalSilenceFrames = abnormalSilenceFramesFor(frameDurationMs)
+        // ── 1. Duration tracking — runs every frame ────────────────────
+        durationMs += frameDurationMs
 
         // ── PCM non-zero verification ────────────────────────────────────
         val hasNonZero = frame.any { it != 0.0f }
@@ -187,28 +184,30 @@ internal class UtteranceAccumulator(
         appendSamples(frame)
 
         if (speechActive) {
-            val isSpeechOrEnergy = isSpeechFrame || isEnergyAboveThreshold()
-
-            if (isSpeechOrEnergy) {
+            // ── 2. Silence tracking ──────────────────────────────────────
+            if (isSpeechFrame) {
                 silenceFrameCount = 0
-                val trigger = stopTrigger as? AutoSilenceStopTrigger
-                trigger?.onSpeechDetected()
-                SttLogger.pcm("[SILENCE] speech-active reset: isSpeechFrame=$isSpeechFrame")
+                SttLogger.pcm("[SILENCE] speech-active reset")
             } else {
                 silenceFrameCount++
-                val trigger = stopTrigger as? AutoSilenceStopTrigger
-                trigger?.onSilenceDetected(silenceFrameCount.toLong() * frameDurationMs)
                 SttLogger.pcm("[SILENCE] silenceFrameCount=$silenceFrameCount, frameDurationMs=$frameDurationMs")
-
-                // Abnormal silence for manual/manual mode fires before max-duration.
-                if (stopTrigger is ManualStopTrigger && silenceFrameCount >= currentAbnormalSilenceFrames) {
-                    return handleAbnormalSilence()
-                }
             }
 
-            // Max-duration check: only fires when speech is detected on the current frame,
-            // so silence time does not advance the clock toward the limit.
-            if (isSpeechOrEnergy && speechDurationMs >= effectiveMaxUtteranceLengthMs) {
+            // ── 3. Termination checks (every frame, in order) ────────────
+            // 3a. Manual/manual: abnormal silence check
+            if (stopTrigger is ManualStopTrigger &&
+                silenceFrameCount >= abnormalSilenceFramesFor(frameDurationMs)) {
+                return handleAbnormalSilence()
+            }
+
+            // 3b. Manual/auto: auto-silence check
+            if (stopTrigger is AutoSilenceStopTrigger &&
+                silenceFrameCount >= autoSilenceFramesFor(frameDurationMs)) {
+                return handleAutoSilenceFinalize()
+            }
+
+            // 3c. Max duration (both modes)
+            if (durationMs >= effectiveMaxUtteranceLengthMs) {
                 return handleMaxUtteranceTimeout()
             }
 
@@ -216,12 +215,9 @@ internal class UtteranceAccumulator(
         }
 
         // ── Pre-speech path (no speech detected yet, pre-roll complete) ──
-        val trigger = stopTrigger as? AutoSilenceStopTrigger
-
         if (isSpeechFrame) {
             // VAD detected speech — reset silence counter and start utterance.
             silenceFrameCount = 0
-            trigger?.onSpeechDetected()
             return handleSpeechStart()
         }
 
@@ -243,22 +239,16 @@ internal class UtteranceAccumulator(
         if (energyDetected) {
             SttLogger.pcm("[FALLBACK] speech: energy=$frameEnergy >= threshold=$energyThreshold")
             silenceFrameCount = 0
-            trigger?.onSpeechDetected()
             return handleSpeechStart()
         }
 
         if (forceSpeech) {
             SttLogger.pcm("[FALLBACK] force speech: energy=$frameEnergy but PCM has non-zero content")
             silenceFrameCount = 0
-            trigger?.onSpeechDetected()
             return handleSpeechStart()
         }
 
         SttLogger.pcm("[FALLBACK] silence: energy=$frameEnergy < threshold=$energyThreshold, hasNonZeroPCM=$frameHasNonZeroPCM")
-
-        // ── Pre-speech silence accumulation ─────────────────────────────
-        // Callback is safe: AutoSilenceStopTrigger guards with speechHasOccurred.
-        trigger?.onSilenceDetected(silenceFrameCount.toLong() * frameDurationMs)
         return null
     }
 
@@ -285,11 +275,8 @@ internal class UtteranceAccumulator(
     private fun handleSpeechStart(): FloatArray? {
         speechActive = true
         silenceFrameCount = 0
-        totalDurationMs = 0
-        speechDurationMs = 0
-        SttLogger.pcm("[SPEECH] speechActive=true")
-
-        (stopTrigger as? AutoSilenceStopTrigger)?.onSpeechDetected()
+        durationMs = 0
+        SttLogger.pcm("[SPEECH] speechActive=true, durationMs=0")
 
         onSpeechStart?.invoke()
 
@@ -321,18 +308,14 @@ internal class UtteranceAccumulator(
     }
 
     /**
-     * Energy-based speech detection fallback for when VAD is unreliable.
-     * Returns true when the last frame's RMS energy matches typical Whisper
-     * energy levels (>= 0.001f).
+     * Handle auto-silence finalization (manual/auto mode):
+     * Returns the accumulated PCM for normal transcription.
+     * Sets autoStopFired so the caller knows to stop the processing loop.
      */
-    private fun isEnergyAboveThreshold(): Boolean {
-        val frameEnergy = vad.lastFrameEnergy
-        val energyThreshold = 0.001f
-        val aboveThreshold = frameEnergy >= energyThreshold
-        if (aboveThreshold) {
-            SttLogger.pcm("[FALLBACK] energy fallback: speech energy=$frameEnergy >= threshold=$energyThreshold")
-        }
-        return aboveThreshold
+    private fun handleAutoSilenceFinalize(): FloatArray? {
+        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${manualAutoConfig.autoSilenceMs}ms, durationMs=$durationMs")
+        autoStopFired = true
+        return finalizeUtterance()
     }
 
     /**
@@ -341,13 +324,12 @@ internal class UtteranceAccumulator(
      * This is NOT an error; it is a user-facing termination message.
      */
     private fun handleMaxUtteranceTimeout(): FloatArray? {
-        SttLogger.pcm("max utterance exceeded: durationMs=$totalDurationMs, limit=$effectiveMaxUtteranceLengthMs")
+        SttLogger.pcm("max utterance exceeded: durationMs=$durationMs, limit=$effectiveMaxUtteranceLengthMs")
 
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
-        speechDurationMs = 0
-        totalDurationMs = 0
+        durationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
 
@@ -369,8 +351,7 @@ internal class UtteranceAccumulator(
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
-        speechDurationMs = 0
-        totalDurationMs = 0
+        durationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
 
@@ -386,13 +367,12 @@ internal class UtteranceAccumulator(
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
-        speechDurationMs = 0
-        totalDurationMs = 0
+        durationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
         timeoutFired = false
         terminationReason = null
-        (stopTrigger as? AutoSilenceStopTrigger)?.reset()
+        autoStopFired = false
     }
 
     /**
@@ -433,22 +413,21 @@ internal class UtteranceAccumulator(
         SttLogger.pcm("[STREAM] accumulator reset")
     }
 
-    internal fun currentDurationMs(): Int = totalDurationMs
+    internal fun currentDurationMs(): Int = durationMs
 
     private fun finalizeUtterance(): FloatArray {
         val utterance = speechAccumulator.toFloatArray()
-        val durationMs = utterance.size * 1000 / sampleRate
-        lastUtteranceDurationMs = durationMs
+        val utterDurationMs = utterance.size * 1000 / sampleRate
+        lastUtteranceDurationMs = utterDurationMs
 
         speechAccumulator.clear()
         speechActive = false
         silenceFrameCount = 0
-        speechDurationMs = 0
-        totalDurationMs = 0
+        durationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
 
-        SttLogger.pcm("[FINALISE] utterance finalized: ${utterance.size} samples, ${durationMs}ms")
+        SttLogger.pcm("[FINALISE] utterance finalized: ${utterance.size} samples, ${utterDurationMs}ms")
         return utterance
     }
 }
