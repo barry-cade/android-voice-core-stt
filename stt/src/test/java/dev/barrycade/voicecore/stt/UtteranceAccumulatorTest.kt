@@ -31,18 +31,20 @@ class UtteranceAccumulatorTest {
 
         // Four silence frames (40ms total) should trigger abnormal silence fallback.
         // Each frame is 10ms, so abnormalSilenceFramesFor(10) = 40 / 10 = 4.
-        // Frame 1: silenceFrameCount = 1 (< 4), returns null
-        // Frame 2: silenceFrameCount = 2 (< 4), returns null
-        // Frame 3: silenceFrameCount = 3 (< 4), returns null
-        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence
+        // Frame 1: silenceFrameCount = 1 (< 4), returns Continue
+        // Frame 2: silenceFrameCount = 2 (< 4), returns Continue
+        // Frame 3: silenceFrameCount = 3 (< 4), returns Continue
+        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence → AbnormalTerminate
         for (i in 0 until 3) {
             accumulator.processFrame(silenceFrame)
         }
 
-        // After handleAbnormalSilence, terminationReason is set and processFrame returns null
-        val finalized = accumulator.processFrame(silenceFrame)
-        assertNull("Abnormal silence must return null (no PCM)", finalized)
-        assertNotNull("terminationReason must be set", accumulator.terminationReason)
+        // After handleAbnormalSilence, processFrame returns AbnormalTerminate
+        val result = accumulator.processFrame(silenceFrame)
+        assertTrue("Abnormal silence must return AbnormalTerminate",
+            result is FrameResult.AbnormalTerminate)
+        assertTrue("Reason must contain abnormal silence message",
+            (result as FrameResult.AbnormalTerminate).reason.contains("stopped speaking"))
     }
 
     @Test
@@ -60,7 +62,8 @@ class UtteranceAccumulatorTest {
         // Even after pre-roll (100ms = 10 frames at 10ms), silence should not trigger
         for (i in 0 until 100) {
             val result = accumulator.processFrame(silenceFrame)
-            assertNull("Must not emit utterance on silence only (frame $i)", result)
+            assertTrue("Must return Continue on silence only (frame $i)",
+                result is FrameResult.Continue)
         }
     }
 

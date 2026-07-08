@@ -86,11 +86,11 @@ internal class ProcessorController(
      * Polls frames, runs VAD, accumulates utterances, and delivers
      * finalized PCM via [UtteranceListener].
      *
-     * ProcessChunk return values and side-channels determine flow:
-     * - Non-null utterance + autoStopFired → deliver PCM, break (auto-silence)
-     * - Non-null utterance + !autoStopFired → deliver PCM, continue (manual stop path)
-     * - null + terminationReason set → stop, invoke onAbnormalTermination, break
-     * - null + neither → continue processing
+     * The [FrameResult] from processChunk drives the loop:
+     * - Continue: keep processing
+     * - NormalFinalize: deliver PCM, continue (manual STOP path)
+     * - AutoStop: deliver PCM, stop (auto-silence)
+     * - AbnormalTerminate: do NOT call Whisper, stop
      */
     private fun runProcessingLoop() {
         while (isRunning.get()) {
@@ -125,29 +125,33 @@ internal class ProcessorController(
                     vadActiveMs += frameDurationMs
                 }
 
-                val utterance = utteranceAccumulator.processChunk(frame, isSpeechFrame)
+                val result = utteranceAccumulator.processChunk(frame, isSpeechFrame)
 
-                // ── Abnormal termination (timeout or abnormal silence) ──
-                val termReason = utteranceAccumulator.terminationReason
-                if (termReason != null) {
-                    SttLogger.pcm("[TERMINATION] abnormal termination: $termReason")
-                    isRunning.set(false)
-                    utteranceAccumulator.timeoutFired = false
-                    onAbnormalTermination?.invoke(termReason)
-                    break
-                }
+                when (result) {
+                    is FrameResult.Continue -> {
+                        // Keep processing
+                    }
 
-                // ── Utterance finalized ──────────────────────────────────
-                if (utterance != null) {
-                    lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                    SttLogger.pcmD("Utterance finalized with ${utterance.size} samples")
-                    listener.onUtteranceReady(utterance)
+                    is FrameResult.NormalFinalize -> {
+                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+                        SttLogger.pcmD("Utterance finalized with ${result.pcm.size} samples")
+                        listener.onUtteranceReady(result.pcm)
+                    }
 
-                    // Auto-silence: break after delivering PCM
-                    if (utteranceAccumulator.autoStopFired) {
+                    is FrameResult.AutoStop -> {
+                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+                        SttLogger.pcmD("Auto-silence finalized with ${result.pcm.size} samples")
+                        listener.onUtteranceReady(result.pcm)
                         SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
                         isRunning.set(false)
                         onAutoStop?.invoke()
+                        break
+                    }
+
+                    is FrameResult.AbnormalTerminate -> {
+                        SttLogger.pcm("[TERMINATION] abnormal termination: ${result.reason}")
+                        isRunning.set(false)
+                        onAbnormalTermination?.invoke(result.reason)
                         break
                     }
                 }
@@ -186,8 +190,11 @@ internal class ProcessorController(
             if (frame == null) break
             val isSpeech = vad.isSpeech(frame)
             val result = utteranceAccumulator.processChunk(frame, isSpeech)
-            if (result != null) {
-                drainFinalized = result
+            if (result is FrameResult.NormalFinalize) {
+                drainFinalized = result.pcm
+            }
+            if (result is FrameResult.AutoStop) {
+                drainFinalized = result.pcm
             }
             drainedCount++
         }

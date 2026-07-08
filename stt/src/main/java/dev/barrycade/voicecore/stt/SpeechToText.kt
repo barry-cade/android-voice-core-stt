@@ -276,61 +276,19 @@ class SpeechToText internal constructor(
             debugLogging = config.debugLoggingEnabled,
             stopRequestedRef = { this@SpeechToText.stopRequested }
         )
-        processor.onAutoStop = createAutoStopCallback()
-        processor.onAbnormalTermination = handleAbnormalTermination()
-        return processor
-    }
-
-    /**
-     * Returns the abnormal termination callback. Dispatches the reason
-     * as a normal user-facing message — NOT an error. Whisper is NOT called.
-     */
-    private fun handleAbnormalTermination(): (reason: String) -> Unit {
-        return { reason ->
+        // ── Phase 3: Wire termination callbacks to shutdownPipeline ──────
+        processor.onAutoStop = {
             synchronized(stateLock) {
-                SttLogger.pcm("[ABNORMAL] abnormal termination: $reason")
-
-                audioSource?.stopCapture()
-                audioSource = null
-                processorController = null
-                isRunning.set(false)
-                stopRequested = false
-
-                if (currentState is SttLifecycleState.RECORDING) {
-                    transitionTo(SttLifecycleState.FINALISING)
-                }
-                transitionTo(SttLifecycleState.READY)
-
-                // Dispatch the reason as a normal result (no timing snapshot).
-                // Whisper must NOT be called — there is no PCM to transcribe.
-                dispatchResult(reason, null)
+                // PCM already delivered via UtteranceHandler — clean up pipeline.
+                shutdownPipeline(SessionResult.Transcribe(accumulator.forceFinalize() ?: floatArrayOf()))
             }
         }
-    }
-
-    /**
-     * Returns the auto-stop cleanup callback. Delegates to [handleAutoStop].
-     */
-    private fun createAutoStopCallback(): () -> Unit {
-        return ::handleAutoStop
-    }
-
-    private fun handleAutoStop() {
-        synchronized(stateLock) {
-            SttLogger.pcm("[AUTOSTOP] cleaning up pipeline after auto-silence")
-
-            // PCM was already delivered via UtteranceHandler.onUtteranceReady.
-            // Just clean up the pipeline — no need to finalize again.
-            processorController = null
-            audioSource?.stopCapture()
-            audioSource = null
-            isRunning.set(false)
-            if (currentState is SttLifecycleState.RECORDING) {
-                transitionTo(SttLifecycleState.FINALISING)
+        processor.onAbnormalTermination = { reason ->
+            synchronized(stateLock) {
+                shutdownPipeline(SessionResult.Reason(reason))
             }
-            transitionTo(SttLifecycleState.READY)
-            stopRequested = false
         }
+        return processor
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -356,31 +314,17 @@ class SpeechToText internal constructor(
                 processorController?.stop()
                 stopRequested = true
 
-                val finalizedPcm = processorController?.drainRemainingFrames()
-
-                val procVadMs = processorController?.vadActiveMs ?: 0L
-                val procUtterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
-                val pcm = finalizedPcm ?: processorController?.stopAndFinalize()
+                val pcm = processorController?.drainRemainingFrames()
+                    ?: processorController?.stopAndFinalize()
                 SttLogger.pcm("[STOP] stopAndFinalize returned pcm=${pcm != null}")
 
-                processorController = null
-                audioSource?.stopCapture()
-                audioSource = null
-
-                val capMs = if (timingPcmStartMs > 0) {
-                    System.currentTimeMillis() - timingPcmStartMs
-                } else {
-                    0L
-                }
-
                 if (pcm != null) {
-                    runInferenceAndDispatch(pcm, procVadMs, procUtterMs, capMs)
+                    shutdownPipeline(SessionResult.Transcribe(pcm))
                 } else {
                     SttLogger.pcmW("no pcm available from accumulator")
+                    transitionTo(SttLifecycleState.READY)
+                    stopRequested = false
                 }
-
-                transitionTo(SttLifecycleState.READY)
-                stopRequested = false
             } catch (t: Throwable) {
                 dispatchError(t)
             }
@@ -388,6 +332,51 @@ class SpeechToText internal constructor(
     }
 
     fun stop() = stopAndTranscribe()
+
+    // ────────────────────────────────────────────────────────────────────────
+    // shutdownPipeline — unified cleanup (Phase 3)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Single unified cleanup path for all session endings.
+     *
+     * Stops and releases [processorController] and [audioSource], transitions
+     * to READY, and dispatches the appropriate result based on [SessionResult].
+     *
+     * - [SessionResult.Transcribe]: runs Whisper inference and dispatches text.
+     * - [SessionResult.Reason]: dispatches the reason message directly (no Whisper).
+     */
+    private fun shutdownPipeline(result: SessionResult) {
+        processorController?.stop()
+        processorController = null
+        audioSource?.stopCapture()
+        audioSource = null
+        isRunning.set(false)
+        stopRequested = false
+
+        if (currentState is SttLifecycleState.RECORDING) {
+            transitionTo(SttLifecycleState.FINALISING)
+        }
+        transitionTo(SttLifecycleState.READY)
+
+        when (result) {
+            is SessionResult.Transcribe -> {
+                if (result.pcm.isNotEmpty()) {
+                    val vadMs = 0L
+                    val utterMs = 0L
+                    val capMs = if (timingPcmStartMs > 0) {
+                        System.currentTimeMillis() - timingPcmStartMs
+                    } else {
+                        0L
+                    }
+                    runInferenceAndDispatch(result.pcm, vadMs, utterMs, capMs)
+                }
+            }
+            is SessionResult.Reason -> {
+                dispatchResult(result.message, null)
+            }
+        }
+    }
 
     // ────────────────────────────────────────────────────────────────────────
     // Shared inference + dispatch

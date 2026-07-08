@@ -12,24 +12,24 @@ package dev.barrycade.voicecore.stt
  * ## Termination Rules
  *
  * ### Manual/manual mode (stopStrategy = "manual")
- * A. User presses STOP → finalizeUtterance() → normal transcription
- * B. Silence ≥ abnormalSilenceMs → abnormal termination → return reasonMessages.abnormalSilence
- * C. Duration ≥ maxDurationMs → abnormal termination → return reasonMessages.tooLong
+ * A. User presses STOP → finalizeUtterance() → FrameResult.NormalFinalize
+ * B. Silence ≥ abnormalSilenceMs → FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence)
+ * C. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(reasonMessages.tooLong)
  *
  * ### Manual/auto mode (stopStrategy = "autoSilence")
- * A. Silence ≥ autoSilenceMs → normalize → finalizeUtterance() → normal transcription
- * B. Duration ≥ maxDurationMs → abnormal termination → return reasonMessages.tooLong
+ * A. Silence ≥ autoSilenceMs → normalize → FrameResult.AutoStop(pcm)
+ * B. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(reasonMessages.tooLong)
  * C. No abnormal silence rule in this mode.
  *
- * ## Abnormal termination
+ * ## FrameResult
  *
- * When maxDuration or abnormalSilence triggers, the accumulator:
- * 1. Discards accumulated PCM
- * 2. Signals [terminationReason] with the reason message
- * 3. Returns null from processChunk (no PCM delivered)
+ * Each call to [processChunk] returns a [FrameResult] sealed type that
+ * encodes the next action for the caller (ProcessorController):
  *
- * The caller (SpeechToText/ProcessorController) must NOT call Whisper when
- * terminationReason is non-null.
+ * - [FrameResult.Continue]: keep processing frames
+ * - [FrameResult.NormalFinalize]: PCM ready for transcription (manual STOP)
+ * - [FrameResult.AutoStop]: PCM ready, caller must stop the loop (auto-silence)
+ * - [FrameResult.AbnormalTerminate]: discard PCM, do NOT call Whisper
  *
  * ## No hysteresis, no minimum speech duration, no timing guards
  *
@@ -74,29 +74,6 @@ internal class UtteranceAccumulator(
 
     /** Testing hook: when true, simulates max-utterance timeout on first speech frame. */
     internal var forceTimeout: Boolean = false
-
-    /**
-     * Set to true when maxDurationMs is exceeded.
-     * ProcessorController checks this after each processChunk() and stops the loop.
-     */
-    @Volatile
-    internal var timeoutFired: Boolean = false
-
-    /**
-     * When non-null, the accumulator has terminated abnormally and the caller
-     * must NOT call Whisper. Instead, the caller should return [terminationReason]
-     * as the error/status message and discard any accumulated PCM.
-     */
-    @Volatile
-    internal var terminationReason: String? = null
-
-    /**
-     * Set to true when auto-silence has fired (manual/auto mode) and the
-     * accumulator has returned PCM. The caller must stop the processing loop
-     * after dispatching the PCM to Whisper.
-     */
-    @Volatile
-    internal var autoStopFired: Boolean = false
 
     /**
      * Callback invoked when a new utterance starts (PRE_ROLL → SPEECH transition).
@@ -155,11 +132,8 @@ internal class UtteranceAccumulator(
     internal var lastUtteranceDurationMs: Int = 0
         private set
 
-    fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FloatArray? {
-        if (frame.isEmpty()) return null
-
-        // If abnormal termination already occurred, discard all frames.
-        if (terminationReason != null) return null
+    fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FrameResult {
+        if (frame.isEmpty()) return FrameResult.Continue
 
         val frameDurationMs = frame.size * 1000 / sampleRate
 
@@ -211,7 +185,7 @@ internal class UtteranceAccumulator(
                 return handleMaxUtteranceTimeout()
             }
 
-            return null
+            return FrameResult.Continue
         }
 
         // ── Pre-speech path (no speech detected yet, pre-roll complete) ──
@@ -249,14 +223,14 @@ internal class UtteranceAccumulator(
         }
 
         SttLogger.pcm("[FALLBACK] silence: energy=$frameEnergy < threshold=$energyThreshold, hasNonZeroPCM=$frameHasNonZeroPCM")
-        return null
+        return FrameResult.Continue
     }
 
     /**
      * Process a frame during pre-roll. PCM is saved but speech detection
      * is delayed until pre-roll completes.
      */
-    private fun handlePreRollFrame(frame: FloatArray, frameDurationMs: Int): FloatArray? {
+    private fun handlePreRollFrame(frame: FloatArray, frameDurationMs: Int): FrameResult {
         preRollFrameCount += 1
         appendSamples(frame)
 
@@ -265,14 +239,14 @@ internal class UtteranceAccumulator(
             preRollComplete = true
             SttLogger.pcm("[PREROLL] preRollMs=$PRE_ROLL_MS complete")
         }
-        return null
+        return FrameResult.Continue
     }
 
     /**
      * Process the first speech frame after silence.
      * Starts a new utterance. May trigger forceTimeout testing hook.
      */
-    private fun handleSpeechStart(): FloatArray? {
+    private fun handleSpeechStart(): FrameResult {
         speechActive = true
         silenceFrameCount = 0
         durationMs = 0
@@ -291,11 +265,10 @@ internal class UtteranceAccumulator(
                 context = mapOf("forcedFailure" to "forceTimeout")
             )
             sttErrorListener?.onSttError(error)
-            timeoutFired = true
-            return finalizeUtterance()
+            return handleMaxUtteranceTimeout()
         }
 
-        return null
+        return FrameResult.Continue
     }
 
     /**
@@ -309,21 +282,18 @@ internal class UtteranceAccumulator(
 
     /**
      * Handle auto-silence finalization (manual/auto mode):
-     * Returns the accumulated PCM for normal transcription.
-     * Sets autoStopFired so the caller knows to stop the processing loop.
+     * Returns [FrameResult.AutoStop] with accumulated PCM.
      */
-    private fun handleAutoSilenceFinalize(): FloatArray? {
+    private fun handleAutoSilenceFinalize(): FrameResult {
         SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${manualAutoConfig.autoSilenceMs}ms, durationMs=$durationMs")
-        autoStopFired = true
-        return finalizeUtterance()
+        return FrameResult.AutoStop(finalizeUtterancePcm())
     }
 
     /**
-     * Handle max utterance timeout: discard PCM, set terminationReason.
-     * Returns null so no PCM is delivered — Whisper must NOT be called.
+     * Handle max utterance timeout: discard PCM, return [FrameResult.AbnormalTerminate].
      * This is NOT an error; it is a user-facing termination message.
      */
-    private fun handleMaxUtteranceTimeout(): FloatArray? {
+    private fun handleMaxUtteranceTimeout(): FrameResult {
         SttLogger.pcm("max utterance exceeded: durationMs=$durationMs, limit=$effectiveMaxUtteranceLengthMs")
 
         speechAccumulator.clear()
@@ -333,19 +303,16 @@ internal class UtteranceAccumulator(
         preRollComplete = false
         preRollFrameCount = 0
 
-        terminationReason = reasonMessages.tooLong
-        timeoutFired = true
-
         SttLogger.pcm("[TIMEOUT] abnormal termination: ${reasonMessages.tooLong}")
-        return null
+        return FrameResult.AbnormalTerminate(reasonMessages.tooLong)
     }
 
     /**
-     * Handle abnormal silence (manual/manual mode): discard PCM, set terminationReason.
-     * Returns null so no PCM is delivered — Whisper must NOT be called.
+     * Handle abnormal silence (manual/manual mode): discard PCM,
+     * return [FrameResult.AbnormalTerminate].
      * This is NOT an error; it is a user-facing termination message.
      */
-    private fun handleAbnormalSilence(): FloatArray? {
+    private fun handleAbnormalSilence(): FrameResult {
         SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualConfig.abnormalSilenceMs}")
 
         speechAccumulator.clear()
@@ -355,13 +322,11 @@ internal class UtteranceAccumulator(
         preRollComplete = false
         preRollFrameCount = 0
 
-        terminationReason = reasonMessages.abnormalSilence
-
         SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: ${reasonMessages.abnormalSilence}")
-        return null
+        return FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence)
     }
 
-    fun processFrame(frame: FloatArray): FloatArray? = processChunk(frame, vad.isSpeech(frame))
+    fun processFrame(frame: FloatArray): FrameResult = processChunk(frame, vad.isSpeech(frame))
 
     fun reset() {
         speechAccumulator.clear()
@@ -370,32 +335,22 @@ internal class UtteranceAccumulator(
         durationMs = 0
         preRollComplete = false
         preRollFrameCount = 0
-        timeoutFired = false
-        terminationReason = null
-        autoStopFired = false
     }
 
     /**
      * forceFinalize returns all buffered PCM, even if VAD never fired.
-     * Returns null when no frames have ever been buffered or when
-     * terminationReason is set (abnormal termination — Whisper must NOT be called).
+     * Returns null when no frames have ever been buffered.
      */
     fun forceFinalize(): FloatArray? {
-        if (terminationReason != null) return null
         if (speechAccumulator.isEmpty()) return null
-        return finalizeUtterance()
+        return finalizeUtterancePcm()
     }
 
     /**
      * finaliseUtterance finalises the current utterance and returns the PCM buffer.
      * Called only from the deterministic Stop path, after stopRequested has been set.
-     * Returns null if terminationReason is set (abnormal termination) or no PCM accumulated.
      */
     fun finaliseUtterance(): FloatArray? {
-        if (terminationReason != null) {
-            SttLogger.pcm("[FINALISE] abnormal termination active, returning null")
-            return null
-        }
         val pcm = forceFinalize()
         if (pcm != null) {
             SttLogger.pcm("[PCM] final pcm size=${pcm.size}")
@@ -415,7 +370,7 @@ internal class UtteranceAccumulator(
 
     internal fun currentDurationMs(): Int = durationMs
 
-    private fun finalizeUtterance(): FloatArray {
+    private fun finalizeUtterancePcm(): FloatArray {
         val utterance = speechAccumulator.toFloatArray()
         val utterDurationMs = utterance.size * 1000 / sampleRate
         lastUtteranceDurationMs = utterDurationMs

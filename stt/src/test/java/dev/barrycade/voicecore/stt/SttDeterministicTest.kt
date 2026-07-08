@@ -41,7 +41,6 @@ class SttDeterministicTest {
                 abnormalSilenceMs = 5000
             )
         )
-        var finalizedUtterance: FloatArray? = null
 
         // Pass pre-roll (100ms = 5 frames of 20ms silence) before speech
         val silenceFrame = FloatArray(frameSize) { 0.0f }
@@ -51,16 +50,12 @@ class SttDeterministicTest {
 
         frames.forEach { frame ->
             val isSpeech = vad.isSpeech(frame)
-            finalizedUtterance = accumulator.processChunk(frame, isSpeech)
+            accumulator.processChunk(frame, isSpeech)
         }
 
-        if (finalizedUtterance == null) {
-            // Use forceFinalize to get the PCM (since silence no longer returns PCM)
-            finalizedUtterance = accumulator.forceFinalize()
-        }
-
-        assertNotNull(finalizedUtterance)
-        assertTrue("finalized utterance must not be empty", finalizedUtterance!!.isNotEmpty())
+        val finalizedPcm = accumulator.forceFinalize()
+        assertNotNull(finalizedPcm)
+        assertTrue("finalized utterance must not be empty", finalizedPcm!!.isNotEmpty())
     }
 
     @Test
@@ -115,7 +110,7 @@ class SttDeterministicTest {
     }
 
     @Test
-    fun deterministicUtterance_WithSilenceFinalization_ReturnsNull() {
+    fun deterministicUtterance_WithSilenceFinalization_ReturnsAbnormalTerminate() {
         val vad = Vad(energyThreshold = 0.01)
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
@@ -140,12 +135,13 @@ class SttDeterministicTest {
         }
 
         // Two silence frames (40ms total silence) should trigger abnormal silence
-        // which returns null and sets terminationReason
         accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 1
-        val utterance = accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 2 >= maxSilenceFrames
+        val result = accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 2 >= maxSilenceFrames
 
-        assertNull("Abnormal silence must return null (no PCM)", utterance)
-        assertNotNull("terminationReason must be set", accumulator.terminationReason)
+        assertTrue("Abnormal silence must return AbnormalTerminate",
+            result is FrameResult.AbnormalTerminate)
+        assertTrue("Reason must contain abnormal silence message",
+            (result as FrameResult.AbnormalTerminate).reason.contains("stopped speaking"))
     }
 
     /**
