@@ -12,24 +12,7 @@ class SpeechToText internal constructor(
     companion object {
         fun create(config: SttConfig): SpeechToText {
             return SpeechToText(
-                RuntimeSttConfig(
-                    energyThreshold = config.energyThreshold,
-                    preRollMs = config.preRollMs,
-                    stableChunkSizeMs = config.stableChunkSizeMs,
-                    manualManual = ManualManualConfig(
-                        maxDurationMs = config.manualManual.maxDurationMs,
-                        abnormalSilenceMs = config.manualManual.abnormalSilenceMs
-                    ),
-                    manualAuto = ManualAutoConfig(
-                        maxDurationMs = config.manualAuto.maxDurationMs,
-                        autoSilenceMs = config.manualAuto.autoSilenceMs
-                    ),
-                    reasonMessages = ReasonMessages(
-                        tooLong = config.reasonMessages.tooLong,
-                        abnormalSilence = config.reasonMessages.abnormalSilence
-                    ),
-                    debugLoggingEnabled = config.debugLoggingEnabled
-                ),
+                config.toRuntimeConfig(),
                 config.modelPath,
                 startTrigger = config.resolveStartTrigger(),
                 stopTrigger = config.resolveStopTrigger()
@@ -280,12 +263,12 @@ class SpeechToText internal constructor(
         processor.onAutoStop = {
             synchronized(stateLock) {
                 // PCM already delivered via UtteranceHandler — clean up pipeline.
-                shutdownPipeline(SessionResult.Transcribe(accumulator.forceFinalize() ?: floatArrayOf()))
+                shutdownPipeline(SessionResult.Transcribe(accumulator.forceFinalize() ?: floatArrayOf(), SttReturnCode.OK))
             }
         }
-        processor.onAbnormalTermination = { reason ->
+        processor.onAbnormalTermination = { reason, code ->
             synchronized(stateLock) {
-                shutdownPipeline(SessionResult.Reason(reason))
+                shutdownPipeline(SessionResult.Reason(reason, code))
             }
         }
         return processor
@@ -319,7 +302,7 @@ class SpeechToText internal constructor(
                 SttLogger.pcm("[STOP] stopAndFinalize returned pcm=${pcm != null}")
 
                 if (pcm != null) {
-                    shutdownPipeline(SessionResult.Transcribe(pcm))
+                    shutdownPipeline(SessionResult.Transcribe(pcm, SttReturnCode.OK))
                 } else {
                     SttLogger.pcmW("no pcm available from accumulator")
                     transitionTo(SttLifecycleState.READY)

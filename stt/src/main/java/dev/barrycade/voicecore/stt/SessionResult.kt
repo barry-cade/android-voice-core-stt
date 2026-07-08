@@ -16,15 +16,20 @@ internal sealed class SessionResult {
      * Produced by:
      * - Manual STOP → finalize utterance → transcribe
      * - Auto-silence → finalize utterance → transcribe
+     *
+     * @property code Always [SttReturnCode.OK] for successful transcription.
      */
-    data class Transcribe(val pcm: FloatArray) : SessionResult()
+    data class Transcribe(val pcm: FloatArray, val code: SttReturnCode = SttReturnCode.OK) : SessionResult()
 
     /**
-     * User-facing reason string — do NOT call Whisper.
+     * Non-transcription outcome — do NOT call Whisper.
      *
      * Produced by:
-     * - Abnormal silence (manual/manual mode) → [ReasonMessages.abnormalSilence]
-     * - Max duration exceeded (both modes) → [ReasonMessages.tooLong]
+     * - Abnormal silence (manual/manual mode) → [SttReturnCode.SILENCE_TIMEOUT]
+     * - Max duration exceeded (both modes) → [SttReturnCode.UTTERANCE_TOO_LONG]
+     *
+     * @property message User-facing reason string.
+     * @property code The [SttReturnCode] categorising this outcome.
      */
-    data class Reason(val message: String) : SessionResult()
+    data class Reason(val message: String, val code: SttReturnCode) : SessionResult()
 }

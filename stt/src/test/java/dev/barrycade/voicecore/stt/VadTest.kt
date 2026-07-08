@@ -125,7 +125,7 @@ class VadTest {
 
     @Test
     fun configConstructor_setsEnergyThreshold() {
-        val config = RuntimeSttConfig(energyThreshold = 0.02f)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(energyThreshold = 0.02f))
         val vad = Vad(config)
         val above = FloatArray(320) { 0.03f }
         val below = FloatArray(320) { 0.01f }

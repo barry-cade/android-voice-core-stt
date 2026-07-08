@@ -3,19 +3,22 @@ package dev.barrycade.voicecore.stt
 /**
  * Full runtime configuration for the STT pipeline.
  *
- * Timing fields are mode-specific to prevent cross-mode interference.
- * Use [manualManual] or [manualAuto] depending on the active stop strategy.
+ * Shared fields are grouped in [shared] for clarity. Timing fields are
+ * mode-specific to prevent cross-mode interference; use [manualManual]
+ * or [manualAuto] depending on the active stop strategy.
  */
 internal data class RuntimeSttConfig(
-    val energyThreshold: Float = 0.03f,
-    val preRollMs: Int = 100,
-    val stableChunkSizeMs: Int = 500,
+    val shared: SharedSttConfig = SharedSttConfig(),
     val manualManual: ManualManualConfig = ManualManualConfig(),
     val manualAuto: ManualAutoConfig = ManualAutoConfig(),
-    val reasonMessages: ReasonMessages = ReasonMessages(),
-    val debugLoggingEnabled: Boolean = false
-)
-
+    val reasonMessages: ReasonMessages = ReasonMessages()
+) {
+    /** Convenience accessors for shared fields. */
+    val energyThreshold: Float get() = shared.energyThreshold
+    val preRollMs: Int get() = shared.preRollMs
+    val stableChunkSizeMs: Int get() = shared.stableChunkSizeMs
+    val debugLoggingEnabled: Boolean get() = shared.debugLoggingEnabled
+}
 internal fun RuntimeSttConfig.validate() {
     require(energyThreshold in 0.0001f..1f) {
         "energyThreshold=$energyThreshold must be in [0.0001, 1]"
@@ -45,3 +48,4 @@ internal fun RuntimeSttConfig.validate() {
         "manualAuto.autoSilenceMs=${manualAuto.autoSilenceMs} must be in [50, 10000] ms"
     }
 }
+

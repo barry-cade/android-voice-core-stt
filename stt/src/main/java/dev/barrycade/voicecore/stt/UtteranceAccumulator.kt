@@ -47,7 +47,8 @@ internal class UtteranceAccumulator(
     // ── Mode-specific config blocks (resolve timing per-mode) ─────────────
     private val manualManualConfig: ManualManualConfig = ManualManualConfig(),
     private val manualAutoConfig: ManualAutoConfig = ManualAutoConfig(),
-    private val reasonMessages: ReasonMessages = ReasonMessages()
+    private val reasonMessages: ReasonMessages = ReasonMessages(),
+    private val debugLoggingEnabled: Boolean = false
 ) {
     constructor(
         config: RuntimeSttConfig,
@@ -61,7 +62,8 @@ internal class UtteranceAccumulator(
         stopTrigger = stopTrigger,
         manualManualConfig = config.manualManual,
         manualAutoConfig = config.manualAuto,
-        reasonMessages = config.reasonMessages
+        reasonMessages = config.reasonMessages,
+        debugLoggingEnabled = config.debugLoggingEnabled
     )
 
     companion object {
@@ -95,20 +97,6 @@ internal class UtteranceAccumulator(
         }
     }
 
-    /**
-     * Compute the abnormal silence threshold in frames for the given frame duration.
-     * Used for manual/manual mode: [manualManualConfig.abnormalSilenceMs] / [frameDurationMs].
-     */
-    private fun abnormalSilenceFramesFor(frameDurationMs: Int): Int =
-        (manualManualConfig.abnormalSilenceMs / frameDurationMs).coerceAtLeast(1)
-
-    /**
-     * Compute the auto-silence threshold in frames for the given frame duration.
-     * Used for manual/auto mode: [manualAutoConfig.autoSilenceMs] / [frameDurationMs].
-     */
-    private fun autoSilenceFramesFor(frameDurationMs: Int): Int =
-        (manualAutoConfig.autoSilenceMs / frameDurationMs).coerceAtLeast(1)
-
     // Buffer that accumulates PCM for the current utterance.
     private val speechAccumulator = mutableListOf<Float>()
     private var speechActive = false
@@ -135,10 +123,7 @@ internal class UtteranceAccumulator(
     fun processChunk(frame: FloatArray, isSpeechFrame: Boolean): FrameResult {
         if (frame.isEmpty()) return FrameResult.Continue
 
-        val frameDurationMs = frame.size * 1000 / sampleRate
-
-        // ── 1. Duration tracking — runs every frame ────────────────────
-        durationMs += frameDurationMs
+        val frameDurationMs = (frame.size * 1000) / sampleRate
 
         // ── PCM non-zero verification ────────────────────────────────────
         val hasNonZero = frame.any { it != 0.0f }
@@ -158,31 +143,58 @@ internal class UtteranceAccumulator(
         appendSamples(frame)
 
         if (speechActive) {
-            // ── 2. Silence tracking ──────────────────────────────────────
+            // ══════════════════════════════════════════════════════════════
+            // CORRECT ORDER — do not reorder
+            // ══════════════════════════════════════════════════════════════
+            //
+            // 1. Update silence counter (reset BEFORE termination checks)
+            // 2. Update duration
+            // 3. Compute threshold frames once for this frame
+            // 4. Run termination checks (abnormal silence, auto-silence, max duration)
+            // 5. Continue
+            // ══════════════════════════════════════════════════════════════
+
+            // ── 1. Update silence counter ────────────────────────────────
             if (isSpeechFrame) {
                 silenceFrameCount = 0
                 SttLogger.pcm("[SILENCE] speech-active reset")
             } else {
                 silenceFrameCount++
-                SttLogger.pcm("[SILENCE] silenceFrameCount=$silenceFrameCount, frameDurationMs=$frameDurationMs")
+                SttLogger.pcm("[SILENCE] silenceFrameCount=$silenceFrameCount frameDurationMs=$frameDurationMs")
             }
 
-            // ── 3. Termination checks (every frame, in order) ────────────
-            // 3a. Manual/manual: abnormal silence check
+            // ── 2. Update duration ───────────────────────────────────────
+            durationMs += frameDurationMs
+
+            // ── 3. Compute threshold frames once per frame ───────────────
+            val abnormalSilenceFrames =
+                manualManualConfig.abnormalSilenceMs / frameDurationMs
+            val autoSilenceFrames =
+                manualAutoConfig.autoSilenceMs / frameDurationMs
+
+            // ── 4. Termination checks (correct order) ────────────────────
+            // 4a. Manual/manual: abnormal silence
             if (stopTrigger is ManualStopTrigger &&
-                silenceFrameCount >= abnormalSilenceFramesFor(frameDurationMs)) {
+                silenceFrameCount >= abnormalSilenceFrames) {
                 return handleAbnormalSilence()
             }
 
-            // 3b. Manual/auto: auto-silence check
+            // 4b. Manual/auto: auto-silence
             if (stopTrigger is AutoSilenceStopTrigger &&
-                silenceFrameCount >= autoSilenceFramesFor(frameDurationMs)) {
+                silenceFrameCount >= autoSilenceFrames) {
                 return handleAutoSilenceFinalize()
             }
 
-            // 3c. Max duration (both modes)
+            // 4c. Max duration (both modes)
             if (durationMs >= effectiveMaxUtteranceLengthMs) {
                 return handleMaxUtteranceTimeout()
+            }
+
+            // ── 5. Debug logging ─────────────────────────────────────────
+            if (debugLoggingEnabled) {
+                android.util.Log.i("STT",
+                    "[DEBUG] speech=$isSpeechFrame silenceFrames=$silenceFrameCount " +
+                    "durationMs=$durationMs frameDurationMs=$frameDurationMs")
             }
 
             return FrameResult.Continue
@@ -190,23 +202,14 @@ internal class UtteranceAccumulator(
 
         // ── Pre-speech path (no speech detected yet, pre-roll complete) ──
         if (isSpeechFrame) {
-            // VAD detected speech — reset silence counter and start utterance.
             silenceFrameCount = 0
             return handleSpeechStart()
         }
 
         // ── Pre-speech speech detection fallback ─────────────────────────
-        // When VAD does not fire speech frames, detect speech using frame
-        // energy against a low threshold (0.001f, matching typical Whisper
-        // energy levels). Also detect speech using a PCM non-zero heuristic
-        // for debugging — if PCM has content but energy reads zero, speech
-        // is happening.
         val frameEnergy = vad.lastFrameEnergy
         val energyThreshold = 0.001f
         val energyDetected = frameEnergy >= energyThreshold
-
-        // Temporary force-speech heuristic: PCM has non-zero samples but
-        // energy is zero — indicates the VAD energy field isn't populated.
         val frameHasNonZeroPCM = frame.any { it != 0.0f }
         val forceSpeech = (frameEnergy == 0.0f && frameHasNonZeroPCM)
 
@@ -222,7 +225,7 @@ internal class UtteranceAccumulator(
             return handleSpeechStart()
         }
 
-        SttLogger.pcm("[FALLBACK] silence: energy=$frameEnergy < threshold=$energyThreshold, hasNonZeroPCM=$frameHasNonZeroPCM")
+        SttLogger.pcm("[FALLBACK] silence: energy=$frameEnergy < threshold=$energyThreshold hasNonZeroPCM=$frameHasNonZeroPCM")
         return FrameResult.Continue
     }
 
@@ -267,7 +270,6 @@ internal class UtteranceAccumulator(
             sttErrorListener?.onSttError(error)
             return handleMaxUtteranceTimeout()
         }
-
         return FrameResult.Continue
     }
 
@@ -304,7 +306,7 @@ internal class UtteranceAccumulator(
         preRollFrameCount = 0
 
         SttLogger.pcm("[TIMEOUT] abnormal termination: ${reasonMessages.tooLong}")
-        return FrameResult.AbnormalTerminate(reasonMessages.tooLong)
+        return FrameResult.AbnormalTerminate(reasonMessages.tooLong, SttReturnCode.UTTERANCE_TOO_LONG)
     }
 
     /**
@@ -323,7 +325,7 @@ internal class UtteranceAccumulator(
         preRollFrameCount = 0
 
         SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: ${reasonMessages.abnormalSilence}")
-        return FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence)
+        return FrameResult.AbnormalTerminate(reasonMessages.abnormalSilence, SttReturnCode.SILENCE_TIMEOUT)
     }
 
     fun processFrame(frame: FloatArray): FrameResult = processChunk(frame, vad.isSpeech(frame))

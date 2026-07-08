@@ -23,6 +23,7 @@ internal sealed class FrameResult {
     /**
      * Utterance terminated abnormally (max duration or abnormal silence).
      * [reason] is the user-facing message. Do NOT call Whisper.
+     * [code] is the [SttReturnCode] categorising the termination.
      */
-    data class AbnormalTerminate(val reason: String) : FrameResult()
+    data class AbnormalTerminate(val reason: String, val code: SttReturnCode = SttReturnCode.ERROR) : FrameResult()
 }

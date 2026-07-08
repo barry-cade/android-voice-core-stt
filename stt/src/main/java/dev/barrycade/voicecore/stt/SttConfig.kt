@@ -31,6 +31,22 @@ data class SttConfig(
     val reasonMessages: ReasonMessages = ReasonMessages()
 ) {
     /**
+     * Convert this public config into the internal [RuntimeSttConfig].
+     */
+    internal fun toRuntimeConfig(): RuntimeSttConfig {
+        return RuntimeSttConfig(
+            shared = SharedSttConfig(
+                energyThreshold = energyThreshold,
+                preRollMs = preRollMs,
+                stableChunkSizeMs = stableChunkSizeMs,
+                debugLoggingEnabled = debugLoggingEnabled
+            ),
+            manualManual = manualManual,
+            manualAuto = manualAuto,
+            reasonMessages = reasonMessages
+        )
+    }
+    /**
      * Resolve the [startStrategy] string to a [StartTriggerStrategy] instance.
      *
      * Allowed values:
@@ -49,7 +65,6 @@ data class SttConfig(
             )
         }
     }
-
     /**
      * Resolve the [stopStrategy] string to a [StopTriggerStrategy] instance.
      *
@@ -110,3 +125,4 @@ data class ReasonMessages(
     val tooLong: String = "You spoke for too long.",
     val abnormalSilence: String = "You stopped speaking for too long."
 )
+

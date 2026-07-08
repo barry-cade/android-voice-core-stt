@@ -23,55 +23,55 @@ class RuntimeSttConfigTest {
 
     @Test
     fun validate_energyThresholdLowBound_succeeds() {
-        val config = RuntimeSttConfig(energyThreshold = 0.0001f)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(energyThreshold = 0.0001f))
         config.validate()
     }
 
     @Test
     fun validate_energyThresholdHighBound_succeeds() {
-        val config = RuntimeSttConfig(energyThreshold = 1f)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(energyThreshold = 1f))
         config.validate()
     }
 
     @Test
     fun validate_energyThresholdBelowMinimum_throws() {
-        val config = RuntimeSttConfig(energyThreshold = 0f)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(energyThreshold = 0f))
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
     @Test
     fun validate_energyThresholdAboveMaximum_throws() {
-        val config = RuntimeSttConfig(energyThreshold = 1.1f)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(energyThreshold = 1.1f))
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
     @Test
     fun validate_preRollMsLowBound_succeeds() {
-        val config = RuntimeSttConfig(preRollMs = 0)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(preRollMs = 0))
         config.validate()
     }
 
     @Test
     fun validate_preRollMsHighBound_succeeds() {
-        val config = RuntimeSttConfig(preRollMs = 2000)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(preRollMs = 2000))
         config.validate()
     }
 
     @Test
     fun validate_preRollMsAboveMaximum_throws() {
-        val config = RuntimeSttConfig(preRollMs = 2001)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(preRollMs = 2001))
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
     @Test
     fun validate_stableChunkSizeMsLowBound_succeeds() {
-        val config = RuntimeSttConfig(stableChunkSizeMs = 50)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(stableChunkSizeMs = 50))
         config.validate()
     }
 
     @Test
     fun validate_stableChunkSizeMsAboveMaximum_throws() {
-        val config = RuntimeSttConfig(stableChunkSizeMs = 2001)
+        val config = RuntimeSttConfig(shared = SharedSttConfig(stableChunkSizeMs = 2001))
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
