@@ -259,16 +259,17 @@ class SpeechToText internal constructor(
             debugLogging = config.debugLoggingEnabled,
             stopRequestedRef = { this@SpeechToText.stopRequested }
         )
-        // ── Phase 3: Wire termination callbacks to shutdownPipeline ──────
+        // ── Wire termination callbacks to shutdownPipeline ──────────────
         processor.onAutoStop = {
             synchronized(stateLock) {
                 // PCM already delivered via UtteranceHandler — clean up pipeline.
-                shutdownPipeline(SessionResult.Transcribe(accumulator.forceFinalize() ?: floatArrayOf(), SttReturnCode.OK))
+                // No inference needed; shutdownPipeline(SttReturnCode.OK) is cleanup only.
+                shutdownPipeline(SttReturnCode.OK)
             }
         }
         processor.onAbnormalTermination = { code ->
             synchronized(stateLock) {
-                shutdownPipeline(SessionResult.Reason(code))
+                shutdownPipeline(code)
             }
         }
         return processor
@@ -302,7 +303,7 @@ class SpeechToText internal constructor(
                 SttLogger.pcm("[STOP] stopAndFinalize returned pcm=${pcm != null}")
 
                 if (pcm != null) {
-                    shutdownPipeline(SessionResult.Transcribe(pcm, SttReturnCode.OK))
+                    shutdownPipeline(pcm, SttReturnCode.OK)
                 } else {
                     SttLogger.pcmW("no pcm available from accumulator")
                     transitionTo(SttLifecycleState.READY)
@@ -317,20 +318,16 @@ class SpeechToText internal constructor(
     fun stop() = stopAndTranscribe()
 
     // ────────────────────────────────────────────────────────────────────────
-    // shutdownPipeline — unified cleanup (Phase 3)
+    // shutdownPipeline — unified cleanup (Phase 5)
     // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * Single unified cleanup path for all session endings.
+     * Clean up resources and run inference on [pcm], then dispatch the transcript.
      *
-     * Stops and releases [processorController] and [audioSource], transitions
-     * to READY, and dispatches the appropriate result based on [SessionResult].
-     *
-     * - [SessionResult.Transcribe]: runs Whisper inference and dispatches text.
-     * - [SessionResult.Reason]: non-transcription outcome — do NOT call Whisper.
-     *   Dispatch is skipped; the caller can use [SttReturnCode] for messaging.
+     * Called from the STOP path (manual and auto-silence) when PCM has been
+     * finalised by the [UtteranceAccumulator].
      */
-    private fun shutdownPipeline(result: SessionResult) {
+    private fun shutdownPipeline(pcm: FloatArray, code: SttReturnCode) {
         processorController?.stop()
         processorController = null
         audioSource?.stopCapture()
@@ -343,24 +340,39 @@ class SpeechToText internal constructor(
         }
         transitionTo(SttLifecycleState.READY)
 
-        when (result) {
-            is SessionResult.Transcribe -> {
-                if (result.pcm.isNotEmpty()) {
-                    val vadMs = 0L
-                    val utterMs = 0L
-                    val capMs = if (timingPcmStartMs > 0) {
-                        System.currentTimeMillis() - timingPcmStartMs
-                    } else {
-                        0L
-                    }
-                    runInferenceAndDispatch(result.pcm, vadMs, utterMs, capMs)
-                }
+        if (pcm.isNotEmpty()) {
+            val vadMs = 0L
+            val utterMs = 0L
+            val capMs = if (timingPcmStartMs > 0) {
+                System.currentTimeMillis() - timingPcmStartMs
+            } else {
+                0L
             }
-            is SessionResult.Reason -> {
-                // Non-transcription outcome — no Whisper inference.
-                // The caller handles messaging based on [SttReturnCode].
-            }
+            runInferenceAndDispatch(pcm, vadMs, utterMs, capMs)
         }
+    }
+
+    /**
+     * Clean up resources without inference — used for abnormal termination
+     * and auto-stop cleanup where PCM was already dispatched.
+     *
+     * @param code The [SttReturnCode] categorising the outcome.
+     */
+    private fun shutdownPipeline(code: SttReturnCode) {
+        processorController?.stop()
+        processorController = null
+        audioSource?.stopCapture()
+        audioSource = null
+        isRunning.set(false)
+        stopRequested = false
+
+        if (currentState is SttLifecycleState.RECORDING) {
+            transitionTo(SttLifecycleState.FINALISING)
+        }
+        transitionTo(SttLifecycleState.READY)
+
+        // Non-transcription outcome — no Whisper inference.
+        // The caller handles messaging based on [SttReturnCode].
     }
 
     // ────────────────────────────────────────────────────────────────────────
