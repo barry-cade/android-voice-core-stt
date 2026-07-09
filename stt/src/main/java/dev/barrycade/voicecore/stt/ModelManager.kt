@@ -182,9 +182,41 @@ internal class ModelManager(
 
     /**
      * Transcribe PCM samples. Thread-safe (C++ mutex in whisper_bridge.cpp).
+     *
+     * Blocking: waits for the C++ mutex if warm-up is still running.
+     * For non-blocking path during warm-up, use [transcribeAfterWarmup].
      */
     fun transcribe(pcm: ShortArray): String {
         return whisperModel.transcribe(pcm)
+    }
+
+    /**
+     * Submit a transcribe task to the whisper executor, queuing it after
+     * any ongoing warm-up. The result is delivered via [onResult].
+     *
+     * Unlike [transcribe], this does NOT block the calling thread waiting
+     * for the C++ mutex. Instead, the inference runs sequentially on the
+     * single-thread executor after warm-up completes.
+     *
+     * Called by the stop path during warm-up to avoid the ~1.5s mutex
+     * wait when the real inference blocks on the warm-up call.
+     *
+     * @param pcm       PCM samples to transcribe.
+     * @param onResult  Called on the executor thread with the result text.
+     */
+    fun transcribeAfterWarmup(pcm: ShortArray, onResult: (String) -> Unit) {
+        whisperCancelled = true
+
+        val runnable = Runnable {
+            val text = whisperModel.transcribe(pcm)
+            onResult(text)
+        }
+
+        try {
+            whisperExecutor.submit(runnable)
+        } catch (_: RuntimeException) {
+            onResult("")
+        }
     }
 
     /**

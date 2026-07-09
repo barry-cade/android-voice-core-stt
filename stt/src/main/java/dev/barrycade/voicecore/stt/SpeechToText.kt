@@ -526,7 +526,7 @@ class SpeechToText internal constructor(
             } else {
                 0L
             }
-            runInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
+            submitInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
         }
     }
 
@@ -547,6 +547,52 @@ class SpeechToText internal constructor(
         }
         if (currentState is SttLifecycleState.UNINITIALISED) {
             currentState = SttLifecycleState.STOPPED
+        }
+    }
+
+    /**
+     * Submit inference to the whisper executor, queuing it after any ongoing
+     * warm-up. The result is delivered via [dispatchResult] on the executor
+     * thread when inference completes.
+     *
+     * Used during early stop (warm-up in progress) to avoid blocking the stop
+     * thread on the C++ whisper mutex held by the warm-up call.
+     *
+     * During normal operation (RECORDING state), [runInferenceAndDispatch] is
+     * used instead since no warm-up mutex contention exists.
+     */
+    private fun submitInferenceAndDispatch(
+        pcm: FloatArray,
+        code: SttReturnCode,
+        vadActiveMs: Long,
+        utteranceMs: Long,
+        captureMs: Long
+    ) {
+        val infStartMs = System.currentTimeMillis()
+        // Use infStartMs as the base for totalMs in the early-stop path
+        // because timingUtteranceStartMs is never set (start() was never called).
+        val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else infStartMs
+        val shortPcm = pcm.toShortArray()
+
+        modelManager.transcribeAfterWarmup(shortPcm) { text ->
+            val whisperMs = System.currentTimeMillis() - infStartMs
+            val totalMs = System.currentTimeMillis() - pipelineStartMs
+
+            val effectiveSilenceMs = when (stopTrigger) {
+                is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs
+                else -> config.manualManualAbnormalSilenceMs
+            }
+            val snapshot = SttTimingSnapshot(
+                vadActiveMs = vadActiveMs,
+                utteranceDurationMs = utteranceMs,
+                silencePaddingMs = effectiveSilenceMs.toLong(),
+                preRollMs = config.preRollMs.toLong(),
+                inferenceMs = whisperMs,
+                totalPipelineMs = totalMs
+            )
+
+            onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
+            dispatchResult(text.trim(), code, snapshot)
         }
     }
 
