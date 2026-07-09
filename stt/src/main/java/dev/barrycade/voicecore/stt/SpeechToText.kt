@@ -521,11 +521,24 @@ class SpeechToText internal constructor(
      * Set the [SttRunConfig] for a subsequent [startSession] call.
      *
      * Validates [config] deterministically via [SttRunConfigValidator].
+     * The validator enforces:
+     * - Type contract: [SttLifeCycleStrategy] must match [strategySpecific] type.
+     * - Numeric constraints: energyThreshold > 0, maxDurationMs > 0,
+     *   abnormalSilenceMs/autoSilenceMs > 0, preRollMs >= 0, stableChunkSizeMs >= 0.
+     * - String constraints: modelPath and language must be non-blank.
+     *
      * On failure, returns [SessionResult] with [SttReturnCode.INVALID_CONFIG]
-     * and does NOT store the config. On success, stores the config and returns
+     * and does NOT store the config. The internal [runConfig] remains null.
+     *
+     * On success, stores [config] internally and returns
      * [SessionResult] with [SttReturnCode.SUCCESS].
      *
-     * No other side effects.
+     * No other side effects. Does NOT start recording.
+     *
+     * @param config The fully specified [SttRunConfig]. Must satisfy all
+     *               validation rules or it will be rejected.
+     * @return [SessionResult] with [SttReturnCode.SUCCESS] on success,
+     *         or [SttReturnCode.INVALID_CONFIG] on validation failure.
      */
     fun setConfig(config: SttRunConfig): SessionResult {
         val validationResult = SttRunConfigValidator.validate(config)
@@ -539,17 +552,24 @@ class SpeechToText internal constructor(
     /**
      * Start an STT session using the config previously set via [setConfig].
      *
-     * Returns [SessionResult] with:
-     * - [SttReturnCode.CONFIG_NOT_SET] if [setConfig] was not called.
-     * - [SttReturnCode.ENGINE_ERROR] if the pipeline encounters an error.
-     * - [SttReturnCode.SUCCESS] on successful transcription.
-     * - Strategy-specific codes for termination conditions.
-     *
      * Lifecycle routing is determined by [SttLifeCycleStrategy]:
      * - [MANUAL_MANUAL]: uses [ManualStartTrigger] + [ManualStopTrigger].
+     *   Caller must call [stopAndTranscribe] explicitly to stop recording.
      * - [MANUAL_AUTO]: uses [ManualStartTrigger] + [AutoSilenceStopTrigger].
+     *   Recording stops automatically when silence exceeds [autoSilenceMs].
      *
-     * This method does NOT modify or overload the existing [start] method.
+     * ## Return codes
+     *
+     * | Code | Condition |
+     * |------|-----------|
+     * | [SttReturnCode.CONFIG_NOT_SET] | [setConfig] was not called before this method. |
+     * | [SttReturnCode.SUCCESS] | Session started successfully. |
+     * | [SttReturnCode.ENGINE_ERROR] | Internal pipeline error during start. |
+     *
+     * Additional codes may be returned depending on pipeline outcome.
+     * The existing [start] method is unaffected by this method.
+     *
+     * @return [SessionResult] categorising the session outcome.
      */
     fun startSession(): SessionResult {
         val config = runConfig

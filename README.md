@@ -192,6 +192,130 @@ stt.destroy()
 
 Full API documentation is available in [`stt/README.md`](stt/README.md).
 
+## New SttRunConfig API (Phase 1+)
+
+A second, complementary API path was introduced alongside the existing [SttConfig]/[SpeechToText.create] path. This new API uses [SttRunConfig] for configuration and [SpeechToText.setConfig]/[SpeechToText.startSession] for lifecycle control. Both API paths coexist — existing code using [SttConfig] continues to work unchanged.
+
+### Overview
+
+The new API introduces the following types:
+
+- **SttRunConfig** — single configuration object wrapping engine config, lifecycle strategy, and strategy-specific parameters.
+- **TtsEngineConfig** — engine-level configuration (model path, language, timing).
+- **SttLifeCycleStrategy** — enum determining how recording starts and stops (MANUAL_MANUAL or MANUAL_AUTO).
+- **ManualManualSpecific** — strategy-specific parameters for MANUAL_MANUAL mode.
+- **ManualAutoSpecific** — strategy-specific parameters for MANUAL_AUTO mode.
+- **SessionResult** — pure data class containing a return code and optional transcript.
+- **SttReturnCode** — expanded enum with new codes (SUCCESS, CONFIG_NOT_SET, INVALID_CONFIG, MAX_DURATION_REACHED, AUTO_SILENCE_TRIGGERED, ABNORMAL_SILENCE, ENGINE_ERROR).
+
+### Example JSON Config
+
+The existing `stt_config.json` is used for both API paths. Example:
+
+```json
+{
+  "energyThreshold": 0.03,
+  "preRollMs": 100,
+  "stableChunkSizeMs": 500,
+  "startStrategy": "manual",
+  "stopStrategy": "manual",
+  "manualManual": {
+    "maxDurationMs": 30000,
+    "abnormalSilenceMs": 5000
+  },
+  "manualAuto": {
+    "maxDurationMs": 30000,
+    "autoSilenceMs": 1200
+  }
+}
+```
+
+### Example Kotlin Usage
+
+```kotlin
+val runConfig = SttRunConfig(
+    ttsEngineConfig = TtsEngineConfig(
+        modelPath = "/path/to/ggml-tiny.en.bin",
+        language = "en",
+        preRollMs = 100,
+        stableChunkSizeMs = 500,
+        debugLoggingEnabled = false
+    ),
+    ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
+    strategySpecific = ManualManualSpecific(
+        energyThreshold = 0.03f,
+        maxDurationMs = 30000,
+        abnormalSilenceMs = 5000
+    )
+)
+
+val stt = SpeechToText.create(
+    SttConfig(modelPath = "/path/to/ggml-tiny.en.bin")
+)
+
+// Set the new config (validates internally)
+val setResult = stt.setConfig(runConfig)
+if (setResult.code != SttReturnCode.SUCCESS) {
+    // handle config rejection
+    return
+}
+
+// Register result listener
+stt.setOnResultListener { text ->
+    // handle transcription
+}
+
+// Start session
+val sessionResult = stt.startSession()
+if (sessionResult.code != SttReturnCode.SUCCESS) {
+    // handle session error
+}
+```
+
+### Lifecycle Strategies
+
+| Strategy | Start Trigger | Stop Trigger | Description |
+|----------|---------------|--------------|-------------|
+| MANUAL_MANUAL | ManualStartTrigger | ManualStopTrigger | Caller controls start and stop explicitly. Silence longer than [abnormalSilenceMs] triggers abnormal termination. |
+| MANUAL_AUTO | ManualStartTrigger | AutoSilenceStopTrigger | Caller controls start. Recording stops automatically when silence exceeds [autoSilenceMs]. |
+
+### Strategy-Specific Types
+
+The `strategySpecific` field on `SttRunConfig` is typed via an enforced contract:
+
+- **ManualManualSpecific**: `energyThreshold`, `maxDurationMs`, `abnormalSilenceMs` — all must be > 0.
+- **ManualAutoSpecific**: `energyThreshold`, `maxDurationMs`, `autoSilenceMs` — all must be > 0.
+
+Passing the wrong type for the selected [SttLifeCycleStrategy] causes `setConfig()` to return `INVALID_CONFIG`.
+
+### Return Codes
+
+| Code | Meaning |
+|------|---------|
+| SUCCESS | Session started or completed successfully. |
+| CONFIG_NOT_SET | `setConfig()` was not called before `startSession()`. |
+| INVALID_CONFIG | Config failed validation (see SttRunConfigValidator). |
+| MAX_DURATION_REACHED | Utterance exceeded max duration. |
+| AUTO_SILENCE_TRIGGERED | Auto-silence threshold reached (MANUAL_AUTO only). |
+| ABNORMAL_SILENCE | Abnormal silence detected (MANUAL_MANUAL only). |
+| ENGINE_ERROR | Internal pipeline error. |
+
+### Validation Behaviour
+
+`SttRunConfigValidator` enforces all field constraints deterministically:
+
+- **Type contract**: `strategySpecific` must match the type required by `ttsLifeCycleStrategy`.
+- **Numeric constraints**: `energyThreshold > 0`, `maxDurationMs > 0`, `abnormalSilenceMs > 0`, `autoSilenceMs > 0`, `preRollMs >= 0`, `stableChunkSizeMs >= 0`.
+- **String constraints**: `modelPath` and `language` must be non-blank.
+- **No inference**: Any missing or invalid field causes immediate rejection. No defaults are applied.
+
+### Coexistence with the Old API
+
+- The existing [SttConfig] + [SpeechToText.create] + [SpeechToText.start()] path is **untouched**.
+- The new [SttRunConfig] + [SpeechToText.setConfig()] + [SpeechToText.startSession()] path is **additive**.
+- Both paths can be used side by side (e.g., for A/B testing during migration).
+- Internal pipeline, triggers, VAD, and Whisper backend are shared by both paths.
+
 ## Roadmap
 
 - Add wake‑word integration examples

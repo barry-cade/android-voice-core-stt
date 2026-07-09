@@ -30,18 +30,42 @@ package dev.barrycade.voicecore.stt
  */
 enum class SttReturnCode {
     // ── Legacy codes (existing pipeline) ────────────────────────────────
+
+    /** Utterance transcribed successfully. Maps to [SUCCESS]. */
     OK,
+
+    /** No speech detected during the session. Maps to [SUCCESS] (transcript is null). */
     NO_SPEECH,
+
+    /** Silence threshold exceeded in MANUAL_MANUAL mode. Maps to [ABNORMAL_SILENCE]. */
     SILENCE_TIMEOUT,
+
+    /** Max utterance duration exceeded. Maps to [MAX_DURATION_REACHED]. */
     UTTERANCE_TOO_LONG,
+
+    /** Internal pipeline error. Maps to [ENGINE_ERROR]. */
     ERROR,
 
     // ── New API codes (Phase 1+) ────────────────────────────────────────
+
+    /** Utterance transcribed successfully. Transcript is available in [SessionResult.transcript]. */
     SUCCESS,
+
+    /** [SpeechToText.setConfig] was not called before [SpeechToText.startSession]. */
     CONFIG_NOT_SET,
+
+    /** Config validation failed. See [SttRunConfigValidator] for validation rules. */
     INVALID_CONFIG,
+
+    /** Maximum utterance duration was exceeded. */
     MAX_DURATION_REACHED,
+
+    /** Auto-silence threshold reached in MANUAL_AUTO mode. */
     AUTO_SILENCE_TRIGGERED,
+
+    /** Abnormal silence detected in MANUAL_MANUAL mode. */
     ABNORMAL_SILENCE,
+
+    /** Internal pipeline error occurred during the session. */
     ENGINE_ERROR
 }
