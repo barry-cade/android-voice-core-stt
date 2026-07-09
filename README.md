@@ -325,6 +325,13 @@ Passing the wrong type for the selected [SttLifeCycleStrategy] causes `setConfig
 - Both paths can be used side by side (e.g., for A/B testing during migration).
 - Internal pipeline, triggers, VAD, and Whisper backend are shared by both paths.
 
+## Migration Status (Phase 7)
+
+- **New API (SttRunConfig)** is stable and fully supported.
+- **Legacy API (SttConfig)** is deprecated but fully functional.
+- **Removal** of legacy API is planned for a future major version.
+- Both APIs coexist without conflict.
+
 ## Roadmap
 
 - Add wake‑word integration examples

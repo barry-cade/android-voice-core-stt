@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * major version.
  */
 class SpeechToText internal constructor(
+    // TODO(major-version): Remove legacy constructor path after full migration to SttRunConfig.
     private val config: RuntimeSttConfig,
     modelPath: String,
     private val whisperModel: WhisperModel = WhisperBridge,

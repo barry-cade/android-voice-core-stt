@@ -1,5 +1,7 @@
 package dev.barrycade.voicecore.stt
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 /**
  * Shared configuration fields common across all STT strategies.
  *

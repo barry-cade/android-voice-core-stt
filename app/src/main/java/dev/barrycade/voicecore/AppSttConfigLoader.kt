@@ -1,5 +1,7 @@
 package dev.barrycade.voicecore
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 import android.content.Context
 import android.util.Log
 import dev.barrycade.voicecore.stt.ManualAutoSpecific

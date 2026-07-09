@@ -1,5 +1,7 @@
 package dev.barrycade.voicecore.stt
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 /**
  * Legacy configuration for [SpeechToText.create].
  *
@@ -116,6 +118,8 @@ data class SttConfig(
     }
 }
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 /**
  * Configurable timing for manual/manual mode.
  *
@@ -135,6 +139,8 @@ data class ManualManualConfig(
     val abnormalSilenceMs: Int = 5000
 )
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 /**
  * Configurable timing for manual/auto (auto-silence) mode.
  *
@@ -153,6 +159,8 @@ data class ManualAutoConfig(
     val maxDurationMs: Int = 30000,
     val autoSilenceMs: Int = 1200
 )
+
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
 
 /**
  * Configurable reason messages returned when an utterance is discarded.

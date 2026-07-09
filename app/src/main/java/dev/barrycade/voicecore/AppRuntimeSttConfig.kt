@@ -1,5 +1,7 @@
 package dev.barrycade.voicecore
 
+// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
+
 data class AppRuntimeSttConfig(
     val energyThreshold: Float,
     val preRollMs: Int,

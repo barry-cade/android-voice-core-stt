@@ -1,5 +1,7 @@
 package dev.barrycade.voicecore.stt
 
+// TODO(major-version): Consolidate trigger system once legacy SttConfig is removed.
+
 /**
  * Manual implementation of [StopTriggerStrategy].
  *
