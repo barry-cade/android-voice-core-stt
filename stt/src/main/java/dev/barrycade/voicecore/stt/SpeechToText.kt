@@ -272,6 +272,9 @@ class SpeechToText internal constructor(
                 val activeCapture = audioSource
                 if (activeCapture != null) {
                     SttLogger.pcm("[STOP] stopping during warm-up with active capture")
+                    // Cancel warm-up inference so the real inference doesn't wait
+                    // for the C++ whisper mutex held by the warm-up call.
+                    modelManager.cancelWarmup()
                     stopRequested = true
                     isRunning.set(false)
                     val drain = drainQueuedFrames(activeCapture)

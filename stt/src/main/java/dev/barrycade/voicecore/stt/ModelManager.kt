@@ -188,6 +188,19 @@ internal class ModelManager(
     }
 
     /**
+     * Cancel any ongoing warm-up inference.
+     * The warm-up runs on [whisperExecutor] via [performWarmup], which holds
+     * the C++ whisper mutex. Setting this flag does NOT interrupt the C++ call,
+     * but the warm-up result is discarded and [isReady] is never set.
+     *
+     * Called by the stop path when the user presses STOP during warm-up,
+     * so the real inference doesn't wait for the warm-up to complete.
+     */
+    fun cancelWarmup() {
+        whisperCancelled = true
+    }
+
+    /**
      * Unload the Whisper model. Resets warm-up flag.
      * Must be called before load to ensure deterministic lifecycle sequencing.
      */
