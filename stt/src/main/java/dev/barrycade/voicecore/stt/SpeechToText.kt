@@ -2,6 +2,22 @@ package dev.barrycade.voicecore.stt
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Main entry point for the STT pipeline.
+ *
+ * ## Configuration paths
+ *
+ * SpeechToText now supports two configuration paths:
+ *
+ * - **Legacy path (deprecated):** [SpeechToText.create] with [SttConfig],
+ *   then [start], [stopAndTranscribe], [destroy].
+ * - **New path (preferred):** [SpeechToText.create] with [SttConfig],
+ *   then [setConfig] with [SttRunConfig], then [startSession].
+ *
+ * The legacy path remains fully functional but is deprecated.
+ * The new path is preferred and will become the default in a future
+ * major version.
+ */
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
     modelPath: String,
@@ -67,6 +83,13 @@ class SpeechToText internal constructor(
 
     /** SttRunConfig-based session config, set via [setConfig]. */
     private var runConfig: SttRunConfig? = null
+
+    /**
+     * True when [setConfig] was called, indicating the new API path is active.
+     * False when the legacy [SpeechToText.create] constructor path was used.
+     * Used for stabilisation tracking only — no behavioural branching.
+     */
+    private var newApiActive: Boolean = false
 
     private var audioSource: AudioSource? = null
     private var processorController: ProcessorController? = null
@@ -546,6 +569,7 @@ class SpeechToText internal constructor(
             return validationResult
         }
         runConfig = config
+        newApiActive = true
         return SessionResult(SttReturnCode.SUCCESS, null)
     }
 

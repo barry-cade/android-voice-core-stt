@@ -1,5 +1,18 @@
 package dev.barrycade.voicecore.stt
 
+/**
+ * Legacy configuration for [SpeechToText.create].
+ *
+ * This type is deprecated. New integrations should use [SttRunConfig]
+ * with [SpeechToText.setConfig] and [SpeechToText.startSession] instead.
+ *
+ * This type will be removed in a future major version.
+ * It remains fully functional for existing code.
+ */
+@Deprecated(
+    message = "Use SttRunConfig instead. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 data class SttConfig(
     val energyThreshold: Float = 0.03f,
 
@@ -22,7 +35,18 @@ data class SttConfig(
     val debugLoggingEnabled: Boolean = false,
     val modelPath: String,
 
+    /** @deprecated Use [SttLifeCycleStrategy] instead. */
+    @Deprecated(
+        message = "Use SttLifeCycleStrategy instead. This field will be removed in a future major version.",
+        level = DeprecationLevel.WARNING
+    )
     val startStrategy: String = "manual",
+
+    /** @deprecated Use [SttLifeCycleStrategy] instead. */
+    @Deprecated(
+        message = "Use SttLifeCycleStrategy instead. This field will be removed in a future major version.",
+        level = DeprecationLevel.WARNING
+    )
     val stopStrategy: String = "manual",
 
     // ── Mode-specific config blocks ────────────────────────────────────────
@@ -97,7 +121,15 @@ data class SttConfig(
  *
  * @property maxDurationMs Max allowed speech duration before forced stop (ms).
  * @property abnormalSilenceMs Silence duration treated as "forgot to press STOP" (ms).
+ *
+ * This type is deprecated. New integrations should use [ManualManualSpecific]
+ * inside [SttRunConfig] instead.
+ * It will be removed in a future major version.
  */
+@Deprecated(
+    message = "Use ManualManualSpecific instead. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 data class ManualManualConfig(
     val maxDurationMs: Int = 30000,
     val abnormalSilenceMs: Int = 5000
@@ -108,7 +140,15 @@ data class ManualManualConfig(
  *
  * @property maxDurationMs Max allowed speech duration before forced stop (ms).
  * @property autoSilenceMs Normal auto-silence threshold (ms).
+ *
+ * This type is deprecated. New integrations should use [ManualAutoSpecific]
+ * inside [SttRunConfig] instead.
+ * It will be removed in a future major version.
  */
+@Deprecated(
+    message = "Use ManualAutoSpecific instead. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 data class ManualAutoConfig(
     val maxDurationMs: Int = 30000,
     val autoSilenceMs: Int = 1200
@@ -119,7 +159,14 @@ data class ManualAutoConfig(
  *
  * @property tooLong Message when max duration is exceeded.
  * @property abnormalSilence Message when abnormal silence is detected (manual/manual only).
+ *
+ * This type is deprecated. Reason messages are not part of the new [SttRunConfig]
+ * API and will be removed in a future major version.
  */
+@Deprecated(
+    message = "Reason messages are removed from the new API. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 data class ReasonMessages(
     val tooLong: String = "You spoke for too long.",
     val abnormalSilence: String = "You stopped speaking for too long."

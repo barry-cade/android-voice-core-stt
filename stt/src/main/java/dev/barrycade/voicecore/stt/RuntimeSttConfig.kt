@@ -6,7 +6,14 @@ package dev.barrycade.voicecore.stt
  * Shared fields are grouped in [shared] for clarity. Timing fields are
  * mode-specific to prevent cross-mode interference; use [manualManual]
  * or [manualAuto] depending on the active stop strategy.
+ *
+ * This type is deprecated. Use [SttRunConfig] instead.
+ * It will be removed in a future major version.
  */
+@Deprecated(
+    message = "Use SttRunConfig instead. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 internal data class RuntimeSttConfig(
     val shared: SharedSttConfig = SharedSttConfig(),
     val manualManual: ManualManualConfig = ManualManualConfig(),

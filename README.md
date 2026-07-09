@@ -160,6 +160,10 @@ Install the demo app on an Android device:
 
 ## Integration Guide
 
+> **Deprecation notice:** The legacy [SttConfig] API is now deprecated. It remains
+> fully supported but will be removed in a future major version. New integrations
+> should use [SttRunConfig] with [SpeechToText.setConfig] and [SpeechToText.startSession].
+
 To use the STT module in your own Android app:
 
 1. Copy the `stt` folder into your project.
@@ -191,6 +195,11 @@ stt.destroy()
 ```
 
 Full API documentation is available in [`stt/README.md`](stt/README.md).
+
+> **Note:** The [SttConfig] type and [SpeechToText.create] shown above are the
+> legacy path. They remain fully functional but are deprecated. New code should
+> use [SttRunConfig] with [SpeechToText.setConfig] and [SpeechToText.startSession]
+> (see next section).
 
 ## New SttRunConfig API (Phase 1+)
 

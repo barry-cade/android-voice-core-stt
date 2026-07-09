@@ -10,7 +10,14 @@ package dev.barrycade.voicecore.stt
  * @property preRollMs Pre-roll window before speech is accepted (ms).
  * @property stableChunkSizeMs Chunk size used for stable frame processing (ms).
  * @property debugLoggingEnabled Enable verbose debug logging.
+ *
+ * This type is deprecated. Use [SttRunConfig] with [TtsEngineConfig] instead.
+ * It will be removed in a future major version.
  */
+@Deprecated(
+    message = "Use SttRunConfig instead. This type will be removed in a future major version.",
+    level = DeprecationLevel.WARNING
+)
 data class SharedSttConfig(
     val energyThreshold: Float = 0.03f,
     val preRollMs: Int = 100,
