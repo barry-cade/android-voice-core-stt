@@ -98,6 +98,26 @@ class PublicApiSmokeTest {
         assertTrue(methods.contains("setOnResultWithTimingListener"))
         assertTrue(methods.contains("setOnErrorListener"))
         assertTrue(methods.contains("destroy"))
+        assertTrue("setConfig must exist as a public method", methods.contains("setConfig"))
+        assertTrue("startSession must exist as a public method", methods.contains("startSession"))
+    }
+
+    @Test
+    fun sessionResult_isPublic() {
+        val resultClass = SessionResult::class.java
+        assertNotNull("SessionResult must be a public class", resultClass)
+        val constructors = resultClass.constructors
+        assertTrue("SessionResult must have at least one constructor", constructors.isNotEmpty())
+    }
+
+    @Test
+    fun sttRunConfigTypes_arePublic() {
+        // Verify the new config types are accessible from the stt package
+        assertNotNull(SttRunConfig::class.java)
+        assertNotNull(TtsEngineConfig::class.java)
+        assertNotNull(SttLifeCycleStrategy::class.java)
+        assertNotNull(ManualManualSpecific::class.java)
+        assertNotNull(ManualAutoSpecific::class.java)
     }
 
     @Test
