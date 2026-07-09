@@ -136,7 +136,7 @@ internal class ProcessorController(
                     is FrameResult.NormalFinalize -> {
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Utterance finalized with ${result.pcm.size} samples")
-                        listener.onUtteranceReady(result.pcm)
+                        listener.onUtteranceReady(result.pcm, result.code)
                         isRunning.set(false)
                         break
                     }
@@ -144,7 +144,6 @@ internal class ProcessorController(
                     is FrameResult.AutoStop -> {
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Auto-silence finalized with ${result.pcm.size} samples")
-                        listener.onUtteranceReady(result.pcm)
                         SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
                         isRunning.set(false)
                         onAutoStop?.invoke()
@@ -154,7 +153,7 @@ internal class ProcessorController(
                     is FrameResult.AbnormalTerminateWithPcm -> {
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcm("[TERMINATION] abnormal termination with PCM: size=${result.pcm.size}, code=${result.code}")
-                        listener.onUtteranceReady(result.pcm)
+                        listener.onUtteranceReady(result.pcm, result.code)
                         isRunning.set(false)
                         onAbnormalTermination?.invoke(result.code)
                         break

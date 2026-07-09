@@ -15,7 +15,7 @@ internal sealed class FrameResult {
     data object Continue : FrameResult()
 
     /** Utterance finalized normally (manual STOP or forced finalize). Transcribe. */
-    data class NormalFinalize(val pcm: FloatArray) : FrameResult()
+    data class NormalFinalize(val code: SttReturnCode, val pcm: FloatArray) : FrameResult()
 
     /** Utterance finalized by auto-silence trigger. Transcribe and stop. */
     data class AutoStop(val pcm: FloatArray) : FrameResult()
@@ -36,3 +36,4 @@ internal sealed class FrameResult {
      */
     data class AbnormalTerminateWithPcm(val code: SttReturnCode, val pcm: FloatArray) : FrameResult()
 }
+

@@ -197,16 +197,18 @@ class MainActivity : ComponentActivity() {
                 return
             }
 
-                        speechToText.setOnResultWithTimingListener { text, timing ->
+                                                                                                speechToText.setOnResultWithTimingListener { text, code, timing ->
                 postToUi {
                     isRecording = false
                     val timingInfo = if (timing != null) {
-                        "\n\nTiming: vad=${timing.vadActiveMs}ms, " +
+                        "Timing: vad=${timing.vadActiveMs}ms, " +
                         "utterance=${timing.utteranceDurationMs}ms, " +
                         "inference=${timing.inferenceMs}ms, " +
                         "total=${timing.totalPipelineMs}ms"
                     } else ""
-                    txtOutput.text = text + timingInfo
+                    txtOutput.text = "[$code] $text"
+                    txtDiagnostics.text = timingInfo
+                    txtDiagnostics.visibility = android.view.View.VISIBLE
                     updateUi()
                 }
             }

@@ -50,7 +50,7 @@ class SpeechToText internal constructor(
 
     private var sttErrorListener: SttErrorListener? = null
     private var onResult: ((String) -> Unit)? = null
-    private var onResultWithTiming: ((text: String, timing: SttTimingSnapshot?) -> Unit)? = null
+    private var onResultWithTiming: ((text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
     var onTimingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
 
@@ -59,7 +59,7 @@ class SpeechToText internal constructor(
     private val stateLock = Any()
 
     @Volatile
-    private var currentState: SttLifecycleState = SttLifecycleState.UNINITIALISED
+    internal var currentState: SttLifecycleState = SttLifecycleState.UNINITIALISED
 
     private val modelManager: ModelManager
 
@@ -105,7 +105,7 @@ class SpeechToText internal constructor(
         onResult = l
     }
 
-    fun setOnResultWithTimingListener(l: (text: String, timing: SttTimingSnapshot?) -> Unit) {
+    fun setOnResultWithTimingListener(l: (text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit) {
         onResultWithTiming = l
     }
 
@@ -178,6 +178,10 @@ class SpeechToText internal constructor(
     /**
      * Internal: create a new STT instance for the session and start it.
      *
+     * Audio capture starts BEFORE model warm-up so that any speech uttered
+     * during the ~4 second warm-up window accumulates in the frame queue.
+     * [start] reuses the pre-started capture via [ensureCaptureStarted].
+     *
      * After model warm-up completes (via [ModelManager.initAsync] callback),
      * [start] is called immediately — no queued-start flags, no ready listener branching.
      */
@@ -198,8 +202,8 @@ class SpeechToText internal constructor(
         stt.setOnResultListener { text ->
             onResult?.invoke(text)
         }
-        stt.setOnResultWithTimingListener { text, timing ->
-            onResultWithTiming?.invoke(text, timing)
+        stt.setOnResultWithTimingListener { text, code, timing ->
+            onResultWithTiming?.invoke(text, code, timing)
         }
         stt.setOnErrorListener { t ->
             onError?.invoke(t)
@@ -209,11 +213,21 @@ class SpeechToText internal constructor(
         // Store reference so stopAndTranscribe() routes to the active session.
         activeSession = stt
 
-        // Start the pipeline immediately when model warm-up completes.
+        // Start audio capture BEFORE model warm-up, so speech during the
+        // ~4 second warm-up window is queued and not lost.
+        stt.startCaptureImmediate()
+
+        // Start the pipeline when model warm-up completes.
         // Transition to READY first, then start.
+        // Guard against stale callback: if the session was already stopped
+        // (user pressed STOP during warm-up), skip the lifecycle transition.
         stt.modelManager.initAsync {
-            stt.transitionTo(SttLifecycleState.READY)
-            stt.start()
+            if (stt.currentState is SttLifecycleState.UNINITIALISED) {
+                stt.transitionTo(SttLifecycleState.READY)
+                stt.start()
+            } else {
+                SttLogger.lifecycle("warm-up callback skipped: state=${stt.currentState}")
+            }
         }
 
         return SessionResult(SttReturnCode.SUCCESS, null)
@@ -245,19 +259,33 @@ class SpeechToText internal constructor(
             SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${currentState}")
             if (!stopTrigger.shouldStop()) return
 
-            if (currentState is SttLifecycleState.UNINITIALISED ||
-                currentState is SttLifecycleState.STOPPED
-            ) {
-                SttLogger.pcm("[STOP] ignoring -- state=${currentState}")
+            if (currentState is SttLifecycleState.STOPPED) {
+                SttLogger.pcm("[STOP] ignoring -- state=STOPPED")
                 return
             }
 
-            // READY state: no audio capture running, just transition to STOPPED.
-            // No PCM to finalise — user stopped before any audio was captured.
-            if (currentState is SttLifecycleState.READY) {
-                SttLogger.pcm("[STOP] stopping during READY (no audio capture)")
-                isRunning.set(false)
-                transitionTo(SttLifecycleState.STOPPED)
+            // UNINITIALISED and READY: audio capture may already be running
+            // (pre-started before warm-up). Drain queued frames and transcribe.
+            if (currentState is SttLifecycleState.UNINITIALISED ||
+                currentState is SttLifecycleState.READY
+            ) {
+                val activeCapture = audioSource
+                if (activeCapture != null) {
+                    SttLogger.pcm("[STOP] stopping during warm-up with active capture")
+                    stopRequested = true
+                    isRunning.set(false)
+                    val drain = drainQueuedFrames(activeCapture)
+                    if (drain != null) {
+                        shutdownPipeline(drain)
+                    } else {
+                        SttLogger.pcm("[STOP] no PCM from queued frames")
+                        setStoppedDirect()
+                    }
+                } else {
+                    SttLogger.pcm("[STOP] stopping during READY (no audio capture)")
+                    isRunning.set(false)
+                    setStoppedDirect()
+                }
                 return
             }
 
@@ -320,6 +348,21 @@ class SpeechToText internal constructor(
     }
 
     // ======== Internal pipeline ========================================
+
+    /**
+     * Start audio capture immediately, before model warm-up.
+     *
+     * The capture fills [AudioCapture.frameQueue] with PCM frames during
+     * the ~4 second warm-up window. When [start] is called later, the
+     * [ProcessorController] drains these frames through VAD + accumulator.
+     *
+     * Safe to call multiple times — [ensureCaptureStarted] is idempotent.
+     */
+    internal fun startCaptureImmediate() {
+        synchronized(stateLock) {
+            ensureCaptureStarted()
+        }
+    }
 
     internal fun start() {
         synchronized(stateLock) {
@@ -419,6 +462,38 @@ class SpeechToText internal constructor(
         return processor
     }
 
+    /**
+     * Drain queued frames from [AudioSource] and finalise into a single PCM buffer.
+     * Used when stopping before the processor loop has started (e.g. STOP during warm-up).
+     * Creates a temporary VAD and accumulator to process the queued frames.
+     */
+    private fun drainQueuedFrames(source: AudioSource): FloatArray? {
+        val tempVad = Vad(config)
+        val tempAccumulator = UtteranceAccumulator(config, stopTrigger = stopTrigger)
+        while (true) {
+            val frame = source.pollFrame()
+            if (frame == null) break
+            val isSpeech = tempVad.isSpeech(frame)
+            val result = tempAccumulator.processChunk(frame, isSpeech)
+            when (result) {
+                is FrameResult.NormalFinalize -> return result.pcm
+                is FrameResult.AutoStop -> return result.pcm
+                is FrameResult.AbnormalTerminateWithPcm -> return result.pcm
+                else -> { }
+            }
+        }
+        return tempAccumulator.finaliseUtterance()
+    }
+
+    /**
+     * Set state to STOPPED directly, bypassing the transition validator.
+     * Used when stopping from UNINITIALISED or READY (early stop during warm-up)
+     * where normal lifecycle transitions are not applicable.
+     */
+    private fun setStoppedDirect() {
+        currentState = SttLifecycleState.STOPPED
+    }
+
     private fun shutdownPipeline(pcm: FloatArray) {
         processorController?.stop()
         processorController = null
@@ -429,7 +504,16 @@ class SpeechToText internal constructor(
         if (currentState is SttLifecycleState.RECORDING) {
             transitionTo(SttLifecycleState.FINALISING)
         }
-        transitionTo(SttLifecycleState.STOPPED)
+        if (currentState is SttLifecycleState.FINALISING ||
+            currentState is SttLifecycleState.READY
+        ) {
+            transitionTo(SttLifecycleState.STOPPED)
+        }
+        if (currentState is SttLifecycleState.UNINITIALISED) {
+            // Direct assignment: capture was started before lifecycle transition.
+            // We bypass the state machine here because we never entered RECORDING.
+            currentState = SttLifecycleState.STOPPED
+        }
 
         if (pcm.isNotEmpty()) {
             val vadMs = 0L
@@ -439,7 +523,7 @@ class SpeechToText internal constructor(
             } else {
                 0L
             }
-            runInferenceAndDispatch(pcm, vadMs, utterMs, capMs)
+            runInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
         }
     }
 
@@ -453,11 +537,19 @@ class SpeechToText internal constructor(
         if (currentState is SttLifecycleState.RECORDING) {
             transitionTo(SttLifecycleState.FINALISING)
         }
-        transitionTo(SttLifecycleState.STOPPED)
+        if (currentState is SttLifecycleState.FINALISING ||
+            currentState is SttLifecycleState.READY
+        ) {
+            transitionTo(SttLifecycleState.STOPPED)
+        }
+        if (currentState is SttLifecycleState.UNINITIALISED) {
+            currentState = SttLifecycleState.STOPPED
+        }
     }
 
     private fun runInferenceAndDispatch(
         pcm: FloatArray,
+        code: SttReturnCode,
         vadActiveMs: Long,
         utteranceMs: Long,
         captureMs: Long
@@ -469,10 +561,6 @@ class SpeechToText internal constructor(
             text = modelManager.transcribe(pcm.toShortArray()).trim()
         } catch (t: Throwable) {
             SttLogger.whisperE("inference failed: ${t.message}")
-            return
-        }
-
-        if (text.isBlank()) {
             return
         }
 
@@ -493,7 +581,7 @@ class SpeechToText internal constructor(
         )
 
         onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
-        dispatchResult(text, snapshot)
+        dispatchResult(text, code, snapshot)
     }
 
     internal fun transitionTo(newState: SttLifecycleState): Boolean {
@@ -515,8 +603,8 @@ class SpeechToText internal constructor(
         return false
     }
 
-    private fun dispatchResult(text: String, timing: SttTimingSnapshot?) {
-        onResultWithTiming?.invoke(text, timing)
+    private fun dispatchResult(text: String, code: SttReturnCode, timing: SttTimingSnapshot?) {
+        onResultWithTiming?.invoke(text, code, timing)
         onResult?.invoke(text)
     }
 
@@ -543,14 +631,14 @@ class SpeechToText internal constructor(
     }
 
     private inner class UtteranceHandler : UtteranceListener {
-        override fun onUtteranceReady(pcm: FloatArray) {
+        override fun onUtteranceReady(pcm: FloatArray, code: SttReturnCode) {
             if (!isRunning.get()) return
             if (!isInferencing.compareAndSet(false, true)) return
 
             try {
                 val vadMs = processorController?.vadActiveMs ?: 0L
                 val utterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
-                runInferenceAndDispatch(pcm, vadMs, utterMs, timingPcmTotalMs)
+                runInferenceAndDispatch(pcm, code, vadMs, utterMs, timingPcmTotalMs)
             } finally {
                 isInferencing.set(false)
             }
