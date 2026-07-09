@@ -171,6 +171,10 @@ internal class ProcessorController(
                 break
             } catch (t: Throwable) {
                 SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
+                SttLogger.error("code=INTERNAL_EXCEPTION, trace=${t.stackTraceToString()}")
+                isRunning.set(false)
+                onAbnormalTermination?.invoke(SttReturnCode.ENGINE_ERROR)
+                break
             }
         }
     }

@@ -2,6 +2,8 @@ package dev.barrycade.voicecore.stt
 
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -25,7 +27,11 @@ internal class ModelManager(
      * Dedicated single-thread executor for Whisper lifecycle operations.
      * All loadModel() and unloadModel() calls are serialized through this executor.
      */
-    private val whisperExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val whisperExecutor: ExecutorService = Executors.newSingleThreadExecutor(
+        ThreadFactory { runnable ->
+            Thread(runnable, "WhisperExecutor").also { it.isDaemon = true }
+        }
+    )
 
     /**
      * True when model is loaded AND warm-up has completed.
@@ -75,8 +81,8 @@ internal class ModelManager(
 
         try {
             whisperExecutor.submit(runnable)
-        } catch (_: RuntimeException) {
-            SttLogger.errorW("initAsync: executor rejected task")
+        } catch (_: RejectedExecutionException) {
+            SttLogger.whisperE("initAsync: executor rejected task — may have been shut down")
         }
     }
 
