@@ -1,7 +1,5 @@
 package dev.barrycade.voicecore
 
-// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
-
 import android.content.Context
 import android.util.Log
 import dev.barrycade.voicecore.stt.ManualAutoSpecific
@@ -11,76 +9,17 @@ import dev.barrycade.voicecore.stt.SttRunConfig
 import dev.barrycade.voicecore.stt.TtsEngineConfig
 import org.json.JSONObject
 
+/**
+ * Loads [SttRunConfig] from the [stt_config.json] asset.
+ *
+ * This is the sole config loader for the app — the legacy [SttConfig] path
+ * has been removed.
+ */
 object AppSttConfigLoader {
     private const val TAG = "STT_CONFIG"
 
-    // ── Existing loader (unchanged) ────────────────────────────────────────
-
-    fun loadFromAssets(context: Context): AppRuntimeSttConfig {
-        val inputStream = context.assets.open("stt_config.json")
-        val json = inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-
-        return try {
-            parse(json)
-        } catch (e: Exception) {
-            Log.e(TAG, "Invalid STT configuration", e)
-            throw IllegalStateException("Invalid STT configuration: ${e.message}", e)
-        }
-    }
-
-    private fun parse(json: String): AppRuntimeSttConfig {
-        val root = JSONObject(json)
-
-        // Mode-specific blocks (optional — defaults apply if missing)
-        val manualManualObj = root.optJSONObject("manualManual")
-        val manualAutoObj = root.optJSONObject("manualAuto")
-        val reasonMessagesObj = root.optJSONObject("reasonMessages")
-
-        return AppRuntimeSttConfig(
-            energyThreshold = root.getDouble("energyThreshold").toFloat(),
-            preRollMs = root.getInt("preRollMs"),
-            stableChunkSizeMs = root.getInt("stableChunkSizeMs"),
-            manualManual = if (manualManualObj != null) {
-                AppManualManualConfig(
-                    maxDurationMs = manualManualObj.optInt("maxDurationMs", 30000),
-                    abnormalSilenceMs = manualManualObj.optInt("abnormalSilenceMs", 5000)
-                )
-            } else {
-                AppManualManualConfig()
-            },
-            manualAuto = if (manualAutoObj != null) {
-                AppManualAutoConfig(
-                    maxDurationMs = manualAutoObj.optInt("maxDurationMs", 30000),
-                    autoSilenceMs = manualAutoObj.optInt("autoSilenceMs", 1200)
-                )
-            } else {
-                AppManualAutoConfig()
-            },
-            reasonMessages = if (reasonMessagesObj != null) {
-                AppReasonMessages(
-                    tooLong = reasonMessagesObj.optString("tooLong", "You spoke for too long."),
-                    abnormalSilence = reasonMessagesObj.optString("abnormalSilence", "You stopped speaking for too long.")
-                )
-            } else {
-                AppReasonMessages()
-            },
-            startStrategy = root.optString("startStrategy", "manual"),
-            stopStrategy = root.optString("stopStrategy", "manual")
-        )
-    }
-
-    // ── New loader for SttRunConfig (Phase 3) ─────────────────────────────
-
     /**
-     * Load and construct a fully validated [SttRunConfig] from the existing
-     * [stt_config.json] asset.
-     *
-     * Maps the JSON fields as follows:
-     * - `energyThreshold`, `preRollMs`, `stableChunkSizeMs`, `debugLoggingEnabled`
-     *   → [TtsEngineConfig] fields
-     * - `startStrategy` + `stopStrategy` → [SttLifeCycleStrategy]
-     * - `manualManual` or `manualAuto` block → [ManualManualSpecific] or
-     *   [ManualAutoSpecific]
+     * Load and construct a fully validated [SttRunConfig] from [stt_config.json].
      *
      * @param context Android context for asset access.
      * @param modelPath Absolute file path to the Whisper model binary.
@@ -179,8 +118,8 @@ object AppSttConfigLoader {
      * Resolve [SttLifeCycleStrategy] from the JSON strategy strings.
      *
      * Allowed combinations:
-     * - start="manual" + stop="manual" → [SttLifeCycleStrategy.MANUAL_MANUAL]
-     * - start="manual" + stop="autoSilence" → [SttLifeCycleStrategy.MANUAL_AUTO]
+     * - start="manual" + stop="manual" -> [SttLifeCycleStrategy.MANUAL_MANUAL]
+     * - start="manual" + stop="autoSilence" -> [SttLifeCycleStrategy.MANUAL_AUTO]
      *
      * @throws IllegalStateException for unrecognised combinations.
      */

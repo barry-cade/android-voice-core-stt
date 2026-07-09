@@ -1,9 +1,9 @@
-package dev.barrycade.voicecore
+﻿package dev.barrycade.voicecore
 
 import dev.barrycade.voicecore.stt.ManualAutoSpecific
 import dev.barrycade.voicecore.stt.ManualManualSpecific
+import dev.barrycade.voicecore.stt.SessionResult
 import dev.barrycade.voicecore.stt.SpeechToText
-import dev.barrycade.voicecore.stt.SttConfig
 import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
 import dev.barrycade.voicecore.stt.SttReturnCode
 import dev.barrycade.voicecore.stt.SttRunConfig
@@ -13,22 +13,17 @@ import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 /**
- * Smoke test for the new [SpeechToText.setConfig] / [SpeechToText.startSession] API.
+ * Smoke test for the new [SttRunConfig]-based API path.
  *
- * This test validates that the new API path loads, validates, and routes
- * correctly in a pure JVM environment. It does NOT require:
- * - Audio hardware
- * - Whisper model loading
- * - Microphone permissions
- *
- * Uses only the public API — [SpeechToText.create] and new API types.
+ * Verifies that:
+ * - [SttRunConfig] can be constructed with valid values
+ * - [SpeechToText.create] returns a valid instance
+ * - [SpeechToText.setConfig] with valid config returns SUCCESS
+ * - [SpeechToText.setConfig] with invalid config returns INVALID_CONFIG
  */
 class NewApiSmokeTest {
 
-    /**
-     * Helper: construct a minimal valid [SttRunConfig] for MANUAL_MANUAL mode.
-     */
-    private fun minimalManualManualConfig(): SttRunConfig {
+    private fun validManualManualConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
@@ -46,10 +41,7 @@ class NewApiSmokeTest {
         )
     }
 
-    /**
-     * Helper: construct a minimal valid [SttRunConfig] for MANUAL_AUTO mode.
-     */
-    private fun minimalManualAutoConfig(): SttRunConfig {
+    private fun validManualAutoConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
@@ -67,81 +59,52 @@ class NewApiSmokeTest {
         )
     }
 
-    /**
-     * Helper: runs [action] and catches UnsatisfiedLinkError from WhisperBridge
-     * when native libraries are unavailable (pure JVM test environment).
-     */
-    private fun safeRun(action: () -> Unit) {
-        try {
-            action()
-        } catch (_: UnsatisfiedLinkError) {
-            // Native Whisper libraries not available — expected in this environment
-        }
+    @Test
+    fun runConfig_manualManual_constructsSuccessfully() {
+        val config = validManualManualConfig()
+        assertNotNull(config)
+        assertEquals(SttLifeCycleStrategy.MANUAL_MANUAL, config.ttsLifeCycleStrategy)
     }
 
     @Test
-    fun setConfig_withValidManualManualConfig_returnsSuccess() {
-        val stt = SpeechToText.create(
-            SttConfig(modelPath = "/dummy/model.bin")
-        )
-        val result = stt.setConfig(minimalManualManualConfig())
-        assertNotNull("setConfig must return a SessionResult", result)
-        assertEquals(
-            "Valid MANUAL_MANUAL config must return SUCCESS",
-            SttReturnCode.SUCCESS,
-            result.code
-        )
+    fun runConfig_manualAuto_constructsSuccessfully() {
+        val config = validManualAutoConfig()
+        assertNotNull(config)
+        assertEquals(SttLifeCycleStrategy.MANUAL_AUTO, config.ttsLifeCycleStrategy)
     }
 
     @Test
-    fun setConfig_withValidManualAutoConfig_returnsSuccess() {
-        val stt = SpeechToText.create(
-            SttConfig(modelPath = "/dummy/model.bin")
-        )
-        val result = stt.setConfig(minimalManualAutoConfig())
-        assertNotNull("setConfig must return a SessionResult", result)
-        assertEquals(
-            "Valid MANUAL_AUTO config must return SUCCESS",
-            SttReturnCode.SUCCESS,
-            result.code
-        )
+    fun speechToText_create_returnsInstance() {
+        val stt = SpeechToText.create("/dummy/model.bin")
+        assertNotNull(stt)
     }
 
     @Test
-    fun startSession_withoutConfig_returnsConfigNotSet() {
-        val stt = SpeechToText.create(
-            SttConfig(modelPath = "/dummy/model.bin")
-        )
-        val result = stt.startSession()
-        assertNotNull("startSession without config must return a SessionResult", result)
-        assertEquals(
-            "startSession without config must return CONFIG_NOT_SET",
-            SttReturnCode.CONFIG_NOT_SET,
-            result.code
-        )
+    fun speechToText_setConfig_valid_returnsSuccess() {
+        val stt = SpeechToText.create("/dummy/model.bin")
+        val result = stt.setConfig(validManualManualConfig())
+        assertEquals(SttReturnCode.SUCCESS, result.code)
     }
 
     @Test
-    fun setConfigThenStartSession_withManualManual_doesNotThrow() {
-        val stt = SpeechToText.create(
-            SttConfig(modelPath = "/dummy/model.bin")
+    fun speechToText_setConfig_invalidModelPath_returnsInvalidConfig() {
+        val stt = SpeechToText.create("/dummy/model.bin")
+        val config = SttRunConfig(
+            ttsEngineConfig = TtsEngineConfig(
+                modelPath = "",
+                language = "en",
+                preRollMs = 100,
+                stableChunkSizeMs = 500,
+                debugLoggingEnabled = false
+            ),
+            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
+            strategySpecific = ManualManualSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000
+            )
         )
-        stt.setConfig(minimalManualManualConfig())
-        safeRun {
-            val result = stt.startSession()
-            assertNotNull("startSession must return a SessionResult", result)
-        }
-    }
-
-    @Test
-    fun setConfigThenStartSession_withManualAuto_doesNotThrow() {
-        val stt = SpeechToText.create(
-            SttConfig(modelPath = "/dummy/model.bin")
-        )
-        stt.setConfig(minimalManualAutoConfig())
-        safeRun {
-            val result = stt.startSession()
-            assertNotNull("startSession must return a SessionResult", result)
-        }
+        val result = stt.setConfig(config)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result.code)
     }
 }

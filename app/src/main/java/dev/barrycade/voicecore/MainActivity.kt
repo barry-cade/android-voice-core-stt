@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
-import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
@@ -14,34 +13,31 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
-import dev.barrycade.voicecore.stt.SttConfig
-import dev.barrycade.voicecore.stt.SttErrorListener
+import dev.barrycade.voicecore.stt.SessionResult
+import dev.barrycade.voicecore.stt.SttReturnCode
 import java.io.File
 import java.io.FileOutputStream
 
+/**
+ * Demo app for the STT module.
+ *
+ * Uses only the new [SttRunConfig]-based API path:
+ * 1. [AppSttConfigLoader.loadSttRunConfig] loads config from JSON asset.
+ * 2. [SpeechToText.setConfig] validates and stores the config.
+ * 3. [SpeechToText.startSession] starts the session.
+ * 4. [SpeechToText.stopAndTranscribe] stops manually (if MANUAL_MANUAL strategy).
+ */
 class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
-    private lateinit var btnNewApiStart: Button
     private lateinit var txtOutput: TextView
-    private lateinit var txtErrorBanner: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
-    private lateinit var radioGroupStartStrategy: RadioGroup
-    private lateinit var radioGroupStopStrategy: RadioGroup
-
-    private var selectedStartStrategy: String = "manual"
-    private var selectedStopStrategy: String = "manual"
 
     private var stt: SpeechToText? = null
     private var isRecording = false
     private val debugLogging = true
-
-    // ── Debug toggle state (no UI controls; set breakpoint to change) ────
-    private var debugForceAudioInitFailure = false
-    private var debugForceWhisperLoadFailure = false
-    private var debugForceTimeout = false
 
     private fun logInfo(tag: String, message: String) {
         if (debugLogging) Log.i(tag, message)
@@ -60,80 +56,37 @@ class MainActivity : ComponentActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
-        btnNewApiStart = findViewById(R.id.btnNewApiStart)
         txtOutput = findViewById(R.id.txtOutput)
-        txtErrorBanner = findViewById(R.id.txtErrorBanner)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
-        radioGroupStartStrategy = findViewById(R.id.radioGroupStartStrategy)
-        radioGroupStopStrategy = findViewById(R.id.radioGroupStopStrategy)
-
-        // ── Strategy radio listeners ─────────────────────────────────────
-        radioGroupStartStrategy.setOnCheckedChangeListener { _, _ ->
-            updateSelectedStrategies()
-            updateUi()
-        }
-
-        radioGroupStopStrategy.setOnCheckedChangeListener { _, _ ->
-            updateSelectedStrategies()
-            updateUi()
-        }
 
         btnStart.setOnClickListener {
             logInfo("STT_FLOW", "Start button pressed")
-            updateUi()
             if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         btnStop.setOnClickListener {
             logInfo("STT_FLOW", "Stop button pressed")
-            stopAndTranscribe()
+            stopRecording()
         }
 
         btnClear.setOnClickListener {
             txtOutput.text = ""
         }
 
-        btnNewApiStart.setOnClickListener {
-            logInfo("STT_FLOW", "New API button pressed")
-            if (hasRecordAudioPermission()) startRecordingWithNewApi()
-            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-
-        // Permission launcher — initialised after view bindings so the
-        // callback can safely reference lateinit views.
+        // Permission launcher
         requestPermissionLauncher = registerForActivityResult(
             RequestPermission()
         ) { granted ->
             if (granted) {
-                updateUi()
                 startRecording()
             } else {
                 txtOutput.text = "Microphone permission is required"
             }
         }
 
-        updateSelectedStrategies()
         updateUi()
-    }
-
-    /**
-     * Read the currently selected radio button values and store them.
-     */
-    private fun updateSelectedStrategies() {
-        val startId = radioGroupStartStrategy.checkedRadioButtonId
-        selectedStartStrategy = when (startId) {
-            R.id.radioStartManual -> "manual"
-            else -> "manual"
-        }
-
-        val stopId = radioGroupStopStrategy.checkedRadioButtonId
-        selectedStopStrategy = when (stopId) {
-            R.id.radioStopManual -> "manual"
-            R.id.radioStopAutoSilence -> "autoSilence"
-            else -> "manual"
-        }
     }
 
     private fun hasRecordAudioPermission(): Boolean {
@@ -143,172 +96,14 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startRecording() {
-        val modelPath = getModelPath()
-        val runtimeConfig = try {
-            AppSttConfigLoader.loadFromAssets(this)
-        } catch (e: Exception) {
-            handleConfigError(e)
-            return
-        }
-
-        try {
-            logInfo("STT_INIT", "Constructing STT with modelPath=$modelPath")
-            val speechToText = SpeechToText.create(
-                SttConfig(
-                    energyThreshold = runtimeConfig.energyThreshold,
-                    preRollMs = runtimeConfig.preRollMs,
-                    stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
-                    modelPath = modelPath,
-                    startStrategy = selectedStartStrategy,
-                    stopStrategy = selectedStopStrategy,
-                    manualManual = dev.barrycade.voicecore.stt.ManualManualConfig(
-                        maxDurationMs = runtimeConfig.manualManual.maxDurationMs,
-                        abnormalSilenceMs = runtimeConfig.manualManual.abnormalSilenceMs
-                    ),
-                    manualAuto = dev.barrycade.voicecore.stt.ManualAutoConfig(
-                        maxDurationMs = runtimeConfig.manualAuto.maxDurationMs,
-                        autoSilenceMs = runtimeConfig.manualAuto.autoSilenceMs
-                    ),
-                    reasonMessages = dev.barrycade.voicecore.stt.ReasonMessages(
-                        tooLong = runtimeConfig.reasonMessages.tooLong,
-                        abnormalSilence = runtimeConfig.reasonMessages.abnormalSilence
-                    )
-                )
-            )
-
-            // ── Apply test hooks via public API ───────────────────────────
-            speechToText.setDebugOptions(
-                forceAudioInitFailure = debugForceAudioInitFailure,
-                forceWhisperLoadFailure = debugForceWhisperLoadFailure,
-                forceTimeout = debugForceTimeout
-            )
-
-            // ── Result callback ───────────────────────────────────────────
-            speechToText.setOnResultListener { result ->
-                postToUi {
-                    isRecording = false
-                    txtOutput.text = result
-                    updateUi()
-                }
-            }
-
-            // ── Timing callback ───────────────────────────────────────────
-            val timingListener: (Long, Long, Long, Long) -> Unit = { pcmMs, vadActiveMs, whisperMs, totalMs ->
-                postToUi {
-                    isRecording = false
-                    txtDiagnostics.visibility = android.view.View.VISIBLE
-                    txtDiagnostics.text = buildString {
-                        appendLine("=== Timing Diagnostics ===")
-                        appendLine("PCM duration:    ${pcmMs}ms")
-                        appendLine("VAD active:      ${vadActiveMs}ms")
-                        appendLine("Whisper inf:     ${whisperMs}ms")
-                        appendLine("Total duration:  ${totalMs}ms")
-                        if (selectedStopStrategy == "autoSilence") {
-                            appendLine("Stop: auto-silence")
-                        }
-                    }
-                    updateUi()
-                }
-            }
-            speechToText.onTimingListener = timingListener
-
-            // ── Structured error callback ─────────────────────────────────
-            val errorListener = SttErrorListener { error ->
-                postToUi {
-                    val keySet = setOf("pcmMs", "vadActiveMs", "whisperMs", "totalMs")
-                    val timingCtx = error.context.filterKeys { it in keySet }
-                    val timingMs = error.timingSnapshotMs
-                    val rms = error.lastRms
-                    val vadState = error.lastVadState
-                    val errorContext = error.context
-                    txtDiagnostics.visibility = android.view.View.VISIBLE
-                    txtDiagnostics.text = buildString {
-                        appendLine("=== Error ===")
-                        appendLine("Category: ${error.category}")
-                        appendLine("Code:    ${error.code}")
-                        appendLine("Message: ${error.message}")
-                        if (rms != null) {
-                            appendLine("Last RMS: $rms")
-                        }
-                        if (vadState != null) {
-                            appendLine("VAD speech: $vadState")
-                        }
-                        if (timingMs != null) {
-                            appendLine("Timing:")
-                            timingMs.forEach { (key, value) ->
-                                appendLine("  $key = ${value}ms")
-                            }
-                        }
-                        if (errorContext.isNotEmpty()) {
-                            appendLine("Context:")
-                            errorContext.forEach { (key, value) ->
-                                appendLine("  $key = $value")
-                            }
-                                }
-                        if (timingCtx.isNotEmpty()) {
-                            appendLine("Timing at error:")
-                            timingCtx.forEach { (key, value) ->
-                                appendLine("  $key = $value")
-                            }
-                        }
-                    }
-                    txtOutput.text = "Error: ${error.category} - ${error.code} - ${error.message}"
-                }
-            }
-            speechToText.setSttErrorListener(errorListener)
-
-            // ── Legacy error callback (backwards compat) ──────────────────
-            speechToText.setOnErrorListener { t ->
-                postToUi {
-                    if (txtDiagnostics.text.isNullOrBlank()) {
-                        txtDiagnostics.visibility = android.view.View.VISIBLE
-                        txtDiagnostics.text = "Error: ${t.message}"
-                    }
-                    txtOutput.text = "Error: ${t.message}"
-                }
-            }
-
-            // ── Start immediately — queued-start handles waiting for READY ─
-            speechToText.start()
-            stt = speechToText
-
-            // ── Show active config ────────────────────────────────────────
-            txtConfigDisplay.visibility = android.view.View.VISIBLE
-            txtConfigDisplay.text = buildString {
-                appendLine("=== Active Config ===")
-                appendLine("energyThreshold:        ${runtimeConfig.energyThreshold}")
-                appendLine("preRollMs:              ${runtimeConfig.preRollMs}")
-                appendLine("stableChunkSizeMs:      ${runtimeConfig.stableChunkSizeMs}")
-                appendLine("startStrategy:          ${selectedStartStrategy}")
-                appendLine("stopStrategy:           ${selectedStopStrategy}")
-                appendLine("manualManual.maxDurationMs:      ${runtimeConfig.manualManual.maxDurationMs}")
-                appendLine("manualManual.abnormalSilenceMs:  ${runtimeConfig.manualManual.abnormalSilenceMs}")
-                appendLine("manualAuto.maxDurationMs:        ${runtimeConfig.manualAuto.maxDurationMs}")
-                appendLine("manualAuto.autoSilenceMs:        ${runtimeConfig.manualAuto.autoSilenceMs}")
-                appendLine("reasonMessages.tooLong:          ${runtimeConfig.reasonMessages.tooLong}")
-                appendLine("reasonMessages.abnormalSilence:  ${runtimeConfig.reasonMessages.abnormalSilence}")
-            }
-
-            isRecording = true
-            txtOutput.text = "Recording..."
-            updateUi()
-        } catch (e: IllegalArgumentException) {
-            handleConfigError(e)
-        }
-    }
-
     /**
      * Start recording using the new [SttRunConfig]-based API.
-     *
-     * This is an optional additive path — the existing [startRecording] path
-     * using [SttConfig] and [SpeechToText.create] remains untouched.
      *
      * Loads config via [AppSttConfigLoader.loadSttRunConfig], sets it via
      * [SpeechToText.setConfig], and starts a session via
      * [SpeechToText.startSession].
      */
-    private fun startRecordingWithNewApi() {
+    private fun startRecording() {
         val modelPath = getModelPath()
 
         val runConfig = try {
@@ -323,38 +118,14 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            logInfo("STT_INIT", "New API: constructing STT with SttRunConfig")
+            logInfo("STT_INIT", "Constructing STT with SttRunConfig")
 
-            // ── Create STT via existing factory (uses SttConfig internally) ─
-            // We reuse the existing pipeline by creating a SpeechToText instance
-            // and then applying the new config via setConfig.
-            val runtimeConfig = AppSttConfigLoader.loadFromAssets(this)
-            val speechToText = SpeechToText.create(
-                SttConfig(
-                    energyThreshold = runtimeConfig.energyThreshold,
-                    preRollMs = runtimeConfig.preRollMs,
-                    stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
-                    modelPath = modelPath,
-                    startStrategy = selectedStartStrategy,
-                    stopStrategy = selectedStopStrategy,
-                    manualManual = dev.barrycade.voicecore.stt.ManualManualConfig(
-                        maxDurationMs = runtimeConfig.manualManual.maxDurationMs,
-                        abnormalSilenceMs = runtimeConfig.manualManual.abnormalSilenceMs
-                    ),
-                    manualAuto = dev.barrycade.voicecore.stt.ManualAutoConfig(
-                        maxDurationMs = runtimeConfig.manualAuto.maxDurationMs,
-                        autoSilenceMs = runtimeConfig.manualAuto.autoSilenceMs
-                    ),
-                    reasonMessages = dev.barrycade.voicecore.stt.ReasonMessages(
-                        tooLong = runtimeConfig.reasonMessages.tooLong,
-                        abnormalSilence = runtimeConfig.reasonMessages.abnormalSilence
-                    )
-                )
-            )
+            // ── Create STT via public factory ────────────────────────────
+            val speechToText = SpeechToText.create(modelPath)
 
             // ── Set the new config via the wrapper API ────────────────────
             val setConfigResult = speechToText.setConfig(runConfig)
-            if (setConfigResult.code != dev.barrycade.voicecore.stt.SttReturnCode.SUCCESS) {
+            if (setConfigResult.code != SttReturnCode.SUCCESS) {
                 postToUi {
                     txtOutput.text = "Config error: ${setConfigResult.code}"
                 }
@@ -381,7 +152,7 @@ class MainActivity : ComponentActivity() {
             val result = speechToText.startSession()
             logInfo("STT_FLOW", "startSession returned: ${result.code}")
 
-            if (result.code != dev.barrycade.voicecore.stt.SttReturnCode.SUCCESS) {
+            if (result.code != SttReturnCode.SUCCESS) {
                 postToUi {
                     txtOutput.text = "Session error: ${result.code}"
                 }
@@ -391,9 +162,9 @@ class MainActivity : ComponentActivity() {
             stt = speechToText
 
             // ── Show active config ────────────────────────────────────────
-            txtConfigDisplay.visibility = android.view.View.VISIBLE
+            txtConfigDisplay.visibility = View.VISIBLE
             txtConfigDisplay.text = buildString {
-                appendLine("=== New API Config ===")
+                appendLine("=== Config ===")
                 appendLine("strategy:  ${runConfig.ttsLifeCycleStrategy}")
                 appendLine("model:     ${runConfig.ttsEngineConfig.modelPath}")
                 appendLine("language:  ${runConfig.ttsEngineConfig.language}")
@@ -416,7 +187,7 @@ class MainActivity : ComponentActivity() {
             }
 
             isRecording = true
-            txtOutput.text = "Recording via New API..."
+            txtOutput.text = "Recording..."
             updateUi()
         } catch (e: IllegalArgumentException) {
             handleConfigError(e)
@@ -430,8 +201,8 @@ class MainActivity : ComponentActivity() {
             message = "The STT tuning values are invalid:\n${e.message}"
         )
         isRecording = false
+        stt?.destroy()
         stt = null
-        txtErrorBanner.visibility = android.view.View.VISIBLE
         updateUi()
     }
 
@@ -443,7 +214,7 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    private fun stopAndTranscribe() {
+    private fun stopRecording() {
         val currentStt = stt
         if (currentStt == null) {
             postToUi { txtOutput.text = "Not yet started" }
@@ -454,41 +225,24 @@ class MainActivity : ComponentActivity() {
         txtOutput.text = "Processing..."
         updateUi()
 
-        val runnable = Runnable {
-            runStopAndTranscribe(currentStt)
-        }
-        val thread = Thread(runnable, "StopAndTranscribeThread")
+        val thread = Thread({
+            try {
+                Log.d("MainActivity", "STOP pressed -> using stopAndTranscribe()")
+                currentStt.stopAndTranscribe()
+            } catch (t: Throwable) {
+                postToUi { txtOutput.text = "Error: ${t.message}" }
+            }
+        }, "StopAndTranscribeThread")
         thread.start()
     }
 
-    private fun runStopAndTranscribe(stt: SpeechToText) {
-        try {
-            Log.d("MainActivity", "STOP pressed → using deterministic stopAndTranscribe()")
-            stt.stopAndTranscribe()
-        } catch (t: Throwable) {
-            postToUi { txtOutput.text = "Error: ${t.message}" }
-        }
-    }
-
     /**
-     * Update button states according to current recording state and strategy.
-     *
-     * Rules:
-     *   - Start enabled when not recording (always, since manual start is the only option)
-     *   - Stop enabled only when recording AND stop strategy is "manual"
-     *   - Clear always enabled
-     *   - Radio groups disabled while recording (cannot change strategy mid-recording)
+     * Update button states according to current recording state.
      */
     private fun updateUi() {
-        val isManualStop = selectedStopStrategy == "manual"
-
         btnStart.isEnabled = !isRecording
-        btnStop.isEnabled = isRecording && isManualStop
+        btnStop.isEnabled = isRecording
         btnClear.isEnabled = true
-        btnNewApiStart.isEnabled = !isRecording
-
-        radioGroupStartStrategy.isEnabled = !isRecording
-        radioGroupStopStrategy.isEnabled = !isRecording
     }
 
     private fun getModelPath(): String {

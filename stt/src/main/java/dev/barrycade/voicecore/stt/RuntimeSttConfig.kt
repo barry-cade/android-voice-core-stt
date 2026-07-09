@@ -1,31 +1,80 @@
 package dev.barrycade.voicecore.stt
 
-// TODO(major-version): Remove legacy config path after full migration to SttRunConfig.
-
 /**
- * Full runtime configuration for the STT pipeline.
+ * Internal runtime configuration for the STT pipeline.
  *
- * Shared fields are grouped in [shared] for clarity. Timing fields are
- * mode-specific to prevent cross-mode interference; use [manualManual]
- * or [manualAuto] depending on the active stop strategy.
+ * All fields are flattened into this single data class. Populated from
+ * [SttRunConfig] via [fromSttRunConfig].
  *
- * This type is deprecated. Use [SttRunConfig] instead.
- * It will be removed in a future major version.
+ * Internal only — external callers use [SttRunConfig].
  */
-@Deprecated(
-    message = "Use SttRunConfig instead. This type will be removed in a future major version.",
-    level = DeprecationLevel.WARNING
-)
 internal data class RuntimeSttConfig(
-    val shared: SharedSttConfig = SharedSttConfig(),
-    val manualManual: ManualManualConfig = ManualManualConfig(),
-    val manualAuto: ManualAutoConfig = ManualAutoConfig()
+    // ── Shared engine fields ──────────────────────────────────────────────
+    val energyThreshold: Float = 0.03f,
+    val preRollMs: Int = 100,
+    val stableChunkSizeMs: Int = 500,
+    val debugLoggingEnabled: Boolean = false,
+
+    // ── Manual/manual-specific fields ────────────────────────────────────
+    val manualManualMaxDurationMs: Int = 30000,
+    val manualManualAbnormalSilenceMs: Int = 5000,
+
+    // ── Manual/auto-specific fields ──────────────────────────────────────
+    val manualAutoMaxDurationMs: Int = 30000,
+    val manualAutoAutoSilenceMs: Int = 1200
 ) {
-    /** Convenience accessors for shared fields. */
-    val energyThreshold: Float get() = shared.energyThreshold
-    val preRollMs: Int get() = shared.preRollMs
-    val stableChunkSizeMs: Int get() = shared.stableChunkSizeMs
-    val debugLoggingEnabled: Boolean get() = shared.debugLoggingEnabled
+    companion object {
+        /**
+         * Build a [RuntimeSttConfig] from a [SttRunConfig].
+         */
+        fun fromSttRunConfig(runCfg: SttRunConfig): RuntimeSttConfig {
+            val engine = runCfg.ttsEngineConfig
+            val specific = runCfg.strategySpecific
+
+            val energyThreshold = when (specific) {
+                is ManualManualSpecific -> specific.energyThreshold
+                is ManualAutoSpecific -> specific.energyThreshold
+                else -> 0.03f
+            }
+
+            val manualManualMaxDurationMs: Int
+            val manualManualAbnormalSilenceMs: Int
+            val manualAutoMaxDurationMs: Int
+            val manualAutoAutoSilenceMs: Int
+
+            when (specific) {
+                is ManualManualSpecific -> {
+                    manualManualMaxDurationMs = specific.maxDurationMs
+                    manualManualAbnormalSilenceMs = specific.abnormalSilenceMs
+                    manualAutoMaxDurationMs = 30000
+                    manualAutoAutoSilenceMs = 1200
+                }
+                is ManualAutoSpecific -> {
+                    manualManualMaxDurationMs = 30000
+                    manualManualAbnormalSilenceMs = 5000
+                    manualAutoMaxDurationMs = specific.maxDurationMs
+                    manualAutoAutoSilenceMs = specific.autoSilenceMs
+                }
+                else -> {
+                    manualManualMaxDurationMs = 30000
+                    manualManualAbnormalSilenceMs = 5000
+                    manualAutoMaxDurationMs = 30000
+                    manualAutoAutoSilenceMs = 1200
+                }
+            }
+
+            return RuntimeSttConfig(
+                energyThreshold = energyThreshold,
+                preRollMs = engine.preRollMs,
+                stableChunkSizeMs = engine.stableChunkSizeMs,
+                debugLoggingEnabled = engine.debugLoggingEnabled,
+                manualManualMaxDurationMs = manualManualMaxDurationMs,
+                manualManualAbnormalSilenceMs = manualManualAbnormalSilenceMs,
+                manualAutoMaxDurationMs = manualAutoMaxDurationMs,
+                manualAutoAutoSilenceMs = manualAutoAutoSilenceMs
+            )
+        }
+    }
 }
 internal fun RuntimeSttConfig.validate() {
     require(energyThreshold in 0.0001f..1f) {
@@ -40,20 +89,20 @@ internal fun RuntimeSttConfig.validate() {
         "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
     }
 
-    require(manualManual.maxDurationMs in 1000..60000) {
-        "manualManual.maxDurationMs=${manualManual.maxDurationMs} must be in [1000, 60000] ms"
+    require(manualManualMaxDurationMs in 1000..60000) {
+        "manualManualMaxDurationMs=$manualManualMaxDurationMs must be in [1000, 60000] ms"
     }
 
-    require(manualManual.abnormalSilenceMs in 50..30000) {
-        "manualManual.abnormalSilenceMs=${manualManual.abnormalSilenceMs} must be in [50, 30000] ms"
+    require(manualManualAbnormalSilenceMs in 50..30000) {
+        "manualManualAbnormalSilenceMs=$manualManualAbnormalSilenceMs must be in [50, 30000] ms"
     }
 
-    require(manualAuto.maxDurationMs in 1000..60000) {
-        "manualAuto.maxDurationMs=${manualAuto.maxDurationMs} must be in [1000, 60000] ms"
+    require(manualAutoMaxDurationMs in 1000..60000) {
+        "manualAutoMaxDurationMs=$manualAutoMaxDurationMs must be in [1000, 60000] ms"
     }
 
-    require(manualAuto.autoSilenceMs in 50..10000) {
-        "manualAuto.autoSilenceMs=${manualAuto.autoSilenceMs} must be in [50, 10000] ms"
+    require(manualAutoAutoSilenceMs in 50..10000) {
+        "manualAutoAutoSilenceMs=$manualAutoAutoSilenceMs must be in [50, 10000] ms"
     }
 }
 

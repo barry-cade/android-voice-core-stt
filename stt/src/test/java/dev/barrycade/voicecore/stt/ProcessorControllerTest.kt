@@ -1,4 +1,4 @@
-package dev.barrycade.voicecore.stt
+﻿package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,10 +36,7 @@ class ProcessorControllerTest {
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000  // high so silence doesn't trigger abnormal termination
-            )
+            manualManualMaxDurationMs = 30000, manualManualAbnormalSilenceMs = 5000
         )
         capturedUtterances.clear()
         listener = object : UtteranceListener {

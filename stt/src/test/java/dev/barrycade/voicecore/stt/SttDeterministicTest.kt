@@ -1,22 +1,12 @@
-package dev.barrycade.voicecore.stt
+﻿package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Deterministic test for [UtteranceAccumulator] with pre-roll and
  * silence-based finalization.
- *
- * Tests generate synthetic PCM (constant-amplitude or silence), feed it through
- * the pipeline with a configured [Vad], and verify that accumulator finalization
- * produces a non-null utterance buffer.
- *
- * All tests are PDP-aligned: linear arrange, act, assert.
- *
- * Note: Since abnormal silence now returns null (no PCM), tests that rely on
- * silence-triggered finalization must use forceFinalize() or STOP instead.
  */
 class SttDeterministicTest {
 
@@ -26,7 +16,6 @@ class SttDeterministicTest {
         val vad = Vad(energyThreshold = 0.01)
         val frames = run {
             val speechFrames = mutableListOf<FloatArray>()
-            // 30 frames of 20ms = 600ms speech
             for (i in 0 until 30) {
                 speechFrames.add(FloatArray(frameSize) { 0.3f })
             }
@@ -36,13 +25,10 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
-            )
+            manualManualMaxDurationMs = 10000,
+            manualManualAbnormalSilenceMs = 5000
         )
 
-        // Pass pre-roll (100ms = 5 frames of 20ms silence) before speech
         val silenceFrame = FloatArray(frameSize) { 0.0f }
         for (i in 0 until 5) {
             accumulator.processChunk(silenceFrame, false)
@@ -65,14 +51,11 @@ class SttDeterministicTest {
             sampleRate = 16000,
             preRollMs = 100,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 4000,
-                abnormalSilenceMs = 5000
-            )
+            manualManualMaxDurationMs = 4000,
+            manualManualAbnormalSilenceMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
-        // Pre-roll is 100ms = 5 frames of 20ms. Pass pre-roll, then feed speech.
         for (i in 0 until 10) {
             accumulator.processChunk(speechFrame, false)
         }
@@ -86,20 +69,15 @@ class SttDeterministicTest {
     }
 
     @Test
-    fun forceFinalize_WithOnlyPreRoll_ReturnsEmptyPcm() {
-        val vad = Vad(energyThreshold = 0.01)
+    fun forceFinalize_WithOnlyPreRoll_ReturnsNonEmptyBuffer() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 4000,
-                abnormalSilenceMs = 5000
-            )
+            manualManualMaxDurationMs = 4000,
+            manualManualAbnormalSilenceMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
-
-        // Send enough frames to pass pre-roll and accumulate speech
         for (i in 0 until 15) {
             accumulator.processChunk(speechFrame, true)
         }
@@ -111,48 +89,30 @@ class SttDeterministicTest {
 
     @Test
     fun deterministicUtterance_WithSilenceFinalization_ReturnsAbnormalTerminate() {
-        val vad = Vad(energyThreshold = 0.01)
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 10000,
-                abnormalSilenceMs = 40  // 2 silence frames (20ms each) = abnormal silence
-            )
+            manualManualMaxDurationMs = 10000,
+            manualManualAbnormalSilenceMs = 40
         )
 
-        val speechFrame = FloatArray(320) { 0.2f } // 20ms at 16kHz
+        val speechFrame = FloatArray(320) { 0.2f }
         val silenceFrame = FloatArray(320) { 0.0f }
 
-        // First pass pre-roll (100ms = 5 frames of 20ms)
         for (i in 0 until 5) {
             accumulator.processChunk(speechFrame, false)
         }
-
-        // Feed speech to accumulate PCM
         for (i in 0 until 35) {
             accumulator.processChunk(speechFrame, true)
         }
 
-        // Two silence frames (40ms total silence) should trigger abnormal silence
-        accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 1
-        val result = accumulator.processChunk(silenceFrame, false) // silenceFrameCount = 2 >= maxSilenceFrames
+        accumulator.processChunk(silenceFrame, false)
+        val result = accumulator.processChunk(silenceFrame, false)
 
         assertTrue("Abnormal silence must return AbnormalTerminate",
             result is FrameResult.AbnormalTerminate)
         val terminate = result as FrameResult.AbnormalTerminate
         assertTrue("Code must be SILENCE_TIMEOUT",
             terminate.code == SttReturnCode.SILENCE_TIMEOUT)
-    }
-
-    /**
-     * Converts a Kotlin ShortArray (already in native order) to a FloatArray.
-     */
-    private fun shortArrayToFloatArray(shorts: ShortArray): FloatArray {
-        val floats = FloatArray(shorts.size)
-        for (i in shorts.indices) {
-            floats[i] = shorts[i].toFloat() / 32768f
-        }
-        return floats
     }
 }

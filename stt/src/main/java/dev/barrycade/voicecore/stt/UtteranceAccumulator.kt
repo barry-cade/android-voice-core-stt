@@ -13,12 +13,12 @@ package dev.barrycade.voicecore.stt
  *
  * ### Manual/manual mode (stopStrategy = "manual")
  * A. User presses STOP → finalizeUtterance() → FrameResult.NormalFinalize
- * B. Silence ≥ abnormalSilenceMs → FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
- * C. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
+ * B. Silence >= abnormalSilenceMs -> FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
+ * C. Duration >= maxDurationMs -> FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
  *
  * ### Manual/auto mode (stopStrategy = "autoSilence")
- * A. Silence ≥ autoSilenceMs → normalize → FrameResult.AutoStop(pcm)
- * B. Duration ≥ maxDurationMs → FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
+ * A. Silence >= autoSilenceMs -> normalize -> FrameResult.AutoStop(pcm)
+ * B. Duration >= maxDurationMs -> FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
  * C. No abnormal silence rule in this mode.
  *
  * ## FrameResult
@@ -33,7 +33,7 @@ package dev.barrycade.voicecore.stt
  *
  * ## No hysteresis, no minimum speech duration, no timing guards
  *
- * SilenceFrameCount is the sole threshold. Speech → silence → threshold → finalize.
+ * SilenceFrameCount is the sole threshold. Speech -> silence -> threshold -> finalize.
  * No minimum speech duration, no trailing silence padding, no stable-block alignment.
  *
  * Testing hook: internal [forceTimeout] flag causes immediate max-utterance finalization
@@ -44,9 +44,11 @@ internal class UtteranceAccumulator(
     private val preRollMs: Int = 100,
     private val vad: Vad = Vad(),
     internal var stopTrigger: StopTriggerStrategy? = null,
-    // ── Mode-specific config blocks (resolve timing per-mode) ─────────────
-    private val manualManualConfig: ManualManualConfig = ManualManualConfig(),
-    private val manualAutoConfig: ManualAutoConfig = ManualAutoConfig(),
+    // ── Mode-specific timing fields (flat, no wrapper types) ─────────────
+    private val manualManualMaxDurationMs: Int = 30000,
+    private val manualManualAbnormalSilenceMs: Int = 5000,
+    private val manualAutoMaxDurationMs: Int = 30000,
+    private val manualAutoAutoSilenceMs: Int = 1200,
     private val debugLoggingEnabled: Boolean = false
 ) {
     constructor(
@@ -59,15 +61,12 @@ internal class UtteranceAccumulator(
         preRollMs = config.preRollMs,
         vad = vad,
         stopTrigger = stopTrigger,
-        manualManualConfig = config.manualManual,
-        manualAutoConfig = config.manualAuto,
+        manualManualMaxDurationMs = config.manualManualMaxDurationMs,
+        manualManualAbnormalSilenceMs = config.manualManualAbnormalSilenceMs,
+        manualAutoMaxDurationMs = config.manualAutoMaxDurationMs,
+        manualAutoAutoSilenceMs = config.manualAutoAutoSilenceMs,
         debugLoggingEnabled = config.debugLoggingEnabled
     )
-
-    companion object {
-        /** Default pre-roll window before speech is accepted. */
-        private const val DEFAULT_PRE_ROLL_MS: Int = 100
-    }
 
     /** Error listener forwarded from SpeechToText for structured error reporting. */
     internal var sttErrorListener: SttErrorListener? = null
@@ -76,7 +75,7 @@ internal class UtteranceAccumulator(
     internal var forceTimeout: Boolean = false
 
     /**
-     * Callback invoked when a new utterance starts (PRE_ROLL → SPEECH transition).
+     * Callback invoked when a new utterance starts (PRE_ROLL -> SPEECH transition).
      * Fires before any accumulation for the utterance begins.
      * SttProcessor uses this to reset per-utterance timing counters.
      */
@@ -84,14 +83,14 @@ internal class UtteranceAccumulator(
 
     /**
      * Max utterance length is mode-specific:
-     * - Manual/manual: uses [manualManualConfig.maxDurationMs]
-     * - Manual/auto:   uses [manualAutoConfig.maxDurationMs]
+     * - Manual/manual: uses [manualManualMaxDurationMs]
+     * - Manual/auto:   uses [manualAutoMaxDurationMs]
      */
     private val effectiveMaxUtteranceLengthMs: Int by lazy {
         when (stopTrigger) {
-            is ManualStopTrigger -> manualManualConfig.maxDurationMs
-            is AutoSilenceStopTrigger -> manualAutoConfig.maxDurationMs
-            else -> manualManualConfig.maxDurationMs
+            is ManualStopTrigger -> manualManualMaxDurationMs
+            is AutoSilenceStopTrigger -> manualAutoMaxDurationMs
+            else -> manualManualMaxDurationMs
         }
     }
 
@@ -109,7 +108,7 @@ internal class UtteranceAccumulator(
 
     /**
      * Total accumulated duration since utterance start, including both speech and silence ms.
-     * Incremented every frame — used for the max-duration termination check.
+     * Incremented every frame -- used for the max-duration termination check.
      * Duration starts counting when speech is first detected (speechActive = true).
      */
     private var durationMs = 0
@@ -142,7 +141,7 @@ internal class UtteranceAccumulator(
 
         if (speechActive) {
             // ══════════════════════════════════════════════════════════════
-            // CORRECT ORDER — do not reorder
+            // CORRECT ORDER -- do not reorder
             // ══════════════════════════════════════════════════════════════
             //
             // 1. Update silence counter (reset BEFORE termination checks)
@@ -166,9 +165,9 @@ internal class UtteranceAccumulator(
 
             // ── 3. Compute threshold frames once per frame ───────────────
             val abnormalSilenceFrames =
-                manualManualConfig.abnormalSilenceMs / frameDurationMs
+                manualManualAbnormalSilenceMs / frameDurationMs
             val autoSilenceFrames =
-                manualAutoConfig.autoSilenceMs / frameDurationMs
+                manualAutoAutoSilenceMs / frameDurationMs
 
             // ── 4. Termination checks (correct order) ────────────────────
             // 4a. Manual/manual: abnormal silence
@@ -285,7 +284,7 @@ internal class UtteranceAccumulator(
      * Returns [FrameResult.AutoStop] with accumulated PCM.
      */
     private fun handleAutoSilenceFinalize(): FrameResult {
-        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${manualAutoConfig.autoSilenceMs}ms, durationMs=$durationMs")
+        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${manualAutoAutoSilenceMs}ms, durationMs=$durationMs")
         return FrameResult.AutoStop(finalizeUtterancePcm())
     }
 
@@ -313,7 +312,7 @@ internal class UtteranceAccumulator(
      * This is NOT an error; it is a user-facing termination message.
      */
     private fun handleAbnormalSilence(): FrameResult {
-        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualConfig.abnormalSilenceMs}")
+        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualAbnormalSilenceMs}")
 
         speechAccumulator.clear()
         speechActive = false

@@ -1,97 +1,85 @@
-package dev.barrycade.voicecore.stt
+﻿package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * Smoke test for the public API types.
+ *
+ * Verifies that the new [SttRunConfig]-based API types are accessible
+ * and can be constructed with valid values.
+ */
 class PublicApiSmokeTest {
-    @Test
-    fun sttConfigDefaults_areStable() {
-        val config = SttConfig(modelPath = "/dummy/path")
-        assertEquals(0.03f, config.energyThreshold, 0.001f)
-        assertEquals(100, config.preRollMs)
-        assertEquals(30000, config.manualManual.maxDurationMs)
-        assertEquals(5000, config.manualManual.abnormalSilenceMs)
-        assertEquals(30000, config.manualAuto.maxDurationMs)
-        assertEquals(1200, config.manualAuto.autoSilenceMs)
-        assertEquals("You spoke for too long.", config.reasonMessages.tooLong)
-        assertEquals("You stopped speaking for too long.", config.reasonMessages.abnormalSilence)
-        assertEquals(false, config.debugLoggingEnabled)
-        assertEquals("/dummy/path", config.modelPath)
-        assertEquals("manual", config.startStrategy)
-        assertEquals("manual", config.stopStrategy)
-    }
 
     @Test
-    fun sttConfig_create_mapsDebugLoggingEnabled() {
-        val config = SttConfig(modelPath = "/dummy/path", debugLoggingEnabled = true)
-        assertEquals(true, config.debugLoggingEnabled)
-    }
-
-    @Test
-    fun sttConfig_resolveStartTrigger_manual_returnsManualStartTrigger() {
-        val config = SttConfig(modelPath = "/dummy/path", startStrategy = "manual")
-        val trigger = config.resolveStartTrigger()
-        assertTrue(trigger is ManualStartTrigger)
-    }
-
-    @Test
-    fun sttConfig_resolveStopTrigger_manual_returnsManualStopTrigger() {
-        val config = SttConfig(modelPath = "/dummy/path", stopStrategy = "manual")
-        val trigger = config.resolveStopTrigger()
-        assertTrue(trigger is ManualStopTrigger)
-    }
-
-    @Test
-    fun sttConfig_resolveStartTrigger_invalid_throws() {
-        val config = SttConfig(modelPath = "/dummy/path", startStrategy = "unknown")
-        assertThrows(IllegalArgumentException::class.java) { config.resolveStartTrigger() }
-    }
-
-    @Test
-    fun sttConfig_resolveStopTrigger_invalid_throws() {
-        val config = SttConfig(modelPath = "/dummy/path", stopStrategy = "bogus")
-        assertThrows(IllegalArgumentException::class.java) { config.resolveStopTrigger() }
-    }
-
-    @Test
-    fun sttConfig_resolveStopTrigger_autoSilence_returnsAutoSilenceStopTrigger() {
-        val config = SttConfig(
-            modelPath = "/dummy/path",
-            stopStrategy = "autoSilence"
+    fun sttRunConfig_constructsManually() {
+        val config = SttRunConfig(
+            ttsEngineConfig = TtsEngineConfig(
+                modelPath = "/dummy/path",
+                language = "en",
+                preRollMs = 100,
+                stableChunkSizeMs = 500,
+                debugLoggingEnabled = false
+            ),
+            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
+            strategySpecific = ManualManualSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000
+            )
         )
-        val trigger = config.resolveStopTrigger()
-        assertTrue("Expected AutoSilenceStopTrigger, got ${trigger::class.simpleName}",
-            trigger is AutoSilenceStopTrigger)
+        assertEquals("/dummy/path", config.ttsEngineConfig.modelPath)
     }
 
     @Test
-    fun sttConfig_resolveStopTrigger_autoSilence_caseInsensitive() {
-        val config = SttConfig(
-            modelPath = "/dummy/path",
-            stopStrategy = "AUTOSILENCE"
+    fun sttRunConfigValidator_acceptsValidConfig() {
+        val config = SttRunConfig(
+            ttsEngineConfig = TtsEngineConfig(
+                modelPath = "/dummy/path",
+                language = "en",
+                preRollMs = 100,
+                stableChunkSizeMs = 500,
+                debugLoggingEnabled = false
+            ),
+            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
+            strategySpecific = ManualAutoSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                autoSilenceMs = 1200
+            )
         )
-        val trigger = config.resolveStopTrigger()
-        assertTrue(trigger is AutoSilenceStopTrigger)
+        val result = SttRunConfigValidator.validate(config)
+        assertNull("Valid config must pass validation", result)
     }
 
     @Test
-    fun sttConfig_resolveStopTrigger_autoSilence_usesManualAutoAutoSilenceMs() {
-        val config = SttConfig(
-            modelPath = "/dummy/path",
-            stopStrategy = "autoSilence",
-            manualAuto = ManualAutoConfig(autoSilenceMs = 300)
+    fun sttRunConfigValidator_rejectsInvalidConfig() {
+        val config = SttRunConfig(
+            ttsEngineConfig = TtsEngineConfig(
+                modelPath = "",
+                language = "en",
+                preRollMs = 100,
+                stableChunkSizeMs = 500,
+                debugLoggingEnabled = false
+            ),
+            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
+            strategySpecific = ManualManualSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000
+            )
         )
-        val trigger = config.resolveStopTrigger()
-        assertTrue(trigger is AutoSilenceStopTrigger)
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("Config with blank modelPath must be rejected", result)
     }
 
     @Test
     fun speechToTextPublicMethods_exist() {
         val methods = SpeechToText::class.java.methods.map { it.name }.toSet()
-        assertTrue(methods.contains("start"))
+        assertTrue(methods.contains("startSession"))
         assertTrue(methods.contains("stop"))
         assertTrue(methods.contains("stopAndTranscribe"))
         assertTrue(methods.contains("setOnResultListener"))
@@ -140,4 +128,3 @@ class PublicApiSmokeTest {
         assertNotNull(bridgeClass)
     }
 }
-

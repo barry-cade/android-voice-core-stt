@@ -1,4 +1,4 @@
-package dev.barrycade.voicecore.stt
+﻿package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -23,13 +23,11 @@ class SpeechToTextTest {
     private lateinit var speechToText: SpeechToText
     private var lastResult: String? = null
     private var lastError: Throwable? = null
-    private var readyFired: Boolean = false
 
     @Before
     fun setUp() {
         lastResult = null
         lastError = null
-        readyFired = false
 
         speechToText = SpeechToText(
             config = RuntimeSttConfig(),
@@ -38,11 +36,6 @@ class SpeechToTextTest {
 
         speechToText.setOnResultListener { lastResult = it }
         speechToText.setOnErrorListener { lastError = it }
-        speechToText.setReadyListener(object : SttReadyListener {
-            override fun onSttReady() {
-                readyFired = true
-            }
-        })
     }
 
     /**
@@ -60,7 +53,6 @@ class SpeechToTextTest {
     @Test
     fun constructor_createsInstance() {
         assertNotNull(speechToText)
-        assertFalse("model must not be ready immediately", readyFired)
     }
 
     @Test
@@ -73,15 +65,6 @@ class SpeechToTextTest {
     fun setOnErrorListener_storesListener() {
         var captured: Throwable? = null
         speechToText.setOnErrorListener { captured = it }
-    }
-
-    @Test
-    fun setReadyListener_storesListener() {
-        speechToText.setReadyListener(object : SttReadyListener {
-            override fun onSttReady() {
-                readyFired = true
-            }
-        })
     }
 
     @Test
@@ -129,11 +112,6 @@ class SpeechToTextTest {
     fun setDebugOptions_forceAudioInitFailure_setsFlag() {
         speechToText.setDebugOptions(forceAudioInitFailure = true)
         assertTrue("forceAudioInitFailure must be set", speechToText.debugOptions.forceAudioInitFailure)
-    }
-
-    @Test
-    fun dumpConfig_noCrash() {
-        safeRun { speechToText.dumpConfig() }
     }
 
     @Test

@@ -1,4 +1,4 @@
-package dev.barrycade.voicecore.stt
+﻿package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -11,10 +11,7 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 40  // 4 frames of 10ms = finalize
-            )
+            manualManualAbnormalSilenceMs = 40  // 4 frames of 10ms = finalize
         )
         val speechFrame = FloatArray(160) { 0.2f }  // 10ms at 16kHz
         val silenceFrame = FloatArray(160) { 0.0f }
@@ -34,7 +31,7 @@ class UtteranceAccumulatorTest {
         // Frame 1: silenceFrameCount = 1 (< 4), returns Continue
         // Frame 2: silenceFrameCount = 2 (< 4), returns Continue
         // Frame 3: silenceFrameCount = 3 (< 4), returns Continue
-        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence → AbnormalTerminate
+        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence -> AbnormalTerminate
         for (i in 0 until 3) {
             accumulator.processFrame(silenceFrame)
         }
@@ -53,10 +50,7 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
-            )
+            manualManualAbnormalSilenceMs = 5000
         )
         val silenceFrame = FloatArray(160) { 0.0f }
 
@@ -73,10 +67,8 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig(
-                maxDurationMs = 4000,
-                abnormalSilenceMs = 5000
-            )
+            manualManualMaxDurationMs = 4000,
+            manualManualAbnormalSilenceMs = 5000
         )
         val speechFrame = FloatArray(160) { 0.2f }
 
@@ -96,8 +88,7 @@ class UtteranceAccumulatorTest {
     fun forceFinalizeReturnsNullWhenEmpty() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualManualConfig = ManualManualConfig()
+            stopTrigger = ManualStopTrigger()
         )
         val result = accumulator.forceFinalize()
         assertNull("forceFinalize must return null when no frames were ever fed", result)
