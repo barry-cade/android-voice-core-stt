@@ -36,13 +36,14 @@ class UtteranceAccumulatorTest {
             accumulator.processFrame(silenceFrame)
         }
 
-        // After handleAbnormalSilence, processFrame returns AbnormalTerminate
+        // After handleAbnormalSilence, processFrame returns AbnormalTerminateWithPcm
         val result = accumulator.processFrame(silenceFrame)
-        assertTrue("Abnormal silence must return AbnormalTerminate",
-            result is FrameResult.AbnormalTerminate)
-        val terminate = result as FrameResult.AbnormalTerminate
+        assertTrue("Abnormal silence must return AbnormalTerminateWithPcm",
+            result is FrameResult.AbnormalTerminateWithPcm)
+        val terminate = result as FrameResult.AbnormalTerminateWithPcm
         assertTrue("Code must be SILENCE_TIMEOUT",
             terminate.code == SttReturnCode.SILENCE_TIMEOUT)
+        assertTrue("PCM must not be empty", terminate.pcm.isNotEmpty())
     }
 
     @Test

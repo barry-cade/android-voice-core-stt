@@ -6,27 +6,23 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
+import dev.barrycade.voicecore.stt.ManualAutoSpecific
+import dev.barrycade.voicecore.stt.ManualManualSpecific
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.stt.SessionResult
+import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
 import dev.barrycade.voicecore.stt.SttReturnCode
+import dev.barrycade.voicecore.stt.SttRunConfig
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * Demo app for the STT module.
- *
- * Uses only the new [SttRunConfig]-based API path:
- * 1. [AppSttConfigLoader.loadSttRunConfig] loads config from JSON asset.
- * 2. [SpeechToText.setConfig] validates and stores the config.
- * 3. [SpeechToText.startSession] starts the session.
- * 4. [SpeechToText.stopAndTranscribe] stops manually (if MANUAL_MANUAL strategy).
- */
 class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
@@ -34,10 +30,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtOutput: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
+    private lateinit var radioGroupStrategy: RadioGroup
 
-    private var stt: SpeechToText? = null
-    private var isRecording = false
-    private val debugLogging = true
+    private var selectedStrategy: SttLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL
+
+        private var stt: SpeechToText? = null
+        private var isRecording = false
+        private val debugLogging = true
 
     private fun logInfo(tag: String, message: String) {
         if (debugLogging) Log.i(tag, message)
@@ -59,6 +58,16 @@ class MainActivity : ComponentActivity() {
         txtOutput = findViewById(R.id.txtOutput)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
+        radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
+
+        radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
+            val newStrategy: SttLifeCycleStrategy = when (checkedId) {
+                R.id.radioManualAuto -> SttLifeCycleStrategy.MANUAL_AUTO
+                else -> SttLifeCycleStrategy.MANUAL_MANUAL
+            }
+            selectedStrategy = newStrategy
+            loadAndApplyConfig(newStrategy)
+        }
 
         btnStart.setOnClickListener {
             logInfo("STT_FLOW", "Start button pressed")
@@ -75,7 +84,6 @@ class MainActivity : ComponentActivity() {
             txtOutput.text = ""
         }
 
-        // Permission launcher
         requestPermissionLauncher = registerForActivityResult(
             RequestPermission()
         ) { granted ->
@@ -86,29 +94,91 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        loadAndApplyConfig(SttLifeCycleStrategy.MANUAL_MANUAL)
         updateUi()
     }
 
-    private fun hasRecordAudioPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+    private fun loadAndApplyConfig(strategy: SttLifeCycleStrategy) {
+        val configFileName = when (strategy) {
+            SttLifeCycleStrategy.MANUAL_MANUAL -> "stt_config_manual_manual.json"
+            SttLifeCycleStrategy.MANUAL_AUTO -> "stt_config_manual_auto.json"
+        }
+
+        val modelPath = getModelPath()
+
+        val runConfig: SttRunConfig = try {
+            AppSttConfigLoader.loadSttRunConfig(
+                context = this,
+                configFileName = configFileName,
+                modelPath = modelPath,
+                language = "en"
+            )
+        } catch (e: Exception) {
+            Log.e("STT_CONFIG", "Failed to load config", e)
+            postToUi {
+                txtConfigDisplay.visibility = View.VISIBLE
+                txtConfigDisplay.text = "ERROR: Failed to load " + configFileName
+            }
+            return
+        }
+
+        val currentStt = stt
+        if (currentStt != null) {
+            val setConfigResult = currentStt.setConfig(runConfig)
+            if (setConfigResult.code != SttReturnCode.SUCCESS) {
+                postToUi {
+                    txtConfigDisplay.visibility = View.VISIBLE
+                    txtConfigDisplay.text = "Config error: " + setConfigResult.code
+                }
+                return
+            }
+        }
+
+        displayConfig(runConfig)
     }
 
-    /**
-     * Start recording using the new [SttRunConfig]-based API.
-     *
-     * Loads config via [AppSttConfigLoader.loadSttRunConfig], sets it via
-     * [SpeechToText.setConfig], and starts a session via
-     * [SpeechToText.startSession].
-     */
+    private fun displayConfig(runConfig: SttRunConfig) {
+        txtConfigDisplay.visibility = View.VISIBLE
+        txtConfigDisplay.text = buildString {
+            appendLine("=== Active Config ===")
+            appendLine("strategy:  " + runConfig.ttsLifeCycleStrategy)
+            appendLine("model:     " + runConfig.ttsEngineConfig.modelPath)
+            appendLine("language:  " + runConfig.ttsEngineConfig.language)
+            appendLine("preRollMs: " + runConfig.ttsEngineConfig.preRollMs)
+            appendLine("stableChunkSizeMs: " + runConfig.ttsEngineConfig.stableChunkSizeMs)
+            when (val specific = runConfig.strategySpecific) {
+                is ManualManualSpecific -> {
+                    appendLine("mode: MANUAL_MANUAL")
+                    appendLine("energyThreshold: " + specific.energyThreshold)
+                    appendLine("maxDurationMs:   " + specific.maxDurationMs)
+                    appendLine("abnormalSilenceMs: " + specific.abnormalSilenceMs)
+                }
+                is ManualAutoSpecific -> {
+                    appendLine("mode: MANUAL_AUTO")
+                    appendLine("energyThreshold: " + specific.energyThreshold)
+                    appendLine("maxDurationMs:   " + specific.maxDurationMs)
+                    appendLine("autoSilenceMs:   " + specific.autoSilenceMs)
+                }
+            }
+        }
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun startRecording() {
+        val configFileName = when (selectedStrategy) {
+            SttLifeCycleStrategy.MANUAL_MANUAL -> "stt_config_manual_manual.json"
+            SttLifeCycleStrategy.MANUAL_AUTO -> "stt_config_manual_auto.json"
+        }
+
         val modelPath = getModelPath()
 
         val runConfig = try {
             AppSttConfigLoader.loadSttRunConfig(
                 context = this,
+                configFileName = configFileName,
                 modelPath = modelPath,
                 language = "en"
             )
@@ -119,73 +189,42 @@ class MainActivity : ComponentActivity() {
 
         try {
             logInfo("STT_INIT", "Constructing STT with SttRunConfig")
-
-            // ── Create STT via public factory ────────────────────────────
             val speechToText = SpeechToText.create(modelPath)
 
-            // ── Set the new config via the wrapper API ────────────────────
             val setConfigResult = speechToText.setConfig(runConfig)
             if (setConfigResult.code != SttReturnCode.SUCCESS) {
-                postToUi {
-                    txtOutput.text = "Config error: ${setConfigResult.code}"
-                }
+                postToUi { txtOutput.text = "Config error: " + setConfigResult.code }
                 return
             }
 
-            // ── Result callback ───────────────────────────────────────────
-            speechToText.setOnResultListener { result ->
+                        speechToText.setOnResultWithTimingListener { text, timing ->
                 postToUi {
                     isRecording = false
-                    txtOutput.text = result
+                    val timingInfo = if (timing != null) {
+                        "\n\nTiming: vad=${timing.vadActiveMs}ms, " +
+                        "utterance=${timing.utteranceDurationMs}ms, " +
+                        "inference=${timing.inferenceMs}ms, " +
+                        "total=${timing.totalPipelineMs}ms"
+                    } else ""
+                    txtOutput.text = text + timingInfo
                     updateUi()
                 }
             }
 
-            // ── Error callback ────────────────────────────────────────────
             speechToText.setOnErrorListener { t ->
-                postToUi {
-                    txtOutput.text = "Error: ${t.message}"
-                }
+                postToUi { txtOutput.text = "Error: " + t.message }
             }
 
-            // ── Start via the new wrapper API ─────────────────────────────
-            val result = speechToText.startSession()
-            logInfo("STT_FLOW", "startSession returned: ${result.code}")
+            val sttResult = speechToText.startSession()
+            logInfo("STT_FLOW", "startSession returned: " + sttResult.code)
 
-            if (result.code != SttReturnCode.SUCCESS) {
-                postToUi {
-                    txtOutput.text = "Session error: ${result.code}"
-                }
+            if (sttResult.code != SttReturnCode.SUCCESS) {
+                postToUi { txtOutput.text = "Session error: " + sttResult.code }
                 return
             }
 
             stt = speechToText
-
-            // ── Show active config ────────────────────────────────────────
-            txtConfigDisplay.visibility = View.VISIBLE
-            txtConfigDisplay.text = buildString {
-                appendLine("=== Config ===")
-                appendLine("strategy:  ${runConfig.ttsLifeCycleStrategy}")
-                appendLine("model:     ${runConfig.ttsEngineConfig.modelPath}")
-                appendLine("language:  ${runConfig.ttsEngineConfig.language}")
-                appendLine("preRollMs: ${runConfig.ttsEngineConfig.preRollMs}")
-                appendLine("stableChunkSizeMs: ${runConfig.ttsEngineConfig.stableChunkSizeMs}")
-                when (val specific = runConfig.strategySpecific) {
-                    is dev.barrycade.voicecore.stt.ManualManualSpecific -> {
-                        appendLine("mode: MANUAL_MANUAL")
-                        appendLine("energyThreshold: ${specific.energyThreshold}")
-                        appendLine("maxDurationMs:   ${specific.maxDurationMs}")
-                        appendLine("abnormalSilenceMs: ${specific.abnormalSilenceMs}")
-                    }
-                    is dev.barrycade.voicecore.stt.ManualAutoSpecific -> {
-                        appendLine("mode: MANUAL_AUTO")
-                        appendLine("energyThreshold: ${specific.energyThreshold}")
-                        appendLine("maxDurationMs:   ${specific.maxDurationMs}")
-                        appendLine("autoSilenceMs:   ${specific.autoSilenceMs}")
-                    }
-                }
-            }
-
+            displayConfig(runConfig)
             isRecording = true
             txtOutput.text = "Recording..."
             updateUi()
@@ -195,11 +234,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleConfigError(e: Exception) {
-        Log.e("STT_CONFIG", "Invalid STT configuration: ${e.message}", e)
-        showErrorDialog(
-            title = "Invalid STT Configuration",
-            message = "The STT tuning values are invalid:\n${e.message}"
-        )
+        Log.e("STT_CONFIG", "Invalid config", e)
+        showErrorDialog("Invalid STT Configuration", e.message ?: "Unknown error")
         isRecording = false
         stt?.destroy()
         stt = null
@@ -207,11 +243,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showErrorDialog(title: String, message: String) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton("OK", null)
-            .show()
+        AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show()
     }
 
     private fun stopRecording() {
@@ -220,25 +252,20 @@ class MainActivity : ComponentActivity() {
             postToUi { txtOutput.text = "Not yet started" }
             return
         }
-
         isRecording = false
         txtOutput.text = "Processing..."
         updateUi()
-
         val thread = Thread({
             try {
                 Log.d("MainActivity", "STOP pressed -> using stopAndTranscribe()")
                 currentStt.stopAndTranscribe()
             } catch (t: Throwable) {
-                postToUi { txtOutput.text = "Error: ${t.message}" }
+                postToUi { txtOutput.text = "Error: " + t.message }
             }
         }, "StopAndTranscribeThread")
         thread.start()
     }
 
-    /**
-     * Update button states according to current recording state.
-     */
     private fun updateUi() {
         btnStart.isEnabled = !isRecording
         btnStop.isEnabled = isRecording
@@ -250,9 +277,7 @@ class MainActivity : ComponentActivity() {
         if (!targetFile.exists()) {
             targetFile.parentFile?.mkdirs()
             assets.open("models/ggml-tiny.en.bin").use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
+                FileOutputStream(targetFile).use { output -> input.copyTo(output) }
             }
         }
         return targetFile.absolutePath

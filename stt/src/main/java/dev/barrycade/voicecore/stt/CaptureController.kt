@@ -12,7 +12,7 @@ package dev.barrycade.voicecore.stt
  */
 internal class CaptureController(
     private val sampleRate: Int = 16000,
-    private val requestedBufferSizeInBytes: Int = 32000
+    private val requestedBufferSizeInBytes: Int = 32000  // 16000 samples = 1 second at 16kHz
 ) : AudioSource {
     private var audioCapture: AudioCapture? = null
 
@@ -53,3 +53,4 @@ internal class CaptureController(
         return audioCapture?.frameQueue?.poll()
     }
 }
+

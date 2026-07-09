@@ -88,7 +88,7 @@ class SttDeterministicTest {
     }
 
     @Test
-    fun deterministicUtterance_WithSilenceFinalization_ReturnsAbnormalTerminate() {
+    fun deterministicUtterance_WithSilenceFinalization_ReturnsAbnormalTerminateWithPcm() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
@@ -109,9 +109,9 @@ class SttDeterministicTest {
         accumulator.processChunk(silenceFrame, false)
         val result = accumulator.processChunk(silenceFrame, false)
 
-        assertTrue("Abnormal silence must return AbnormalTerminate",
-            result is FrameResult.AbnormalTerminate)
-        val terminate = result as FrameResult.AbnormalTerminate
+        assertTrue("Abnormal silence must return AbnormalTerminateWithPcm",
+            result is FrameResult.AbnormalTerminateWithPcm)
+        val terminate = result as FrameResult.AbnormalTerminateWithPcm
         assertTrue("Code must be SILENCE_TIMEOUT",
             terminate.code == SttReturnCode.SILENCE_TIMEOUT)
     }

@@ -26,4 +26,13 @@ internal sealed class FrameResult {
      * [code] is the [SttReturnCode] categorising the termination.
      */
     data class AbnormalTerminate(val code: SttReturnCode) : FrameResult()
+
+    /**
+     * Utterance terminated abnormally but PCM has been preserved for transcription.
+     * The caller MUST run inference on [pcm] before dispatching the [code].
+     *
+     * Added to fix the bug where abnormal silence/timeout discarded the utterance
+     * buffer, preventing any transcription from reaching the UI.
+     */
+    data class AbnormalTerminateWithPcm(val code: SttReturnCode, val pcm: FloatArray) : FrameResult()
 }

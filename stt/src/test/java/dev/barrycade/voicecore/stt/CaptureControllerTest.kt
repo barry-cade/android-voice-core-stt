@@ -76,3 +76,4 @@ class CaptureControllerTest {
         controller.stopCapture()
     }
 }
+

@@ -90,7 +90,8 @@ internal class ProcessorController(
      * - Continue: keep processing
      * - NormalFinalize: deliver PCM, continue (manual STOP path)
      * - AutoStop: deliver PCM, stop (auto-silence)
-     * - AbnormalTerminate: do NOT call Whisper, stop
+     * - AbnormalTerminateWithPcm: deliver PCM to listener, stop
+     * - AbnormalTerminate: no PCM available, stop
      */
     private fun runProcessingLoop() {
         while (isRunning.get()) {
@@ -136,6 +137,8 @@ internal class ProcessorController(
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
                         SttLogger.pcmD("Utterance finalized with ${result.pcm.size} samples")
                         listener.onUtteranceReady(result.pcm)
+                        isRunning.set(false)
+                        break
                     }
 
                     is FrameResult.AutoStop -> {
@@ -148,8 +151,17 @@ internal class ProcessorController(
                         break
                     }
 
+                    is FrameResult.AbnormalTerminateWithPcm -> {
+                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
+                        SttLogger.pcm("[TERMINATION] abnormal termination with PCM: size=${result.pcm.size}, code=${result.code}")
+                        listener.onUtteranceReady(result.pcm)
+                        isRunning.set(false)
+                        onAbnormalTermination?.invoke(result.code)
+                        break
+                    }
+
                     is FrameResult.AbnormalTerminate -> {
-                        SttLogger.pcm("[TERMINATION] abnormal termination: code=${result.code}")
+                        SttLogger.pcm("[TERMINATION] abnormal termination (no PCM): code=${result.code}")
                         isRunning.set(false)
                         onAbnormalTermination?.invoke(result.code)
                         break
@@ -194,6 +206,9 @@ internal class ProcessorController(
                 drainFinalized = result.pcm
             }
             if (result is FrameResult.AutoStop) {
+                drainFinalized = result.pcm
+            }
+            if (result is FrameResult.AbnormalTerminateWithPcm) {
                 drainFinalized = result.pcm
             }
             drainedCount++

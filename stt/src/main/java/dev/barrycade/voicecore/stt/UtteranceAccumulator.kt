@@ -13,12 +13,12 @@ package dev.barrycade.voicecore.stt
  *
  * ### Manual/manual mode (stopStrategy = "manual")
  * A. User presses STOP → finalizeUtterance() → FrameResult.NormalFinalize
- * B. Silence >= abnormalSilenceMs -> FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
- * C. Duration >= maxDurationMs -> FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
+ * B. Silence >= abnormalSilenceMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.SILENCE_TIMEOUT, pcm)
+ * C. Duration >= maxDurationMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
  *
  * ### Manual/auto mode (stopStrategy = "autoSilence")
  * A. Silence >= autoSilenceMs -> normalize -> FrameResult.AutoStop(pcm)
- * B. Duration >= maxDurationMs -> FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
+ * B. Duration >= maxDurationMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
  * C. No abnormal silence rule in this mode.
  *
  * ## FrameResult
@@ -29,7 +29,8 @@ package dev.barrycade.voicecore.stt
  * - [FrameResult.Continue]: keep processing frames
  * - [FrameResult.NormalFinalize]: PCM ready for transcription (manual STOP)
  * - [FrameResult.AutoStop]: PCM ready, caller must stop the loop (auto-silence)
- * - [FrameResult.AbnormalTerminate]: discard PCM, do NOT call Whisper
+ * - [FrameResult.AbnormalTerminateWithPcm]: PCM preserved, caller must run inference
+ * - [FrameResult.AbnormalTerminate]: PCM was empty or discarded, do NOT call Whisper
  *
  * ## No hysteresis, no minimum speech duration, no timing guards
  *
@@ -289,40 +290,32 @@ internal class UtteranceAccumulator(
     }
 
     /**
-     * Handle max utterance timeout: discard PCM, return [FrameResult.AbnormalTerminate].
-     * This is NOT an error; it is a user-facing termination message.
+     * Handle max utterance timeout: finalize PCM, return [FrameResult.AbnormalTerminateWithPcm].
+     * PCM is preserved so inference can still produce a transcript for whatever
+     * was captured before the timeout.
      */
     private fun handleMaxUtteranceTimeout(): FrameResult {
         SttLogger.pcm("max utterance exceeded: durationMs=$durationMs, limit=$effectiveMaxUtteranceLengthMs")
 
-        speechAccumulator.clear()
-        speechActive = false
-        silenceFrameCount = 0
-        durationMs = 0
-        preRollComplete = false
-        preRollFrameCount = 0
+        val pcm = finalizeUtterancePcm()
 
-        SttLogger.pcm("[TIMEOUT] abnormal termination: UTTERANCE_TOO_LONG")
-        return FrameResult.AbnormalTerminate(SttReturnCode.UTTERANCE_TOO_LONG)
+        SttLogger.pcm("[TIMEOUT] abnormal termination with PCM: size=${pcm.size}, code=UTTERANCE_TOO_LONG")
+        return FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
     }
 
     /**
-     * Handle abnormal silence (manual/manual mode): discard PCM,
-     * return [FrameResult.AbnormalTerminate].
-     * This is NOT an error; it is a user-facing termination message.
+     * Handle abnormal silence (manual/manual mode): finalize PCM,
+     * return [FrameResult.AbnormalTerminateWithPcm].
+     * PCM is preserved so inference can still produce a transcript for
+     * whatever was captured before silence timeout.
      */
     private fun handleAbnormalSilence(): FrameResult {
         SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualAbnormalSilenceMs}")
 
-        speechAccumulator.clear()
-        speechActive = false
-        silenceFrameCount = 0
-        durationMs = 0
-        preRollComplete = false
-        preRollFrameCount = 0
+        val pcm = finalizeUtterancePcm()
 
-        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination: SILENCE_TIMEOUT")
-        return FrameResult.AbnormalTerminate(SttReturnCode.SILENCE_TIMEOUT)
+        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination with PCM: size=${pcm.size}, code=SILENCE_TIMEOUT")
+        return FrameResult.AbnormalTerminateWithPcm(SttReturnCode.SILENCE_TIMEOUT, pcm)
     }
 
     fun processFrame(frame: FloatArray): FrameResult = processChunk(frame, vad.isSpeech(frame))
@@ -373,6 +366,12 @@ internal class UtteranceAccumulator(
         val utterance = speechAccumulator.toFloatArray()
         val utterDurationMs = utterance.size * 1000 / sampleRate
         lastUtteranceDurationMs = utterDurationMs
+
+        // ── Debug: PCM amplitude stats ───────────────────────────────────────────
+        val maxAmp = utterance.maxOrNull() ?: 0f
+        val minAmp = utterance.minOrNull() ?: 0f
+        val avgAmp = if (utterance.isNotEmpty()) utterance.average() else 0.0
+        SttLogger.pcm("[DEBUG] PCM stats: max=$maxAmp min=$minAmp avg=$avgAmp")
 
         speechAccumulator.clear()
         speechActive = false

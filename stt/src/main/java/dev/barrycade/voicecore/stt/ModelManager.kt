@@ -65,12 +65,16 @@ internal class ModelManager(
 
     /**
      * Async model initialisation: load model + warm-up, then set isReady.
+     *
+     * After warm-up completes, [onReady] is invoked on the executor thread.
+     * Use this to chain the start of the capture pipeline immediately after
+     * model readiness, without queued-start flags or ready listener branching.
+     *
      * Runs on whisperExecutor, never on the main/UI thread.
-     * LifecycleController must check [isReady] before starting capture.
      */
-    fun initAsync() {
+    fun initAsync(onReady: () -> Unit = {}) {
         val runnable = Runnable {
-            runInitSequence()
+            runInitSequence(onReady)
         }
 
         try {
@@ -83,8 +87,9 @@ internal class ModelManager(
     /**
      * Core init sequence executed on [whisperExecutor].
      * Loads model, runs warm-up, and sets [isReady] or [initFailed].
+     * After completion, invokes [onReady] callback.
      */
-    private fun runInitSequence() {
+    private fun runInitSequence(onReady: () -> Unit = {}) {
         try {
             if (handleForcedFailure()) return
 
@@ -95,6 +100,7 @@ internal class ModelManager(
             isReady = true
             SttLogger.lifecycle("ModelManager: model loaded, warm-up complete, isReady=true")
             readyListener?.onSttReady()
+            onReady()
         } catch (t: Throwable) {
             SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
             val error = SttError(

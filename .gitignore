@@ -21,3 +21,7 @@ local.properties
 
 # Whisper.cpp submodule - clone via: git submodule add https://github.com/ggerganov/whisper.cpp external/whisper.cpp
 /external/
+
+# Temp files
+/tmp/
+/tmp/**

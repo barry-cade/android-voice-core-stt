@@ -48,51 +48,51 @@ class SttStopPathTest {
     }
 
     @Test
-    fun stopPath_fullCycle_emitsFinalisingToReady() {
+    fun stopPath_fullCycle_emitsFinalisingToStopped() {
         currentState = SttLifecycleState.FINALISING
 
-        val transitionResult = applyTransition(SttLifecycleState.READY)
+        val transitionResult = applyTransition(SttLifecycleState.STOPPED)
 
-        assertTrue("FINALISING -> READY must succeed", transitionResult.allowed)
-        assertEquals(SttLifecycleState.READY, currentState)
+        assertTrue("FINALISING -> STOPPED must succeed", transitionResult.allowed)
+        assertEquals(SttLifecycleState.STOPPED, currentState)
     }
 
     @Test
     fun stopPath_fullCycle_bothTransitionsEmittedExactlyOnce() {
         applyTransition(SttLifecycleState.FINALISING)
-        applyTransition(SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.STOPPED)
 
         val recordingToFinalisingCount = capturedLogs.filter {
             it.contains("state: RECORDING -> FINALISING")
         }.size
-        val finalisingToReadyCount = capturedLogs.filter {
-            it.contains("state: FINALISING -> READY")
+        val finalisingToStoppedCount = capturedLogs.filter {
+            it.contains("state: FINALISING -> STOPPED")
         }.size
 
         assertEquals("exactly one RECORDING -> FINALISING log", 1, recordingToFinalisingCount)
-        assertEquals("exactly one FINALISING -> READY log", 1, finalisingToReadyCount)
+        assertEquals("exactly one FINALISING -> STOPPED log", 1, finalisingToStoppedCount)
     }
 
     @Test
-    fun stopPath_noTransitionsAfterReady() {
-        currentState = SttLifecycleState.READY
+    fun stopPath_noTransitionsAfterStopped() {
+        currentState = SttLifecycleState.STOPPED
 
-        // After reaching READY, no more transitions should occur via stop.
-        // Attempting FINALISING from READY should fail.
+        // After reaching STOPPED, no more transitions should occur via stop.
+        // Attempting any transition from STOPPED should fail.
         val transitionResult = applyTransition(SttLifecycleState.FINALISING)
 
-        assertFalse("READY -> FINALISING must fail after stop", transitionResult.allowed)
-        assertEquals(SttLifecycleState.READY, currentState)
+        assertFalse("STOPPED -> FINALISING must fail after stop", transitionResult.allowed)
+        assertEquals(SttLifecycleState.STOPPED, currentState)
     }
 
     @Test
-    fun stopPath_modelUnloadOccursAfterReady() {
-        // Simulate: RECORDING -> FINALISING -> READY
+    fun stopPath_modelUnloadOccursAfterStopped() {
+        // Simulate: RECORDING -> FINALISING -> STOPPED
         applyTransition(SttLifecycleState.FINALISING)
-        applyTransition(SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.STOPPED)
 
-        // After READY state, verify lifecycle state is correct.
-        assertEquals(SttLifecycleState.READY, currentState)
+        // After STOPPED state, verify lifecycle state is correct.
+        assertEquals(SttLifecycleState.STOPPED, currentState)
 
         // No errors should have been emitted during a clean stop cycle.
         assertTrue("no errors during clean stop cycle", capturedErrors.isEmpty())
@@ -102,7 +102,7 @@ class SttStopPathTest {
     fun stopPath_noWarmupDuringStop() {
         // Simulate stop cycle
         applyTransition(SttLifecycleState.FINALISING)
-        applyTransition(SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.STOPPED)
 
         // Check no warmup-related log lines appear
         val warmupLogs = capturedLogs.filter {
@@ -118,10 +118,10 @@ class SttStopPathTest {
         // Simulate PCM finalisation at this point.
         val pcmFinalised = true
 
-        applyTransition(SttLifecycleState.READY)
+        applyTransition(SttLifecycleState.STOPPED)
 
         assertTrue("PCM must be finalised before inference", pcmFinalised)
-        assertEquals(SttLifecycleState.READY, currentState)
+        assertEquals(SttLifecycleState.STOPPED, currentState)
     }
 
     @Test
@@ -166,7 +166,8 @@ class SttStopPathTest {
             is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
             is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING
             is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
-            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.READY
+            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED
+            else -> false
         }
 
         if (valid) {

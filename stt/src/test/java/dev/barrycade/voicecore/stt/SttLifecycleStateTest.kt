@@ -72,13 +72,13 @@ class SttLifecycleStateTest {
     }
 
     @Test
-    fun legalTransition_finalisingToReady() {
+    fun legalTransition_finalisingToStopped() {
         currentState = SttLifecycleState.FINALISING
 
-        val result = applyTransition(SttLifecycleState.READY)
+        val result = applyTransition(SttLifecycleState.STOPPED)
 
-        assertTrue("FINALISING -> READY must return true", result.allowed)
-        assertEquals(SttLifecycleState.READY, currentState)
+        assertTrue("FINALISING -> STOPPED must return true", result.allowed)
+        assertEquals(SttLifecycleState.STOPPED, currentState)
     }
 
     // ── Illegal transitions ─────────────────────────────────────────────
@@ -187,7 +187,8 @@ class SttLifecycleStateTest {
             is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
             is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING
             is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
-            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.READY
+            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED
+            else -> false
         }
 
         if (valid) {

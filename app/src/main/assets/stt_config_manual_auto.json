@@ -1,0 +1,15 @@
+{
+  "modelPath": "/path/to/model",
+  "language": "en",
+  "ttsEngineConfig": {
+    "energyThreshold": 0.03,
+    "preRollMs": 100,
+    "stableChunkSizeMs": 500,
+    "debugLoggingEnabled": true
+  },
+  "lifeCycleStrategy": "MANUAL_AUTO",
+  "strategySpecific": {
+    "maxDurationMs": 30000,
+    "maxSilenceMs": 1200
+  }
+}

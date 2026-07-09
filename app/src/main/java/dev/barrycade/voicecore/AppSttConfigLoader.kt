@@ -10,44 +10,63 @@ import dev.barrycade.voicecore.stt.TtsEngineConfig
 import org.json.JSONObject
 
 /**
- * Loads [SttRunConfig] from the [stt_config.json] asset.
+ * Loads [SttRunConfig] from a new-format JSON config asset.
  *
- * This is the sole config loader for the app — the legacy [SttConfig] path
- * has been removed.
+ * Reads the config file specified by [configFileName] (e.g. "stt_config_manual_manual.json").
+ * The JSON format is:
+ * ```json
+ * {
+ *   "modelPath": "/path/to/model",
+ *   "language": "en",
+ *   "ttsEngineConfig": {
+ *     "energyThreshold": 0.03,
+ *     "preRollMs": 100,
+ *     "stableChunkSizeMs": 500,
+ *     "debugLoggingEnabled": false
+ *   },
+ *   "lifeCycleStrategy": "MANUAL_MANUAL",
+ *   "strategySpecific": {
+ *     "maxDurationMs": 30000,
+ *     "maxSilenceMs": 5000
+ *   }
+ * }
+ * ```
+ *
+ * Does NOT reference any legacy config types or fields (startStrategy, stopStrategy,
+ * manualManual, manualAuto, reasonMessages).
  */
 object AppSttConfigLoader {
     private const val TAG = "STT_CONFIG"
 
     /**
-     * Load and construct a fully validated [SttRunConfig] from [stt_config.json].
+     * Load and construct a fully validated [SttRunConfig] from the given JSON asset file.
      *
      * @param context Android context for asset access.
-     * @param modelPath Absolute file path to the Whisper model binary.
-     * @param language Language code for transcription (e.g. "en").
+     * @param configFileName Asset file name (e.g. "stt_config_manual_manual.json").
+     * @param modelPath Override absolute file path to the Whisper model binary.
+     * @param language Override language code for transcription (e.g. "en").
      * @return A fully constructed [SttRunConfig].
      * @throws IllegalStateException if the JSON is missing required fields.
      */
     fun loadSttRunConfig(
         context: Context,
+        configFileName: String,
         modelPath: String,
         language: String
     ): SttRunConfig {
-        val inputStream = context.assets.open("stt_config.json")
+        val inputStream = context.assets.open(configFileName)
         val json = inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
 
         return try {
             parseSttRunConfig(json, modelPath, language)
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid STT configuration for SttRunConfig", e)
+            Log.e(TAG, "Invalid STT configuration in $configFileName", e)
             throw IllegalStateException("Invalid STT configuration: ${e.message}", e)
         }
     }
 
     /**
-     * Parse JSON string into a [SttRunConfig].
-     *
-     * Uses `get*` (not `opt*`) for required fields so missing values throw
-     * a [JSONException] immediately — fail fast, no defaults, no inference.
+     * Parse JSON string into a [SttRunConfig] using the new format.
      */
     private fun parseSttRunConfig(
         json: String,
@@ -56,11 +75,12 @@ object AppSttConfigLoader {
     ): SttRunConfig {
         val root = JSONObject(json)
 
-        // ── Required engine fields (fail fast if missing) ─────────────────
-        val energyThreshold = root.getDouble("energyThreshold").toFloat()
-        val preRollMs = root.getInt("preRollMs")
-        val stableChunkSizeMs = root.getInt("stableChunkSizeMs")
-        val debugLoggingEnabled = root.optBoolean("debugLoggingEnabled", false)
+        // ── ttsEngineConfig block (fail fast if missing) ──────────────────
+        val engineObj = root.getJSONObject("ttsEngineConfig")
+        val energyThreshold = engineObj.getDouble("energyThreshold").toFloat()
+        val preRollMs = engineObj.getInt("preRollMs")
+        val stableChunkSizeMs = engineObj.getInt("stableChunkSizeMs")
+        val debugLoggingEnabled = engineObj.optBoolean("debugLoggingEnabled", false)
 
         // ── Build TtsEngineConfig ─────────────────────────────────────────
         val engineConfig = TtsEngineConfig(
@@ -71,78 +91,43 @@ object AppSttConfigLoader {
             debugLoggingEnabled = debugLoggingEnabled
         )
 
-        // ── Determine lifecycle strategy from JSON strings ────────────────
-        val startStrategy = root.getString("startStrategy")
-        val stopStrategy = root.getString("stopStrategy")
+        // ── Determine lifecycle strategy ──────────────────────────────────
+        val lifeCycleStrategyStr = root.getString("lifeCycleStrategy")
+        val lifeCycleStrategy = when (lifeCycleStrategyStr) {
+            "MANUAL_MANUAL" -> SttLifeCycleStrategy.MANUAL_MANUAL
+            "MANUAL_AUTO" -> SttLifeCycleStrategy.MANUAL_AUTO
+            else -> throw IllegalStateException(
+                "Unsupported lifeCycleStrategy='$lifeCycleStrategyStr'. " +
+                    "Allowed: MANUAL_MANUAL, MANUAL_AUTO."
+            )
+        }
 
-        val lifecycleStrategy = resolveLifecycleStrategy(startStrategy, stopStrategy)
+        // ── Build strategy-specific config from strategySpecific block ────
+        val specificObj = root.getJSONObject("strategySpecific")
+        val maxDurationMs = specificObj.getInt("maxDurationMs")
+        val maxSilenceMs = specificObj.getInt("maxSilenceMs")
 
-        // ── Build strategy-specific config ────────────────────────────────
-        val strategySpecific: Any = when (lifecycleStrategy) {
+        val strategySpecific: Any = when (lifeCycleStrategy) {
             SttLifeCycleStrategy.MANUAL_MANUAL -> {
-                val mmObj = root.optJSONObject("manualManual")
-                if (mmObj == null) {
-                    throw IllegalStateException(
-                        "Missing 'manualManual' block in config for MANUAL_MANUAL strategy"
-                    )
-                }
                 ManualManualSpecific(
                     energyThreshold = energyThreshold,
-                    maxDurationMs = mmObj.getInt("maxDurationMs"),
-                    abnormalSilenceMs = mmObj.getInt("abnormalSilenceMs")
+                    maxDurationMs = maxDurationMs,
+                    abnormalSilenceMs = maxSilenceMs
                 )
             }
             SttLifeCycleStrategy.MANUAL_AUTO -> {
-                val maObj = root.optJSONObject("manualAuto")
-                if (maObj == null) {
-                    throw IllegalStateException(
-                        "Missing 'manualAuto' block in config for MANUAL_AUTO strategy"
-                    )
-                }
                 ManualAutoSpecific(
                     energyThreshold = energyThreshold,
-                    maxDurationMs = maObj.getInt("maxDurationMs"),
-                    autoSilenceMs = maObj.getInt("autoSilenceMs")
+                    maxDurationMs = maxDurationMs,
+                    autoSilenceMs = maxSilenceMs
                 )
             }
         }
 
         return SttRunConfig(
             ttsEngineConfig = engineConfig,
-            ttsLifeCycleStrategy = lifecycleStrategy,
+            ttsLifeCycleStrategy = lifeCycleStrategy,
             strategySpecific = strategySpecific
         )
-    }
-
-    /**
-     * Resolve [SttLifeCycleStrategy] from the JSON strategy strings.
-     *
-     * Allowed combinations:
-     * - start="manual" + stop="manual" -> [SttLifeCycleStrategy.MANUAL_MANUAL]
-     * - start="manual" + stop="autoSilence" -> [SttLifeCycleStrategy.MANUAL_AUTO]
-     *
-     * @throws IllegalStateException for unrecognised combinations.
-     */
-    private fun resolveLifecycleStrategy(
-        startStrategy: String,
-        stopStrategy: String
-    ): SttLifeCycleStrategy {
-        val start = startStrategy.lowercase()
-        val stop = stopStrategy.lowercase()
-
-        if (start != "manual") {
-            throw IllegalStateException(
-                "Unsupported startStrategy='$startStrategy'. Only 'manual' is supported."
-            )
-        }
-
-        return when (stop) {
-            "manual" -> SttLifeCycleStrategy.MANUAL_MANUAL
-            "autosilence" -> SttLifeCycleStrategy.MANUAL_AUTO
-            else -> throw IllegalStateException(
-                "Unsupported stopStrategy='$stopStrategy'. " +
-                    "Allowed: manual, autoSilence."
-            )
-        }
     }
 }
