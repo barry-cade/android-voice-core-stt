@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
+    private lateinit var btnNewApiStart: Button
     private lateinit var txtOutput: TextView
     private lateinit var txtErrorBanner: TextView
     private lateinit var txtDiagnostics: TextView
@@ -59,6 +60,7 @@ class MainActivity : ComponentActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
+        btnNewApiStart = findViewById(R.id.btnNewApiStart)
         txtOutput = findViewById(R.id.txtOutput)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
@@ -91,6 +93,12 @@ class MainActivity : ComponentActivity() {
 
         btnClear.setOnClickListener {
             txtOutput.text = ""
+        }
+
+        btnNewApiStart.setOnClickListener {
+            logInfo("STT_FLOW", "New API button pressed")
+            if (hasRecordAudioPermission()) startRecordingWithNewApi()
+            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         // Permission launcher — initialised after view bindings so the
@@ -290,6 +298,131 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Start recording using the new [SttRunConfig]-based API.
+     *
+     * This is an optional additive path — the existing [startRecording] path
+     * using [SttConfig] and [SpeechToText.create] remains untouched.
+     *
+     * Loads config via [AppSttConfigLoader.loadSttRunConfig], sets it via
+     * [SpeechToText.setConfig], and starts a session via
+     * [SpeechToText.startSession].
+     */
+    private fun startRecordingWithNewApi() {
+        val modelPath = getModelPath()
+
+        val runConfig = try {
+            AppSttConfigLoader.loadSttRunConfig(
+                context = this,
+                modelPath = modelPath,
+                language = "en"
+            )
+        } catch (e: Exception) {
+            handleConfigError(e)
+            return
+        }
+
+        try {
+            logInfo("STT_INIT", "New API: constructing STT with SttRunConfig")
+
+            // ── Create STT via existing factory (uses SttConfig internally) ─
+            // We reuse the existing pipeline by creating a SpeechToText instance
+            // and then applying the new config via setConfig.
+            val runtimeConfig = AppSttConfigLoader.loadFromAssets(this)
+            val speechToText = SpeechToText.create(
+                SttConfig(
+                    energyThreshold = runtimeConfig.energyThreshold,
+                    preRollMs = runtimeConfig.preRollMs,
+                    stableChunkSizeMs = runtimeConfig.stableChunkSizeMs,
+                    modelPath = modelPath,
+                    startStrategy = selectedStartStrategy,
+                    stopStrategy = selectedStopStrategy,
+                    manualManual = dev.barrycade.voicecore.stt.ManualManualConfig(
+                        maxDurationMs = runtimeConfig.manualManual.maxDurationMs,
+                        abnormalSilenceMs = runtimeConfig.manualManual.abnormalSilenceMs
+                    ),
+                    manualAuto = dev.barrycade.voicecore.stt.ManualAutoConfig(
+                        maxDurationMs = runtimeConfig.manualAuto.maxDurationMs,
+                        autoSilenceMs = runtimeConfig.manualAuto.autoSilenceMs
+                    ),
+                    reasonMessages = dev.barrycade.voicecore.stt.ReasonMessages(
+                        tooLong = runtimeConfig.reasonMessages.tooLong,
+                        abnormalSilence = runtimeConfig.reasonMessages.abnormalSilence
+                    )
+                )
+            )
+
+            // ── Set the new config via the wrapper API ────────────────────
+            val setConfigResult = speechToText.setConfig(runConfig)
+            if (setConfigResult.code != dev.barrycade.voicecore.stt.SttReturnCode.SUCCESS) {
+                postToUi {
+                    txtOutput.text = "Config error: ${setConfigResult.code}"
+                }
+                return
+            }
+
+            // ── Result callback ───────────────────────────────────────────
+            speechToText.setOnResultListener { result ->
+                postToUi {
+                    isRecording = false
+                    txtOutput.text = result
+                    updateUi()
+                }
+            }
+
+            // ── Error callback ────────────────────────────────────────────
+            speechToText.setOnErrorListener { t ->
+                postToUi {
+                    txtOutput.text = "Error: ${t.message}"
+                }
+            }
+
+            // ── Start via the new wrapper API ─────────────────────────────
+            val result = speechToText.startSession()
+            logInfo("STT_FLOW", "startSession returned: ${result.code}")
+
+            if (result.code != dev.barrycade.voicecore.stt.SttReturnCode.SUCCESS) {
+                postToUi {
+                    txtOutput.text = "Session error: ${result.code}"
+                }
+                return
+            }
+
+            stt = speechToText
+
+            // ── Show active config ────────────────────────────────────────
+            txtConfigDisplay.visibility = android.view.View.VISIBLE
+            txtConfigDisplay.text = buildString {
+                appendLine("=== New API Config ===")
+                appendLine("strategy:  ${runConfig.ttsLifeCycleStrategy}")
+                appendLine("model:     ${runConfig.ttsEngineConfig.modelPath}")
+                appendLine("language:  ${runConfig.ttsEngineConfig.language}")
+                appendLine("preRollMs: ${runConfig.ttsEngineConfig.preRollMs}")
+                appendLine("stableChunkSizeMs: ${runConfig.ttsEngineConfig.stableChunkSizeMs}")
+                when (val specific = runConfig.strategySpecific) {
+                    is dev.barrycade.voicecore.stt.ManualManualSpecific -> {
+                        appendLine("mode: MANUAL_MANUAL")
+                        appendLine("energyThreshold: ${specific.energyThreshold}")
+                        appendLine("maxDurationMs:   ${specific.maxDurationMs}")
+                        appendLine("abnormalSilenceMs: ${specific.abnormalSilenceMs}")
+                    }
+                    is dev.barrycade.voicecore.stt.ManualAutoSpecific -> {
+                        appendLine("mode: MANUAL_AUTO")
+                        appendLine("energyThreshold: ${specific.energyThreshold}")
+                        appendLine("maxDurationMs:   ${specific.maxDurationMs}")
+                        appendLine("autoSilenceMs:   ${specific.autoSilenceMs}")
+                    }
+                }
+            }
+
+            isRecording = true
+            txtOutput.text = "Recording via New API..."
+            updateUi()
+        } catch (e: IllegalArgumentException) {
+            handleConfigError(e)
+        }
+    }
+
     private fun handleConfigError(e: Exception) {
         Log.e("STT_CONFIG", "Invalid STT configuration: ${e.message}", e)
         showErrorDialog(
@@ -352,6 +485,7 @@ class MainActivity : ComponentActivity() {
         btnStart.isEnabled = !isRecording
         btnStop.isEnabled = isRecording && isManualStop
         btnClear.isEnabled = true
+        btnNewApiStart.isEnabled = !isRecording
 
         radioGroupStartStrategy.isEnabled = !isRecording
         radioGroupStopStrategy.isEnabled = !isRecording
