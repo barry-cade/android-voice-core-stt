@@ -177,6 +177,12 @@ internal class ProcessorController(
 
     /**
      * Stop the processor worker thread.
+     *
+     * If called from the processor's own worker thread (e.g. via [onAutoStop]
+     * or [onAbnormalTermination] callback), the self-join ([Thread.join]) is
+     * a no-op because a thread cannot join itself. No behavioural issue arises.
+     *
+     * Idempotent: multiple calls are safe after the thread has stopped.
      */
     fun stop() {
         if (!isRunning.getAndSet(false)) return

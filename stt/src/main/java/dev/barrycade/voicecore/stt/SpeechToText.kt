@@ -9,9 +9,25 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 1. Call [setConfig] with a validated [SttRunConfig].
  * 2. Call [startSession] to begin recording and transcription.
  * 3. Use [stopAndTranscribe] to stop manually (MANUAL_MANUAL strategy).
- * 4. Call [destroy] to release all resources.
+ * 4. Call [resetForNextSession] to reuse this instance for a new utterance.
+ * 5. Call [destroy] to release all resources.
  *
- * Only the new [SttRunConfig] API path is supported.
+ * ## Threading
+ *
+ * Result and error callbacks are **not** delivered on the main thread.
+ * Callers must post to their own [android.os.Handler] or
+ * [kotlinx.coroutines.Dispatchers.Main] if main-thread delivery is required.
+ *
+ * | Callback | Delivery thread |
+ * |---|---|
+ * | [onResult] | Internal worker thread (processor or whisper executor) |
+ * | [onResultWithTiming] | Same as [onResult] |
+ * | [onError] | The thread that encountered the error |
+ * | [sttErrorListener] | Same as [onError] |
+ *
+ * Lifecycle methods ([setConfig], [startSession], [stopAndTranscribe], [destroy],
+ * [resetForNextSession]) are not thread-safe. Callers must serialise calls to
+ * these methods.
  */
 class SpeechToText internal constructor(
     private val config: RuntimeSttConfig,
@@ -26,6 +42,10 @@ class SpeechToText internal constructor(
          *
          * The caller must call [setConfig] with a [SttRunConfig] before
          * calling [startSession].
+         *
+         * Model loading and warm-up begin immediately in the constructor.
+         * [startSession] will wait for model readiness before starting
+         * audio capture.
          *
          * @param modelPath Absolute path to the Whisper model binary.
          * @return A new [SpeechToText] instance.
@@ -52,20 +72,32 @@ class SpeechToText internal constructor(
     private var onResult: ((String) -> Unit)? = null
     private var onResultWithTiming: ((text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
+
+    /**
+     * Timing listener, called after each inference completes.
+     *
+     * **Delivery thread:** Internal worker thread (whisper executor or processor thread).
+     *
+     * @param pcmMs       Wall-clock duration of PCM capture.
+     * @param vadActiveMs Total time speech was detected by VAD.
+     * @param whisperMs   Duration of the Whisper inference call.
+     * @param totalMs     End-to-end pipeline time from utterance start to result.
+     */
     var onTimingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
 
     private val isRunning = AtomicBoolean(false)
     private val isInferencing = AtomicBoolean(false)
     private val stateLock = Any()
 
-    @Volatile
-    internal var currentState: SttLifecycleState = SttLifecycleState.UNINITIALISED
+    /** Thread-safe lifecycle state machine with internal lock. */
+    internal val stateMachine = SttLifecycleStateMachine()
 
     private val modelManager: ModelManager
 
     /** [SttRunConfig] set via [setConfig]. */
     private var runConfig: SttRunConfig? = null
 
+    // ── Session-scoped state (reset by resetForNextSession) ────────────────
     private var audioSource: AudioSource? = null
     private var processorController: ProcessorController? = null
     @Volatile private var stopRequested: Boolean = false
@@ -73,19 +105,18 @@ class SpeechToText internal constructor(
     private var timingPcmTotalMs: Long = 0L
     private var timingUtteranceStartMs: Long = 0L
 
-    /**
-     * Reference to the inner SpeechToText instance created by [startSessionInternal].
-     * All lifecycle operations (start, stop, destroy) must be routed through this
-     * instance, not the outer shell.
-     */
-    @Volatile
-    private var activeSession: SpeechToText? = null
-
     private fun resetTiming() {
         timingPcmStartMs = 0L
         timingPcmTotalMs = 0L
         timingUtteranceStartMs = 0L
     }
+
+    /**
+     * Tracks whether [startSession] was called before model readiness.
+     * When warm-up completes and this flag is set, [start] is called
+     * automatically from the init callback.
+     */
+    private var startRequested: Boolean = false
 
     init {
         config.validate()
@@ -95,28 +126,85 @@ class SpeechToText internal constructor(
             readyListener = null,
             whisperModel = whisperModel
         )
-        // No auto-init here. initAsync is called explicitly by startSessionInternal
-        // with a callback that chains into start().
+        // Start model loading and warm-up immediately.
+        // When warm-up completes, the callback transitions to READY.
+        // If startSession() was already called before readiness, it replays.
+        modelManager.initAsync {
+            synchronized(stateLock) {
+                if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
+                    stateMachine.transitionTo(SttLifecycleState.READY)
+                    // If startSession() queued a start, replay it now.
+                    if (startRequested) {
+                        startRequested = false
+                        start()
+                    }
+                } else {
+                    SttLogger.lifecycle("warm-up callback skipped: state=${stateMachine.currentState}")
+                }
+            }
+        }
     }
 
     // ------- Public API ------------------------------------------------
 
+    /**
+     * Register a listener for transcription results.
+     *
+     * **Delivery thread:** Internal worker thread (processor or whisper executor).
+     * Callers must post to [android.os.Handler] or [kotlinx.coroutines.Dispatchers.Main]
+     * if main-thread delivery is required.
+     */
     fun setOnResultListener(l: (String) -> Unit) {
         onResult = l
     }
 
+    /**
+     * Register a listener for transcription results with timing snapshot.
+     *
+     * **Delivery thread:** Same as [setOnResultListener].
+     * The [SttTimingSnapshot] is non-null when the transcript was produced by
+     * a full pipeline run (VAD + accumulator + inference). It is null during
+     * early stop paths that bypass the accumulator.
+     */
     fun setOnResultWithTimingListener(l: (text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit) {
         onResultWithTiming = l
     }
 
+    /**
+     * Register a generic error listener.
+     *
+     * **Delivery thread:** The thread that encountered the error.
+     * This may be a processor worker thread, the whisper executor, or a
+     * caller thread (e.g. [stopAndTranscribe]). Must handle cross-thread
+     * delivery safely.
+     */
     fun setOnErrorListener(l: (Throwable) -> Unit) {
         onError = l
     }
 
+    /**
+     * Register a structured STT error listener.
+     *
+     * **Delivery thread:** Same as [setOnErrorListener].
+     * [SttError] provides structured error metadata including category,
+     * code, message, cause, and a context map.
+     */
     fun setSttErrorListener(l: SttErrorListener) {
         sttErrorListener = l
     }
 
+    /**
+     * Set debug/test options for the pipeline.
+     *
+     * **Delivery thread:** Caller thread (no callback involved).
+     *
+     * @param forceAudioInitFailure  If true, audio capture initialisation will
+     *                               fail immediately (for test error paths).
+     * @param forceWhisperLoadFailure If true, whisper model load will fail
+     *                                (for test error paths).
+     * @param forceTimeout           If true, the accumulator will force a
+     *                               timeout finalisation during tests.
+     */
     fun setDebugOptions(
         forceAudioInitFailure: Boolean = false,
         forceWhisperLoadFailure: Boolean = false,
@@ -153,10 +241,14 @@ class SpeechToText internal constructor(
      * - [MANUAL_MANUAL]: uses [ManualStartTrigger] + [ManualStopTrigger].
      * - [MANUAL_AUTO]: uses [ManualStartTrigger] + [AutoSilenceStopTrigger].
      *
+     * If the model is not yet ready (warm-up in progress), the start request
+     * is queued and replayed automatically when warm-up completes. The caller
+     * does not need to call [startSession] again.
+     *
      * ## Return codes
      *
      * | [SttReturnCode.CONFIG_NOT_SET] | [setConfig] was not called. |
-     * | [SttReturnCode.SUCCESS] | Session started successfully. |
+     * | [SttReturnCode.SUCCESS] | Session started successfully (or queued). |
      * | [SttReturnCode.ENGINE_ERROR] | Internal pipeline error. |
      */
     fun startSession(): SessionResult {
@@ -165,68 +257,22 @@ class SpeechToText internal constructor(
             return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
         }
 
-        val runtimeConfig = RuntimeSttConfig.fromSttRunConfig(storedConfig)
-        val engine = storedConfig.ttsEngineConfig
-
-        return startSessionInternal(
-            runCfg = storedConfig,
-            runtimeConfig = runtimeConfig,
-            modelPath = engine.modelPath
-        )
-    }
-
-    /**
-     * Internal: create a new STT instance for the session and start it.
-     *
-     * Audio capture starts BEFORE model warm-up so that any speech uttered
-     * during the ~4 second warm-up window accumulates in the frame queue.
-     * [start] reuses the pre-started capture via [ensureCaptureStarted].
-     *
-     * After model warm-up completes (via [ModelManager.initAsync] callback),
-     * [start] is called immediately — no queued-start flags, no ready listener branching.
-     */
-    internal fun startSessionInternal(
-        runCfg: SttRunConfig,
-        runtimeConfig: RuntimeSttConfig,
-        modelPath: String
-    ): SessionResult {
-        val stt = SpeechToText(
-            config = runtimeConfig,
-            modelPath = modelPath,
-            whisperModel = WhisperBridge,
-            startTrigger = ManualStartTrigger(),
-            stopTrigger = ManualStopTrigger()
-        )
-
-        // Forward all result listeners from the inner instance to the outer shell.
-        stt.setOnResultListener { text ->
-            onResult?.invoke(text)
-        }
-        stt.setOnResultWithTimingListener { text, code, timing ->
-            onResultWithTiming?.invoke(text, code, timing)
-        }
-        stt.setOnErrorListener { t ->
-            onError?.invoke(t)
-        }
-        stt.sttErrorListener = sttErrorListener
-
-        // Store reference so stopAndTranscribe() routes to the active session.
-        activeSession = stt
-
-        // Start audio capture BEFORE model warm-up, so speech during the
-        // ~4 second warm-up window is queued and not lost.
-        stt.startCaptureImmediate()
-
-        // Start the pipeline when model warm-up completes.
-        // Transition to READY first, then start.
-        // Guard against stale callback: if the session was already stopped
-        // (user pressed STOP during warm-up), skip the lifecycle transition.
-        stt.modelManager.initAsync {
-            if (stt.currentState is SttLifecycleState.UNINITIALISED) {
-                stt.transitionTo(SttLifecycleState.READY)
-                stt.start()
+        // Start audio capture BEFORE model warm-up (if warm-up is still
+        // running), so any speech uttered during the warm-up window
+        // accumulates in the frame queue.
+        synchronized(stateLock) {
+            if (stateMachine.currentState is SttLifecycleState.READY) {
+                // Model is ready, start immediately.
+                start()
+            } else if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
+                // Model still warming up. Queue start request and begin
+                // capture so speech during warm-up is not lost.
+                startRequested = true
+                startCaptureImmediate()
             } else {
-                SttLogger.lifecycle("warm-up callback skipped: state=${stt.currentState}")
+                // Illegal state — log and return error.
+                SttLogger.lifecycleW("startSession() called from ${stateMachine.currentState} -- ignoring")
+                return SessionResult(SttReturnCode.ENGINE_ERROR, null)
             }
         }
 
@@ -235,8 +281,6 @@ class SpeechToText internal constructor(
 
     /**
      * Stop the current session and transcribe accumulated audio.
-     *
-     * Routes to the active inner session instance created by [startSessionInternal].
      *
      * Acceptable states for stop:
      * - [SttLifecycleState.READY]: user pressed STOP during warm-up or pre-speech;
@@ -248,45 +292,41 @@ class SpeechToText internal constructor(
      * States UNINITIALISED and STOPPED are ignored.
      */
     fun stopAndTranscribe() {
-        // Route to the active inner session if it exists.
-        val session = activeSession
-        if (session != null && session !== this) {
-            session.stopAndTranscribe()
-            return
-        }
+        // ── Phase 1: Lock-protected cleanup ──────────────────────────────
+        // Only state transitions and PCM drain happen under the lock.
+        // Inference dispatch happens outside the lock in Phase 2.
+        val extractedPcm: FloatArray?
 
         synchronized(stateLock) {
-            SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${currentState}")
+            SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${stateMachine.currentState}")
             if (!stopTrigger.shouldStop()) return
 
-            if (currentState is SttLifecycleState.STOPPED) {
+            if (stateMachine.currentState is SttLifecycleState.STOPPED) {
                 SttLogger.pcm("[STOP] ignoring -- state=STOPPED")
                 return
             }
 
             // UNINITIALISED and READY: audio capture may already be running
             // (pre-started before warm-up). Drain queued frames and transcribe.
-            if (currentState is SttLifecycleState.UNINITIALISED ||
-                currentState is SttLifecycleState.READY
+            if (stateMachine.currentState is SttLifecycleState.UNINITIALISED ||
+                stateMachine.currentState is SttLifecycleState.READY
             ) {
                 val activeCapture = audioSource
                 if (activeCapture != null) {
                     SttLogger.pcm("[STOP] stopping during warm-up with active capture")
-                    // Cancel warm-up inference so the real inference doesn't wait
-                    // for the C++ whisper mutex held by the warm-up call.
-                    modelManager.cancelWarmup()
                     stopRequested = true
                     isRunning.set(false)
-                    val drain = drainQueuedFrames(activeCapture)
-                    if (drain != null) {
-                        shutdownPipeline(drain)
-                    } else {
-                        SttLogger.pcm("[STOP] no PCM from queued frames")
-                        setStoppedDirect()
-                    }
+                    extractedPcm = drainQueuedFrames(activeCapture)
                 } else {
                     SttLogger.pcm("[STOP] stopping during READY (no audio capture)")
                     isRunning.set(false)
+                    setStoppedDirect()
+                    return
+                }
+                if (extractedPcm != null) {
+                    shutdownPipeline(extractedPcm)
+                } else {
+                    SttLogger.pcm("[STOP] no PCM from queued frames")
                     setStoppedDirect()
                 }
                 return
@@ -295,8 +335,10 @@ class SpeechToText internal constructor(
             // ── RECORDING or FINALISING: finalise PCM and run inference ──
             isRunning.set(false)
 
-            try {
-                if (!transitionTo(SttLifecycleState.FINALISING)) return
+            extractedPcm = try {
+                if (!stateMachine.transitionTo(SttLifecycleState.FINALISING)) {
+                    return
+                }
 
                 // Signal the processor loop that stop is requested.
                 // Must be set BEFORE processorController?.stop() so that
@@ -308,44 +350,78 @@ class SpeechToText internal constructor(
 
                 // Drain any remaining frames from the audio source queue,
                 // then fall back to force-finalising the accumulator.
-                val pcm = processorController?.drainRemainingFrames()
+                processorController?.drainRemainingFrames()
                     ?: processorController?.stopAndFinalize()
-
-                if (pcm != null) {
-                    shutdownPipeline(pcm)
-                } else {
-                    SttLogger.pcmW("no pcm available from accumulator")
-                    transitionTo(SttLifecycleState.STOPPED)
-                }
             } catch (t: Throwable) {
                 dispatchError(t)
+                return
+            }
+        }
+        // ═══════════════════════════════════════════════════════════════
+        // Phase 2: Inference dispatch (outside stateLock)
+        // ═══════════════════════════════════════════════════════════════
+        if (extractedPcm != null) {
+            shutdownPipeline(extractedPcm)
+        } else {
+            synchronized(stateLock) {
+                SttLogger.pcmW("no pcm available from accumulator")
+                stateMachine.transitionTo(SttLifecycleState.STOPPED)
             }
         }
     }
 
     fun stop() = stopAndTranscribe()
 
+    /**
+     * Reset this instance for a new session without unloading the model.
+     *
+     * Call this after [stopAndTranscribe] has delivered its result to prepare
+     * for a new utterance. The model stays loaded and warm, so the next
+     * [startSession] call will begin capture immediately without warm-up.
+     *
+     * Safe to call multiple times. Idempotent when no session is active.
+     */
+    fun resetForNextSession() {
+        synchronized(stateLock) {
+            SttLogger.lifecycle("resetForNextSession: state=${stateMachine.currentState}")
+            processorController?.stop()
+            processorController = null
+            audioSource?.stopCapture()
+            audioSource = null
+            isRunning.set(false)
+            stopRequested = false
+            startRequested = false
+            resetTiming()
+            if (stateMachine.currentState is SttLifecycleState.RECORDING ||
+                stateMachine.currentState is SttLifecycleState.FINALISING ||
+                stateMachine.currentState is SttLifecycleState.STOPPED
+            ) {
+                // Model is still warm — go back to READY.
+                stateMachine.forceSet(SttLifecycleState.READY)
+            }
+            // If UNINITIALISED or READY, leave as-is.
+        }
+    }
+
     // ------- destroy() ------------------------------------------------
 
     fun destroy() {
-        val session = activeSession
-        if (session != null && session !== this) {
-            session.destroy()
-            activeSession = null
-            return
-        }
         synchronized(stateLock) {
             processorController?.stop()
             processorController = null
             audioSource?.stopCapture()
             audioSource = null
+            isRunning.set(false)
+            stopRequested = false
+            startRequested = false
+            resetTiming()
             modelManager.unload()
-            if (currentState is SttLifecycleState.RECORDING ||
-                currentState is SttLifecycleState.FINALISING
+            if (stateMachine.currentState is SttLifecycleState.RECORDING ||
+                stateMachine.currentState is SttLifecycleState.FINALISING
             ) {
-                transitionTo(SttLifecycleState.STOPPED)
+                stateMachine.transitionTo(SttLifecycleState.STOPPED)
             }
-            currentState = SttLifecycleState.UNINITIALISED
+            stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
         }
         modelManager.shutdown()
     }
@@ -384,8 +460,8 @@ class SpeechToText internal constructor(
                 dispatchError(RuntimeException("Forced test: AudioCapture init"))
                 return
             }
-            if (currentState !is SttLifecycleState.READY) {
-                SttLogger.lifecycleW("start() called from ${currentState} -- ignoring")
+            if (stateMachine.currentState !is SttLifecycleState.READY) {
+                SttLogger.lifecycleW("start() called from ${stateMachine.currentState} -- ignoring")
                 return
             }
 
@@ -395,7 +471,7 @@ class SpeechToText internal constructor(
             val capture = ensureCaptureStarted()
             if (capture == null) return
 
-            if (!transitionTo(SttLifecycleState.RECORDING)) {
+            if (!stateMachine.transitionTo(SttLifecycleState.RECORDING)) {
                 capture.stopCapture()
                 return
             }
@@ -494,7 +570,7 @@ class SpeechToText internal constructor(
      * where normal lifecycle transitions are not applicable.
      */
     private fun setStoppedDirect() {
-        currentState = SttLifecycleState.STOPPED
+        stateMachine.forceSet(SttLifecycleState.STOPPED)
     }
 
     private fun shutdownPipeline(pcm: FloatArray) {
@@ -504,18 +580,18 @@ class SpeechToText internal constructor(
         audioSource = null
         isRunning.set(false)
 
-        if (currentState is SttLifecycleState.RECORDING) {
-            transitionTo(SttLifecycleState.FINALISING)
+        if (stateMachine.currentState is SttLifecycleState.RECORDING) {
+            stateMachine.transitionTo(SttLifecycleState.FINALISING)
         }
-        if (currentState is SttLifecycleState.FINALISING ||
-            currentState is SttLifecycleState.READY
+        if (stateMachine.currentState is SttLifecycleState.FINALISING ||
+            stateMachine.currentState is SttLifecycleState.READY
         ) {
-            transitionTo(SttLifecycleState.STOPPED)
+            stateMachine.transitionTo(SttLifecycleState.STOPPED)
         }
-        if (currentState is SttLifecycleState.UNINITIALISED) {
+        if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
             // Direct assignment: capture was started before lifecycle transition.
             // We bypass the state machine here because we never entered RECORDING.
-            currentState = SttLifecycleState.STOPPED
+            stateMachine.forceSet(SttLifecycleState.STOPPED)
         }
 
         if (pcm.isNotEmpty()) {
@@ -526,7 +602,7 @@ class SpeechToText internal constructor(
             } else {
                 0L
             }
-            submitInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
+            runInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
         }
     }
 
@@ -537,62 +613,16 @@ class SpeechToText internal constructor(
         audioSource = null
         isRunning.set(false)
 
-        if (currentState is SttLifecycleState.RECORDING) {
-            transitionTo(SttLifecycleState.FINALISING)
+        if (stateMachine.currentState is SttLifecycleState.RECORDING) {
+            stateMachine.transitionTo(SttLifecycleState.FINALISING)
         }
-        if (currentState is SttLifecycleState.FINALISING ||
-            currentState is SttLifecycleState.READY
+        if (stateMachine.currentState is SttLifecycleState.FINALISING ||
+            stateMachine.currentState is SttLifecycleState.READY
         ) {
-            transitionTo(SttLifecycleState.STOPPED)
+            stateMachine.transitionTo(SttLifecycleState.STOPPED)
         }
-        if (currentState is SttLifecycleState.UNINITIALISED) {
-            currentState = SttLifecycleState.STOPPED
-        }
-    }
-
-    /**
-     * Submit inference to the whisper executor, queuing it after any ongoing
-     * warm-up. The result is delivered via [dispatchResult] on the executor
-     * thread when inference completes.
-     *
-     * Used during early stop (warm-up in progress) to avoid blocking the stop
-     * thread on the C++ whisper mutex held by the warm-up call.
-     *
-     * During normal operation (RECORDING state), [runInferenceAndDispatch] is
-     * used instead since no warm-up mutex contention exists.
-     */
-    private fun submitInferenceAndDispatch(
-        pcm: FloatArray,
-        code: SttReturnCode,
-        vadActiveMs: Long,
-        utteranceMs: Long,
-        captureMs: Long
-    ) {
-        val infStartMs = System.currentTimeMillis()
-        // Use infStartMs as the base for totalMs in the early-stop path
-        // because timingUtteranceStartMs is never set (start() was never called).
-        val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else infStartMs
-        val shortPcm = pcm.toShortArray()
-
-        modelManager.transcribeAfterWarmup(shortPcm) { text ->
-            val whisperMs = System.currentTimeMillis() - infStartMs
-            val totalMs = System.currentTimeMillis() - pipelineStartMs
-
-            val effectiveSilenceMs = when (stopTrigger) {
-                is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs
-                else -> config.manualManualAbnormalSilenceMs
-            }
-            val snapshot = SttTimingSnapshot(
-                vadActiveMs = vadActiveMs,
-                utteranceDurationMs = utteranceMs,
-                silencePaddingMs = effectiveSilenceMs.toLong(),
-                preRollMs = config.preRollMs.toLong(),
-                inferenceMs = whisperMs,
-                totalPipelineMs = totalMs
-            )
-
-            onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
-            dispatchResult(text.trim(), code, snapshot)
+        if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
+            stateMachine.forceSet(SttLifecycleState.STOPPED)
         }
     }
 
@@ -614,7 +644,8 @@ class SpeechToText internal constructor(
         }
 
         val whisperMs = System.currentTimeMillis() - infStartMs
-        val totalMs = System.currentTimeMillis() - timingUtteranceStartMs
+        val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else infStartMs
+        val totalMs = System.currentTimeMillis() - pipelineStartMs
 
         val effectiveSilenceMs = when (stopTrigger) {
             is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs
@@ -631,25 +662,6 @@ class SpeechToText internal constructor(
 
         onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
         dispatchResult(text, code, snapshot)
-    }
-
-    internal fun transitionTo(newState: SttLifecycleState): Boolean {
-        val from = currentState
-        if (from == newState) return true
-        val valid = when (from) {
-            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
-            is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING ||
-                    newState is SttLifecycleState.STOPPED
-            is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
-            is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED
-            else -> false
-        }
-        if (valid) {
-            currentState = newState
-            return true
-        }
-        SttLogger.lifecycleE("illegal transition: ${from.javaClass.simpleName} -> ${newState.javaClass.simpleName}")
-        return false
     }
 
     private fun dispatchResult(text: String, code: SttReturnCode, timing: SttTimingSnapshot?) {

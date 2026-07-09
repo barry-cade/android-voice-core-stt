@@ -40,7 +40,7 @@ class ProcessorControllerTest {
         )
         capturedUtterances.clear()
         listener = object : UtteranceListener {
-            override fun onUtteranceReady(pcm: FloatArray) {
+            override fun onUtteranceReady(pcm: FloatArray, code: SttReturnCode) {
                 capturedUtterances.add(pcm)
             }
         }

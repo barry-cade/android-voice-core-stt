@@ -7,8 +7,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * ModelManager owns the Whisper model lifecycle: load, warm-up, unload, transcribe.
+ *
  * Warm-up runs asynchronously on a dedicated single-thread executor immediately
- * after model load. [isReady] reports true only after both load and warm-up complete.
+ * after model load (triggered by [initAsync]). [isReady] reports true only after
+ * both load and warm-up complete.
  *
  * No PCM, VAD, STOP, AudioCapture, or lifecycle transitions.
  * Only Whisper model operations and the warm-up flag.
@@ -51,12 +53,6 @@ internal class ModelManager(
      * Idempotency guard for executor shutdown.
      */
     private var executorsShutdown: Boolean = false
-
-    /**
-     * Cancellation flag for all Whisper executor tasks.
-     */
-    @Volatile
-    private var whisperCancelled: Boolean = false
 
     /**
      * Testing hook: when true, initAsync() will fail fast with MODEL_LOAD_FAILED.
@@ -156,17 +152,14 @@ internal class ModelManager(
      */
     private fun performWarmup() {
         if (warmupPerformed) return
-        if (whisperCancelled) return
 
         val warmupStartMs = System.currentTimeMillis()
         try {
             whisperModel.transcribe(WARMUP_PCM)
-            if (whisperCancelled) return
             val warmupMs = System.currentTimeMillis() - warmupStartMs
             SttLogger.whisper("warmUpMs=$warmupMs")
             warmupPerformed = true
         } catch (t: Throwable) {
-            if (whisperCancelled) return
             SttLogger.whisperE("warmup failed: ${t.message}")
             val error = SttError(
                 category = SttErrorCategory.UNKNOWN,
@@ -181,55 +174,15 @@ internal class ModelManager(
     }
 
     /**
-     * Transcribe PCM samples. Thread-safe (C++ mutex in whisper_bridge.cpp).
+     * Transcribe PCM samples by calling the native Whisper model.
+     * Thread-safe: the C++ whisper mutex in whisper_bridge.cpp serialises
+     * concurrent calls.
      *
-     * Blocking: waits for the C++ mutex if warm-up is still running.
-     * For non-blocking path during warm-up, use [transcribeAfterWarmup].
+     * @param pcm 16-bit linear PCM samples at 16 kHz mono.
+     * @return Transcribed text (may be empty on silence or error).
      */
     fun transcribe(pcm: ShortArray): String {
         return whisperModel.transcribe(pcm)
-    }
-
-    /**
-     * Submit a transcribe task to the whisper executor, queuing it after
-     * any ongoing warm-up. The result is delivered via [onResult].
-     *
-     * Unlike [transcribe], this does NOT block the calling thread waiting
-     * for the C++ mutex. Instead, the inference runs sequentially on the
-     * single-thread executor after warm-up completes.
-     *
-     * Called by the stop path during warm-up to avoid the ~1.5s mutex
-     * wait when the real inference blocks on the warm-up call.
-     *
-     * @param pcm       PCM samples to transcribe.
-     * @param onResult  Called on the executor thread with the result text.
-     */
-    fun transcribeAfterWarmup(pcm: ShortArray, onResult: (String) -> Unit) {
-        whisperCancelled = true
-
-        val runnable = Runnable {
-            val text = whisperModel.transcribe(pcm)
-            onResult(text)
-        }
-
-        try {
-            whisperExecutor.submit(runnable)
-        } catch (_: RuntimeException) {
-            onResult("")
-        }
-    }
-
-    /**
-     * Cancel any ongoing warm-up inference.
-     * The warm-up runs on [whisperExecutor] via [performWarmup], which holds
-     * the C++ whisper mutex. Setting this flag does NOT interrupt the C++ call,
-     * but the warm-up result is discarded and [isReady] is never set.
-     *
-     * Called by the stop path when the user presses STOP during warm-up,
-     * so the real inference doesn't wait for the warm-up to complete.
-     */
-    fun cancelWarmup() {
-        whisperCancelled = true
     }
 
     /**
@@ -251,7 +204,6 @@ internal class ModelManager(
         if (executorsShutdown) return
         executorsShutdown = true
 
-        whisperCancelled = true
         whisperExecutor.shutdown()
         try {
             val terminated = whisperExecutor.awaitTermination(5, TimeUnit.SECONDS)
