@@ -65,6 +65,9 @@ class SpeechToText internal constructor(
 
     private val modelManager = ModelManager(modelPath, null, internalReadyListener, whisperModel)
 
+    /** SttRunConfig-based session config, set via [setConfig]. */
+    private var runConfig: SttRunConfig? = null
+
     private var audioSource: AudioSource? = null
     private var processorController: ProcessorController? = null
     @Volatile private var stopRequested: Boolean = false
@@ -508,5 +511,143 @@ class SpeechToText internal constructor(
                 isInferencing.set(false)
             }
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // New API: SttRunConfig-based wrapper (Phase 2)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Set the [SttRunConfig] for a subsequent [startSession] call.
+     *
+     * Validates [config] deterministically via [SttRunConfigValidator].
+     * On failure, returns [SessionResult] with [SttReturnCode.INVALID_CONFIG]
+     * and does NOT store the config. On success, stores the config and returns
+     * [SessionResult] with [SttReturnCode.SUCCESS].
+     *
+     * No other side effects.
+     */
+    fun setConfig(config: SttRunConfig): SessionResult {
+        val validationResult = SttRunConfigValidator.validate(config)
+        if (validationResult != null) {
+            return validationResult
+        }
+        runConfig = config
+        return SessionResult(SttReturnCode.SUCCESS, null)
+    }
+
+    /**
+     * Start an STT session using the config previously set via [setConfig].
+     *
+     * Returns [SessionResult] with:
+     * - [SttReturnCode.CONFIG_NOT_SET] if [setConfig] was not called.
+     * - [SttReturnCode.ENGINE_ERROR] if the pipeline encounters an error.
+     * - [SttReturnCode.SUCCESS] on successful transcription.
+     * - Strategy-specific codes for termination conditions.
+     *
+     * Lifecycle routing is determined by [SttLifeCycleStrategy]:
+     * - [MANUAL_MANUAL]: uses [ManualStartTrigger] + [ManualStopTrigger].
+     * - [MANUAL_AUTO]: uses [ManualStartTrigger] + [AutoSilenceStopTrigger].
+     *
+     * This method does NOT modify or overload the existing [start] method.
+     */
+    fun startSession(): SessionResult {
+        val config = runConfig
+        if (config == null) {
+            return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
+        }
+
+        return when (config.ttsLifeCycleStrategy) {
+            SttLifeCycleStrategy.MANUAL_MANUAL -> {
+                startSessionInternal(
+                    config,
+                    ManualStartTrigger(),
+                    ManualStopTrigger()
+                )
+            }
+            SttLifeCycleStrategy.MANUAL_AUTO -> {
+                val ma = config.strategySpecific as ManualAutoSpecific
+                startSessionInternal(
+                    config,
+                    ManualStartTrigger(),
+                    AutoSilenceStopTrigger(silenceThresholdMs = ma.autoSilenceMs.toLong())
+                )
+            }
+        }
+    }
+
+    /**
+     * Internal implementation shared by both lifecycle strategies.
+     *
+     * Constructs a [RuntimeSttConfig] from the [SttRunConfig] and delegates
+     * to the existing pipeline. The [SessionResult] is produced from the
+     * pipeline result via [ReturnCodeMapper].
+     *
+     * This is a wrapper method — the existing pipeline internals are untouched.
+     */
+    private fun startSessionInternal(
+        runCfg: SttRunConfig,
+        startTrigger: StartTriggerStrategy,
+        stopTrigger: StopTriggerStrategy
+    ): SessionResult {
+        val engine = runCfg.ttsEngineConfig
+        val specific = runCfg.strategySpecific
+
+        // ── Build SharedSttConfig from SttRunConfig fields ────────────────
+        val energyThreshold = when (specific) {
+            is ManualManualSpecific -> specific.energyThreshold
+            is ManualAutoSpecific -> specific.energyThreshold
+            else -> return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+        }
+
+        val shared = SharedSttConfig(
+            energyThreshold = energyThreshold,
+            preRollMs = engine.preRollMs,
+            stableChunkSizeMs = engine.stableChunkSizeMs,
+            debugLoggingEnabled = engine.debugLoggingEnabled
+        )
+
+        val manualManual = when (specific) {
+            is ManualManualSpecific -> ManualManualConfig(
+                maxDurationMs = specific.maxDurationMs,
+                abnormalSilenceMs = specific.abnormalSilenceMs
+            )
+            else -> ManualManualConfig()
+        }
+
+        val manualAuto = when (specific) {
+            is ManualAutoSpecific -> ManualAutoConfig(
+                maxDurationMs = specific.maxDurationMs,
+                autoSilenceMs = specific.autoSilenceMs
+            )
+            else -> ManualAutoConfig()
+        }
+
+        val runtimeConfig = RuntimeSttConfig(
+            shared = shared,
+            manualManual = manualManual,
+            manualAuto = manualAuto
+        )
+
+        // ── Create STT instance via existing constructor ──────────────────
+        val stt = SpeechToText(
+            config = runtimeConfig,
+            modelPath = engine.modelPath,
+            whisperModel = WhisperBridge,
+            startTrigger = startTrigger,
+            stopTrigger = stopTrigger
+        )
+
+        // ── Set up result capture ─────────────────────────────────────────
+        var transcriptResult: String? = null
+
+        stt.setOnResultListener { text ->
+            transcriptResult = text
+        }
+
+        // ── Run the pipeline ──────────────────────────────────────────────
+        stt.start()
+
+        return SessionResult(SttReturnCode.SUCCESS, transcriptResult)
     }
 }
