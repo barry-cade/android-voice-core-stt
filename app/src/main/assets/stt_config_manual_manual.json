@@ -11,6 +11,6 @@
   "strategySpecific": {
     "maxDurationMs": 30000,
     "maxSilenceMs": 5000,
-    "drainMode": "DRAIN_FROM_NEXT_FRAME"
+    "drainMode": "DRAIN_FROM_HEAD"
   }
 }
