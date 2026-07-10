@@ -36,7 +36,7 @@ class SpeechToText internal constructor(
     private val startTrigger: StartTriggerStrategy = ManualStartTrigger(),
     private val stopTrigger: StopTriggerStrategy = ManualStopTrigger(),
     private val captureManager: SessionManager = CaptureManager(),
-    private val captureStrategy: CaptureStrategy = ManualManualStrategy(
+    private var captureStrategy: CaptureStrategy = ManualManualStrategy(
         ManualManualSpecific(
             energyThreshold = 0.03f,
             maxDurationMs = 30000,
@@ -234,7 +234,9 @@ class SpeechToText internal constructor(
      *
      * Validates [config] deterministically via [SttRunConfigValidator].
      * On failure, returns [SessionResult] with [SttReturnCode.INVALID_CONFIG].
-     * On success, stores [config] internally and returns [SessionResult] with [SttReturnCode.SUCCESS].
+     * On success, stores [config] internally, rebuilds the capture strategy
+     * from the parsed strategy-specific config, and returns [SessionResult]
+     * with [SttReturnCode.SUCCESS].
      * Does NOT start recording. Call [startSession] after this.
      */
     fun setConfig(config: SttRunConfig): SessionResult {
@@ -243,6 +245,15 @@ class SpeechToText internal constructor(
             return validationResult
         }
         runConfig = config
+
+        // Rebuild capture strategy from parsed config so drainMode and other
+        // strategy-specific fields take effect immediately.
+        val specific = config.strategySpecific
+        if (specific is ManualManualSpecific) {
+            captureStrategy = ManualManualStrategy(specific)
+        }
+        // Future strategies (e.g. ManualAuto) would be handled here.
+
         return SessionResult(SttReturnCode.SUCCESS, null)
     }
 
