@@ -35,6 +35,10 @@ internal class FakeCaptureController : AudioSource {
         return frameQueue.poll()
     }
 
+    override fun clearQueue() {
+        frameQueue.clear()
+    }
+
     /** Add a single PCM frame of silence of the given size. */
     fun addSilenceFrame(size: Int = 320) {
         frameQueue.add(FloatArray(size))

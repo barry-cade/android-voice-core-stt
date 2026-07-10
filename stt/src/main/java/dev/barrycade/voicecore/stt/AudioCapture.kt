@@ -31,6 +31,15 @@ class AudioCapture(
 
     fun getQueue(): ConcurrentLinkedQueue<FloatArray> = frameQueue
 
+    /**
+     * Clear all pending frames from the queue.
+     * Called by SpeechToText before starting the processor to discard
+     * frames accumulated during warm-up (background noise, not intentional speech).
+     */
+    fun clearQueue() {
+        frameQueue.clear()
+    }
+
     @SuppressLint("MissingPermission")
     fun start() {
         synchronized(stateLock) {

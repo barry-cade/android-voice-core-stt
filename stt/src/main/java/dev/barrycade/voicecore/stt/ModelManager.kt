@@ -192,6 +192,31 @@ internal class ModelManager(
     }
 
     /**
+     * Submit an inference task to the whisper executor.
+     *
+     * The [onResult] callback is invoked on the whisper executor thread.
+     * Callers must post to their own thread if main-thread delivery is required.
+     *
+     * Safe to call after [shutdown]; the task is silently discarded.
+     */
+    fun submitInference(pcm: ShortArray, onResult: (String) -> Unit) {
+        val runnable = Runnable {
+            val text = try {
+                whisperModel.transcribe(pcm).trim()
+            } catch (t: Throwable) {
+                SttLogger.whisperE("inference failed: ${t.message}")
+                return@Runnable
+            }
+            onResult(text)
+        }
+        try {
+            whisperExecutor.submit(runnable)
+        } catch (_: RejectedExecutionException) {
+            SttLogger.whisperE("submitInference: executor rejected task — may have been shut down")
+        }
+    }
+
+    /**
      * Unload the Whisper model. Resets warm-up flag.
      * Must be called before load to ensure deterministic lifecycle sequencing.
      */

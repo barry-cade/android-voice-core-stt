@@ -4,7 +4,7 @@
 > When you start a fresh session, read this file first to refamiliarise yourself
 > with the architecture, known issues, and planned work.
 >
-> **Status:** Last reviewed [2025-07-17] — **I2, I3, I8 fixed**. Next review: after any threading change.
+> **Status:** Last reviewed [2025-07-18] — **I2, I3, I8, O2 fixed**. Next review: after any threading change.
 >
 > **Authoritative references:**
 > - `SpeechToText.kt` — top-level orchestrator
@@ -20,12 +20,12 @@
 | # | Thread / Executor | Created In | Purpose | Priority | Daemon? |
 |---|---|---|---|---|---|
 | T1 | **AudioCaptureThread** | `AudioCapture.start()` | Reads PCM from `AudioRecord`, enqueues `FloatArray` frames into `ConcurrentLinkedQueue` | Real-time audio | ❌ Normal |
-| T2 | **ProcessorControllerThread** | `ProcessorController.start()` | Polls frames from queue, runs VAD + `UtteranceAccumulator`, delivers utterances | Pipeline processing | ❌ Normal |
-| T3 | **WhisperExecutor** (single-thread) | `ModelManager` init | Model load, warm-up, `transcribe()` calls | Serialised Whisper access | ❌ Normal (see O5) |
+| T2 | **ProcessorControllerThread** | `ProcessorController.start()` | Polls frames from queue, runs VAD + `UtteranceAccumulator`, delivers utterances to whisper executor | Pipeline processing | ❌ Normal |
+| T3 | **WhisperExecutor** (single-thread) | `ModelManager` init | Model load, warm-up, `transcribe()` calls, inference dispatch and callbacks | Serialised Whisper access + result dispatch | ✅ Daemon |
 | T4 | **Main / UI thread** | Android | `startSession()`, `stopAndTranscribe()`, `destroy()`, callbacks | Lifecycle control | ✅ Main |
 | T5 | **StopAndTranscribeThread** (app-only) | `MainActivity.stopRecording()` | Calls `stt.stopAndTranscribe()` off main thread | App-level offload | ❌ Normal |
 
-**Native side:** `whisper_bridge.cpp` uses a global `std::mutex g_mutex` guarding `whisper_context* g_ctx`. This is redundant with the Java executor (T3) — belt-and-suspenders.
+**Native side:** `whisper_bridge.cpp` uses a global `std::mutex g_mutex` guarding `whisper_context* g_ctx`. Redundant with Java executor (T3) — maintained as defensive belt-and-suspenders.
 
 ---
 
@@ -40,9 +40,9 @@
                                          ↓
                                    UtteranceListener.onUtteranceReady(pcm)
                                          ↓
-                                   [T2 or T3] runInferenceAndDispatch()
+                                   submitInferenceToWhisperExecutor()
                                          ↓
-                                   callback: onResult / onResultWithTiming / onTimingListener
+                                   [T3] transcribe() → onResult / onResultWithTiming / onTimingListener
 ```
 
 **Stop path (manual):**
@@ -51,7 +51,9 @@
     ↓ synchronized(stateLock)
   drain accumulator PCM
     ↓ (Phase 2, outside lock)
-  runInferenceAndDispatch() — may run on [T2] or caller thread
+  submitInferenceToWhisperExecutor()
+    ↓
+  [T3] transcribe() → callbacks on whisper executor thread
 ```
 
 ---
@@ -156,6 +158,7 @@ Replace `ConcurrentLinkedQueue` + `Thread.sleep(10)` with `LinkedBlockingQueue` 
 
 ### O2. Move inference dispatch to WhisperExecutor
 Instead of running `runInferenceAndDispatch()` on the processor thread (delaying its cleanup), submit it to the whisper executor. The thread returns to draining faster.
+- **Status:** ✅ Fixed 2025-07-18. Added `ModelManager.submitInference()` and `SpeechToText.submitInferenceAndDispatch()`. All inference dispatch now goes through the whisper executor (T3), never the processor thread (T2) or caller thread.
 
 ### O3. Remove `isInferencing` guard if streaming mode is not in use
 The `AtomicBoolean` in `UtteranceHandler` is never contended because the processor loop breaks after one utterance. Dead code if streaming is not active.

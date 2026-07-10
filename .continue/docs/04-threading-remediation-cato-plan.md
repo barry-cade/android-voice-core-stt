@@ -192,6 +192,7 @@ internal class SttLifecycleStateMachine {
 ```
 
 **Replace**:
+
 - `@Volatile internal var currentState: SttLifecycleState` → `val stateMachine = SttLifecycleStateMachine()`
 - All `currentState = X` direct assignments → `stateMachine.forceSet(SttLifecycleState.X)`
 - All `transitionTo(SttLifecycleState.X)` → `stateMachine.transitionTo(SttLifecycleState.X)`

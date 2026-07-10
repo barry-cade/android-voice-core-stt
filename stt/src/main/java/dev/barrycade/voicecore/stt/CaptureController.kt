@@ -52,5 +52,14 @@ internal class CaptureController(
     override fun pollFrame(): FloatArray? {
         return audioCapture?.frameQueue?.poll()
     }
+
+    /**
+     * Discard all pending frames from the AudioCapture queue.
+     * Called before starting the processor to clear frames accumulated
+     * during warm-up (ambient noise, not intentional speech).
+     */
+    override fun clearQueue() {
+        audioCapture?.clearQueue()
+    }
 }
 

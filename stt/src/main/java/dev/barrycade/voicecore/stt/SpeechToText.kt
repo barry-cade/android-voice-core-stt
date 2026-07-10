@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * | Callback | Delivery thread |
  * |---|---|
- * | [onResult] | Internal worker thread (processor or whisper executor) |
- * | [onResultWithTiming] | Same as [onResult] |
+ * | [onResult] | Whisper executor thread |
+ * | [onResultWithTiming] | Whisper executor thread |
  * | [onError] | The thread that encountered the error |
  * | [sttErrorListener] | Same as [onError] |
  *
@@ -76,7 +76,7 @@ class SpeechToText internal constructor(
     /**
      * Timing listener, called after each inference completes.
      *
-     * **Delivery thread:** Internal worker thread (whisper executor or processor thread).
+     * **Delivery thread:** Whisper executor thread.
      *
      * @param pcmMs       Wall-clock duration of PCM capture.
      * @param vadActiveMs Total time speech was detected by VAD.
@@ -478,6 +478,11 @@ class SpeechToText internal constructor(
 
             timingPcmStartMs = System.currentTimeMillis()
 
+            // Clear any frames accumulated during warm-up (ambient noise,
+            // not intentional speech). The processor should only see live
+            // capture frames from here onwards.
+            capture.clearQueue()
+
             val processor = createProcessor(capture)
 
             processorController = processor
@@ -602,7 +607,7 @@ class SpeechToText internal constructor(
             } else {
                 0L
             }
-            runInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
+            submitInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
         }
     }
 
@@ -626,42 +631,50 @@ class SpeechToText internal constructor(
         }
     }
 
-    private fun runInferenceAndDispatch(
+    /**
+     * Submit an inference task to the whisper executor.
+     *
+     * Converts [pcm] to ShortArray on the caller thread (fast), then submits
+     * the blocking transcribe() call to the whisper executor so the caller
+     * (processor thread or stop thread) is not blocked for the duration of
+     * inference.
+     *
+     * Timing capture (whisperMs, totalMs) happens on the executor thread.
+     * Result dispatch (onResult, onResultWithTiming, onTimingListener) also
+     * occurs on the executor thread.
+     */
+    private fun submitInferenceAndDispatch(
         pcm: FloatArray,
         code: SttReturnCode,
         vadActiveMs: Long,
         utteranceMs: Long,
         captureMs: Long
     ) {
-        val infStartMs = System.currentTimeMillis()
-        val text: String
-
-        try {
-            text = modelManager.transcribe(pcm.toShortArray()).trim()
-        } catch (t: Throwable) {
-            SttLogger.whisperE("inference failed: ${t.message}")
-            return
-        }
-
-        val whisperMs = System.currentTimeMillis() - infStartMs
-        val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else infStartMs
-        val totalMs = System.currentTimeMillis() - pipelineStartMs
-
+        val shortPcm = pcm.toShortArray()
+        val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else System.currentTimeMillis()
         val effectiveSilenceMs = when (stopTrigger) {
-            is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs
-            else -> config.manualManualAbnormalSilenceMs
+            is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs.toLong()
+            else -> config.manualManualAbnormalSilenceMs.toLong()
         }
-        val snapshot = SttTimingSnapshot(
-            vadActiveMs = vadActiveMs,
-            utteranceDurationMs = utteranceMs,
-            silencePaddingMs = effectiveSilenceMs.toLong(),
-            preRollMs = config.preRollMs.toLong(),
-            inferenceMs = whisperMs,
-            totalPipelineMs = totalMs
-        )
 
-        onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
-        dispatchResult(text, code, snapshot)
+        val onResultCallback: (String) -> Unit = { text ->
+            val whisperMs = System.currentTimeMillis() - pipelineStartMs
+            val totalMs = System.currentTimeMillis() - pipelineStartMs
+
+            val snapshot = SttTimingSnapshot(
+                vadActiveMs = vadActiveMs,
+                utteranceDurationMs = utteranceMs,
+                silencePaddingMs = effectiveSilenceMs,
+                preRollMs = config.preRollMs.toLong(),
+                inferenceMs = whisperMs,
+                totalPipelineMs = totalMs
+            )
+
+            onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
+            dispatchResult(text, code, snapshot)
+        }
+
+        modelManager.submitInference(shortPcm, onResultCallback)
     }
 
     private fun dispatchResult(text: String, code: SttReturnCode, timing: SttTimingSnapshot?) {
@@ -699,7 +712,7 @@ class SpeechToText internal constructor(
             try {
                 val vadMs = processorController?.vadActiveMs ?: 0L
                 val utterMs = (processorController?.lastUtteranceDurationMs ?: 0).toLong()
-                runInferenceAndDispatch(pcm, code, vadMs, utterMs, timingPcmTotalMs)
+                submitInferenceAndDispatch(pcm, code, vadMs, utterMs, timingPcmTotalMs)
             } finally {
                 isInferencing.set(false)
             }
