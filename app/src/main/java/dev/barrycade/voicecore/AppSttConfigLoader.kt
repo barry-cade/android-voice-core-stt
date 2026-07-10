@@ -108,8 +108,8 @@ object AppSttConfigLoader {
         val maxDurationMs = specificObj.getInt("maxDurationMs")
         val maxSilenceMs = specificObj.getInt("maxSilenceMs")
 
-        // ── Parse drainMode (optional, defaults to DRAIN_FROM_NEXT_FRAME) ─
-        val drainModeString = specificObj.optString("drainMode", "DRAIN_FROM_NEXT_FRAME")
+        // ── Parse drainMode (required field) ──────────────────────────────
+        val drainModeString = specificObj.getString("drainMode")
         val drainMode = try {
             DrainMode.valueOf(drainModeString)
         } catch (_: IllegalArgumentException) {
