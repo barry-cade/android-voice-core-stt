@@ -8,7 +8,8 @@ package dev.barrycade.voicecore.stt
  * is a volatile field and does not require the lock.
  *
  * Legal transitions:
- *   UNINITIALISED → READY
+ *   UNINITIALISED → INITIALISED
+ *   INITIALISED   → READY
  *   READY         → RECORDING | STOPPED
  *   RECORDING     → FINALISING
  *   FINALISING    → STOPPED
@@ -42,7 +43,8 @@ internal class SttLifecycleStateMachine {
             if (from == newState) return true
 
             val valid = when (from) {
-                is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
+                is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.INITIALISED
+                is SttLifecycleState.INITIALISED -> newState is SttLifecycleState.READY
                 is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING ||
                         newState is SttLifecycleState.STOPPED
                 is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
@@ -67,7 +69,9 @@ internal class SttLifecycleStateMachine {
      *
      * Use only for bypass paths where the normal lifecycle has not been
      * followed (e.g. early stop during warm-up, direct assignment in
-     * [destroy]). Each call site MUST document why the bypass is necessary.
+     * [destroy], or initial transition from UNINITIALISED to INITIALISED
+     * which occurs when CaptureManager is pre-wired in the constructor).
+     * Each call site MUST document why the bypass is necessary.
      *
      * Thread-safe: guarded by internal lock.
      */

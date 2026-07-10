@@ -3,12 +3,12 @@ package dev.barrycade.voicecore.stt
 /**
  * Interface for microphone PCM frame sourcing.
  *
- * Production: [CaptureController] wraps [AudioCapture] (Android AudioRecord).
+ * Production: [CaptureManager] wraps [AudioCapture] (Android AudioRecord).
  * Tests: [FakeCaptureController] provides deterministic frames.
  *
  * Only the three methods used by [ProcessorController] polling loop
- * are exposed — start, poll, stop. [clearQueue] is used by SpeechToText
- * to discard frames accumulated during warm-up.
+ * are exposed — start, poll, stop. [clearQueue] is used by CaptureManager
+ * to discard frames during reset.
  */
 internal interface AudioSource {
     /**

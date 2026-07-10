@@ -23,7 +23,7 @@ import org.junit.Test
  * 5. STOP is never ignored during READY or RECORDING
  * 6. State machine transitions are correct
  *
- * Tests use [FakeCaptureController] for deterministic PCM frames,
+ * Tests use [FakeCaptureManager] for deterministic PCM frames,
  * direct [UtteranceAccumulator] calls for silence/inference tests,
  * and a mockable [WhisperModel] for inference verification.
  *
@@ -415,15 +415,15 @@ class SttPipelineBehaviourTest {
     // ── Test 6: State machine transitions must be correct ─────────────────
 
     @Test
-    fun `state machine UNINITIALISED to READY`() {
+    fun `state machine UNINITIALISED to INITIALISED to READY`() {
         var state: SttLifecycleState = SttLifecycleState.UNINITIALISED
 
-        val result = applyTransition(
-            from = state,
-            to = SttLifecycleState.READY
-        )
+        var result = applyTransition(from = state, to = SttLifecycleState.INITIALISED)
+        assertTrue("UNINITIALISED -> INITIALISED must be allowed", result)
+        state = SttLifecycleState.INITIALISED
 
-        assertTrue("UNINITIALISED -> READY must be allowed", result)
+        result = applyTransition(from = state, to = SttLifecycleState.READY)
+        assertTrue("INITIALISED -> READY must be allowed", result)
     }
 
     @Test
@@ -464,7 +464,12 @@ class SttPipelineBehaviourTest {
 
     @Test
     fun `illegal transitions must throw errors`() {
-        // ── UNINITIALISED cannot skip states ─────────────────────────────
+        // ── UNINITIALISED must go through INITIALISED first ──────────────
+        assertFalse(
+            "UNINITIALISED -> READY must be rejected",
+            applyTransition(SttLifecycleState.UNINITIALISED, SttLifecycleState.READY)
+        )
+
         assertFalse(
             "UNINITIALISED -> RECORDING must be rejected",
             applyTransition(SttLifecycleState.UNINITIALISED, SttLifecycleState.RECORDING)
@@ -478,6 +483,22 @@ class SttPipelineBehaviourTest {
         assertFalse(
             "UNINITIALISED -> STOPPED must be rejected",
             applyTransition(SttLifecycleState.UNINITIALISED, SttLifecycleState.STOPPED)
+        )
+
+        // ── INITIALISED must go to READY first ──────────────────────────
+        assertFalse(
+            "INITIALISED -> RECORDING must be rejected",
+            applyTransition(SttLifecycleState.INITIALISED, SttLifecycleState.RECORDING)
+        )
+
+        assertFalse(
+            "INITIALISED -> FINALISING must be rejected",
+            applyTransition(SttLifecycleState.INITIALISED, SttLifecycleState.FINALISING)
+        )
+
+        assertFalse(
+            "INITIALISED -> STOPPED must be rejected",
+            applyTransition(SttLifecycleState.INITIALISED, SttLifecycleState.STOPPED)
         )
 
         // ── READY cannot skip RECORDING ──────────────────────────────────
@@ -523,6 +544,11 @@ class SttPipelineBehaviourTest {
             "STOPPED -> FINALISING must be rejected",
             applyTransition(SttLifecycleState.STOPPED, SttLifecycleState.FINALISING)
         )
+
+        assertFalse(
+            "STOPPED -> INITIALISED must be rejected",
+            applyTransition(SttLifecycleState.STOPPED, SttLifecycleState.INITIALISED)
+        )
     }
 
     // ── Additional scenario tests ─────────────────────────────────────────
@@ -531,6 +557,9 @@ class SttPipelineBehaviourTest {
     fun `full lifecycle UNINITIALISED to STOPPED`() {
         // Complete legal cycle
         var state: SttLifecycleState = SttLifecycleState.UNINITIALISED
+
+        assertTrue(applyTransition(state, SttLifecycleState.INITIALISED))
+        state = SttLifecycleState.INITIALISED
 
         assertTrue(applyTransition(state, SttLifecycleState.READY))
         state = SttLifecycleState.READY
@@ -681,10 +710,11 @@ class SttPipelineBehaviourTest {
 
     /**
      * Apply a state machine transition using the same rules as
-     * [SpeechToText.transitionTo].
+     * [SttLifecycleStateMachine.transitionTo].
      *
      * Legal transitions:
-     *   UNINITIALISED → READY
+     *   UNINITIALISED → INITIALISED
+     *   INITIALISED   → READY
      *   READY         → RECORDING | STOPPED
      *   RECORDING     → FINALISING
      *   FINALISING    → STOPPED
@@ -698,7 +728,8 @@ class SttPipelineBehaviourTest {
         if (from == to) return true
 
         return when (from) {
-            is SttLifecycleState.UNINITIALISED -> to is SttLifecycleState.READY
+            is SttLifecycleState.UNINITIALISED -> to is SttLifecycleState.INITIALISED
+            is SttLifecycleState.INITIALISED -> to is SttLifecycleState.READY
             is SttLifecycleState.READY -> to is SttLifecycleState.RECORDING ||
                     to is SttLifecycleState.STOPPED
             is SttLifecycleState.RECORDING -> to is SttLifecycleState.FINALISING

@@ -34,7 +34,9 @@ class SpeechToText internal constructor(
     modelPath: String,
     private val whisperModel: WhisperModel = WhisperBridge,
     private val startTrigger: StartTriggerStrategy = ManualStartTrigger(),
-    private val stopTrigger: StopTriggerStrategy = ManualStopTrigger()
+    private val stopTrigger: StopTriggerStrategy = ManualStopTrigger(),
+    private val captureManager: SessionManager = CaptureManager(),
+    private val captureStrategy: CaptureStrategy = ManualManualStrategy()
 ) {
     companion object {
         /**
@@ -44,8 +46,7 @@ class SpeechToText internal constructor(
          * calling [startSession].
          *
          * Model loading and warm-up begin immediately in the constructor.
-         * [startSession] will wait for model readiness before starting
-         * audio capture.
+         * Audio capture also begins immediately (CaptureManager is pre-wired).
          *
          * @param modelPath Absolute path to the Whisper model binary.
          * @return A new [SpeechToText] instance.
@@ -98,7 +99,6 @@ class SpeechToText internal constructor(
     private var runConfig: SttRunConfig? = null
 
     // ── Session-scoped state (reset by resetForNextSession) ────────────────
-    private var audioSource: AudioSource? = null
     private var processorController: ProcessorController? = null
     @Volatile private var stopRequested: Boolean = false
     private var timingPcmStartMs: Long = 0L
@@ -120,6 +120,11 @@ class SpeechToText internal constructor(
 
     init {
         config.validate()
+
+        // CaptureManager is constructed and starts AudioCapture immediately.
+        // Transition to INITIALISED (CaptureManager pre-wired, mic running).
+        stateMachine.forceSet(SttLifecycleState.INITIALISED)
+
         modelManager = ModelManager(
             modelPath = modelPath,
             sttErrorListener = null,
@@ -131,7 +136,7 @@ class SpeechToText internal constructor(
         // If startSession() was already called before readiness, it replays.
         modelManager.initAsync {
             synchronized(stateLock) {
-                if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
+                if (stateMachine.currentState is SttLifecycleState.INITIALISED) {
                     stateMachine.transitionTo(SttLifecycleState.READY)
                     // If startSession() queued a start, replay it now.
                     if (startRequested) {
@@ -241,9 +246,10 @@ class SpeechToText internal constructor(
      * - [MANUAL_MANUAL]: uses [ManualStartTrigger] + [ManualStopTrigger].
      * - [MANUAL_AUTO]: uses [ManualStartTrigger] + [AutoSilenceStopTrigger].
      *
-     * If the model is not yet ready (warm-up in progress), the start request
-     * is queued and replayed automatically when warm-up completes. The caller
-     * does not need to call [startSession] again.
+     * CaptureManager is pre-wired (microphone already running). This method:
+     * 1. Calls [CaptureManager.begin] to start buffering frames into the session buffer.
+     * 2. If the model is ready, starts the processor immediately.
+     * 3. If the model is still warming up, queues the start and replays when ready.
      *
      * ## Return codes
      *
@@ -257,18 +263,21 @@ class SpeechToText internal constructor(
             return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
         }
 
-        // Start audio capture BEFORE model warm-up (if warm-up is still
-        // running), so any speech uttered during the warm-up window
-        // accumulates in the frame queue.
         synchronized(stateLock) {
-            if (stateMachine.currentState is SttLifecycleState.READY) {
-                // Model is ready, start immediately.
-                start()
-            } else if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
-                // Model still warming up. Queue start request and begin
-                // capture so speech during warm-up is not lost.
-                startRequested = true
-                startCaptureImmediate()
+            if (stateMachine.currentState is SttLifecycleState.READY ||
+                stateMachine.currentState is SttLifecycleState.INITIALISED
+            ) {
+                // Capture is already running. Begin buffering frames via strategy.
+                captureStrategy.onStartPressed(captureManager)
+
+                if (stateMachine.currentState is SttLifecycleState.READY) {
+                    // Model is ready, start the processor immediately.
+                    start()
+                } else {
+                    // Model still warming up. Queue start request.
+                    // begin() was already called above — frames are buffering.
+                    startRequested = true
+                }
             } else {
                 // Illegal state — log and return error.
                 SttLogger.lifecycleW("startSession() called from ${stateMachine.currentState} -- ignoring")
@@ -282,23 +291,27 @@ class SpeechToText internal constructor(
     /**
      * Stop the current session and transcribe accumulated audio.
      *
-     * Acceptable states for stop:
-     * - [SttLifecycleState.READY]: user pressed STOP during warm-up or pre-speech;
-     *   no audio capture or accumulator exists yet, so just transition to STOPPED.
-     * - [SttLifecycleState.RECORDING]: normal stop during active capture;
-     *   drain accumulator, run inference, deliver result.
-     * - [SttLifecycleState.FINALISING]: already stopping, allow re-entry.
+     * This method:
+     * 1. Calls [CaptureManager.finalize] to drain all buffered PCM immediately.
+     *    No VAD, no accumulator — raw PCM concatenation.
+     * 2. Submits inference to the Whisper executor (queues behind warm-up if needed).
+     * 3. Transitions to STOPPED.
+     *
+     * Acceptable states:
+     * - [SttLifecycleState.RECORDING]: normal stop during active capture.
+     * - [SttLifecycleState.READY] or [SttLifecycleState.INITIALISED]: stop during
+     *   warm-up; PCM accumulated since [begin] is returned.
+     * - [SttLifecycleState.FINALISING]: already stopping, allow re-entry (no-op).
      *
      * States UNINITIALISED and STOPPED are ignored.
      */
     fun stopAndTranscribe() {
-        // ── Phase 1: Lock-protected cleanup ──────────────────────────────
-        // Only state transitions and PCM drain happen under the lock.
-        // Inference dispatch happens outside the lock in Phase 2.
-        val extractedPcm: FloatArray?
+        val finalPcm: FloatArray
+        val timingMs: Long
 
         synchronized(stateLock) {
             SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${stateMachine.currentState}")
+
             if (!stopTrigger.shouldStop()) return
 
             if (stateMachine.currentState is SttLifecycleState.STOPPED) {
@@ -306,65 +319,60 @@ class SpeechToText internal constructor(
                 return
             }
 
-            // UNINITIALISED and READY: audio capture may already be running
-            // (pre-started before warm-up). Drain queued frames and transcribe.
-            if (stateMachine.currentState is SttLifecycleState.UNINITIALISED ||
-                stateMachine.currentState is SttLifecycleState.READY
-            ) {
-                val activeCapture = audioSource
-                if (activeCapture != null) {
-                    SttLogger.pcm("[STOP] stopping during warm-up with active capture")
-                    stopRequested = true
-                    isRunning.set(false)
-                    extractedPcm = drainQueuedFrames(activeCapture)
-                } else {
-                    SttLogger.pcm("[STOP] stopping during READY (no audio capture)")
-                    isRunning.set(false)
-                    setStoppedDirect()
-                    return
-                }
-                if (extractedPcm != null) {
-                    shutdownPipeline(extractedPcm)
-                } else {
-                    SttLogger.pcm("[STOP] no PCM from queued frames")
-                    setStoppedDirect()
-                }
+            if (stateMachine.currentState is SttLifecycleState.FINALISING) {
+                SttLogger.pcm("[STOP] already FINALISING -- returning")
                 return
             }
 
-            // ── RECORDING or FINALISING: finalise PCM and run inference ──
+            // ── Finalise PCM via CaptureManager (raw PCM, no VAD) ────────
             isRunning.set(false)
+            stopRequested = true
 
-            extractedPcm = try {
-                if (!stateMachine.transitionTo(SttLifecycleState.FINALISING)) {
-                    return
-                }
+            // Stop the processor thread if it was running.
+            processorController?.stop()
+            processorController = null
 
-                // Signal the processor loop that stop is requested.
-                // Must be set BEFORE processorController?.stop() so that
-                // drainRemainingFrames sees the flag.
-                stopRequested = true
+            // Extract PCM before invoking the stop callback.
+            finalPcm = captureManager.finalize()
 
-                // Stop the processor worker thread.
-                processorController?.stop()
+            // Invoke strategy stop callback (e.g. stop capture).
+            captureStrategy.onStopPressed(captureManager)
 
-                // Drain any remaining frames from the audio source queue,
-                // then fall back to force-finalising the accumulator.
-                processorController?.drainRemainingFrames()
-                    ?: processorController?.stopAndFinalize()
-            } catch (t: Throwable) {
-                dispatchError(t)
+            if (finalPcm.isEmpty()) {
+                SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED")
+                stateMachine.transitionTo(SttLifecycleState.STOPPED)
                 return
+            }
+
+            // Transition to FINALISING (inference pending).
+            if (stateMachine.currentState is SttLifecycleState.RECORDING ||
+                stateMachine.currentState is SttLifecycleState.READY ||
+                stateMachine.currentState is SttLifecycleState.INITIALISED
+            ) {
+                stateMachine.forceSet(SttLifecycleState.FINALISING)
+            }
+
+            timingMs = if (timingPcmStartMs > 0) {
+                System.currentTimeMillis() - timingPcmStartMs
+            } else {
+                0L
             }
         }
-        // ═══════════════════════════════════════════════════════════════
-        // Phase 2: Inference dispatch (outside stateLock)
-        // ═══════════════════════════════════════════════════════════════
-        if (extractedPcm != null) {
-            shutdownPipeline(extractedPcm)
-        } else {
-            synchronized(stateLock) {
-                SttLogger.pcmW("no pcm available from accumulator")
+
+        // ═════════════════════════════════════════════════════════════════
+        // Phase 2: Submit inference (outside stateLock)
+        // ═════════════════════════════════════════════════════════════════
+        submitInferenceAndDispatch(
+            pcm = finalPcm,
+            code = SttReturnCode.SUCCESS,
+            vadActiveMs = 0L,
+            utteranceMs = 0L,
+            captureMs = timingMs
+        )
+
+        // Transition to STOPPED after inference is submitted.
+        synchronized(stateLock) {
+            if (stateMachine.currentState is SttLifecycleState.FINALISING) {
                 stateMachine.transitionTo(SttLifecycleState.STOPPED)
             }
         }
@@ -379,6 +387,9 @@ class SpeechToText internal constructor(
      * for a new utterance. The model stays loaded and warm, so the next
      * [startSession] call will begin capture immediately without warm-up.
      *
+     * CaptureManager is NOT stopped — only the session buffer is reset.
+     * AudioCapture continues running (invarant #6).
+     *
      * Safe to call multiple times. Idempotent when no session is active.
      */
     fun resetForNextSession() {
@@ -386,8 +397,9 @@ class SpeechToText internal constructor(
             SttLogger.lifecycle("resetForNextSession: state=${stateMachine.currentState}")
             processorController?.stop()
             processorController = null
-            audioSource?.stopCapture()
-            audioSource = null
+            // Restart AudioCapture (was stopped by finalize() during stopAndTranscribe).
+            captureManager.restartCapture()
+            captureManager.reset()
             isRunning.set(false)
             stopRequested = false
             startRequested = false
@@ -399,7 +411,6 @@ class SpeechToText internal constructor(
                 // Model is still warm — go back to READY.
                 stateMachine.forceSet(SttLifecycleState.READY)
             }
-            // If UNINITIALISED or READY, leave as-is.
         }
     }
 
@@ -409,8 +420,7 @@ class SpeechToText internal constructor(
         synchronized(stateLock) {
             processorController?.stop()
             processorController = null
-            audioSource?.stopCapture()
-            audioSource = null
+            captureManager.shutdown()
             isRunning.set(false)
             stopRequested = false
             startRequested = false
@@ -427,21 +437,6 @@ class SpeechToText internal constructor(
     }
 
     // ======== Internal pipeline ========================================
-
-    /**
-     * Start audio capture immediately, before model warm-up.
-     *
-     * The capture fills [AudioCapture.frameQueue] with PCM frames during
-     * the ~4 second warm-up window. When [start] is called later, the
-     * [ProcessorController] drains these frames through VAD + accumulator.
-     *
-     * Safe to call multiple times — [ensureCaptureStarted] is idempotent.
-     */
-    internal fun startCaptureImmediate() {
-        synchronized(stateLock) {
-            ensureCaptureStarted()
-        }
-    }
 
     internal fun start() {
         synchronized(stateLock) {
@@ -460,7 +455,9 @@ class SpeechToText internal constructor(
                 dispatchError(RuntimeException("Forced test: AudioCapture init"))
                 return
             }
-            if (stateMachine.currentState !is SttLifecycleState.READY) {
+            if (stateMachine.currentState !is SttLifecycleState.READY &&
+                stateMachine.currentState !is SttLifecycleState.INITIALISED
+            ) {
                 SttLogger.lifecycleW("start() called from ${stateMachine.currentState} -- ignoring")
                 return
             }
@@ -468,42 +465,22 @@ class SpeechToText internal constructor(
             resetTiming()
             SttLogger.config("Active config: $config")
 
-            val capture = ensureCaptureStarted()
-            if (capture == null) return
-
             if (!stateMachine.transitionTo(SttLifecycleState.RECORDING)) {
-                capture.stopCapture()
                 return
             }
 
             timingPcmStartMs = System.currentTimeMillis()
 
-            // Clear any frames accumulated during warm-up (ambient noise,
-            // not intentional speech). The processor should only see live
-            // capture frames from here onwards.
-            capture.clearQueue()
-
-            val processor = createProcessor(capture)
+            // CaptureManager is already running. The processor uses
+            // CaptureManager.pollFrame() which both buffers into session
+            // and returns frames for VAD processing.
+            val processor = createProcessor(captureManager)
 
             processorController = processor
             processor.start()
             timingUtteranceStartMs = System.currentTimeMillis()
             isRunning.set(true)
         }
-    }
-
-    private fun ensureCaptureStarted(): AudioSource? {
-        val existingCapture = audioSource
-        if (existingCapture != null) {
-            return existingCapture
-        }
-        val newCapture = CaptureController()
-        if (!newCapture.startCapture()) {
-            dispatchError(RuntimeException("Audio capture failed"))
-            return null
-        }
-        audioSource = newCapture
-        return newCapture
     }
 
     private fun createProcessor(capture: AudioSource): ProcessorController {
@@ -535,100 +512,46 @@ class SpeechToText internal constructor(
         )
         processor.onAutoStop = {
             synchronized(stateLock) {
-                shutdownPipeline()
+                shutdownPipelineOnAutoStop()
             }
         }
         processor.onAbnormalTermination = { code ->
             synchronized(stateLock) {
-                shutdownPipeline()
+                shutdownPipelineOnAbnormal(code)
             }
         }
         return processor
     }
 
     /**
-     * Drain queued frames from [AudioSource] and finalise into a single PCM buffer.
-     * Used when stopping before the processor loop has started (e.g. STOP during warm-up).
-     * Creates a temporary VAD and accumulator to process the queued frames.
+     * Shutdown pipeline on auto-stop (auto-silence silence trigger).
+     * Captures PCM from accumulator and submits inference.
      */
-    private fun drainQueuedFrames(source: AudioSource): FloatArray? {
-        val tempVad = Vad(config)
-        val tempAccumulator = UtteranceAccumulator(config, stopTrigger = stopTrigger)
-        while (true) {
-            val frame = source.pollFrame()
-            if (frame == null) break
-            val isSpeech = tempVad.isSpeech(frame)
-            val result = tempAccumulator.processChunk(frame, isSpeech)
-            when (result) {
-                is FrameResult.NormalFinalize -> return result.pcm
-                is FrameResult.AutoStop -> return result.pcm
-                is FrameResult.AbnormalTerminateWithPcm -> return result.pcm
-                else -> { }
-            }
+    private fun shutdownPipelineOnAutoStop() {
+        val pcm: FloatArray?
+        synchronized(stateLock) {
+            processorController = null
+            isRunning.set(false)
+            pcm = null  // Auto-stop already has PCM in processor — finalize via CaptureManager
         }
-        return tempAccumulator.finaliseUtterance()
+        // Fallback: use CaptureManager finalize for any remaining PCM.
+        val remainingPcm = captureManager.finalize()
+        if (remainingPcm.isNotEmpty()) {
+            submitInferenceAndDispatch(remainingPcm, SttReturnCode.SUCCESS, 0L, 0L, 0L)
+        }
     }
 
     /**
-     * Set state to STOPPED directly, bypassing the transition validator.
-     * Used when stopping from UNINITIALISED or READY (early stop during warm-up)
-     * where normal lifecycle transitions are not applicable.
+     * Shutdown pipeline on abnormal termination.
+     * Dispatches the error code without inference.
      */
-    private fun setStoppedDirect() {
-        stateMachine.forceSet(SttLifecycleState.STOPPED)
-    }
-
-    private fun shutdownPipeline(pcm: FloatArray) {
-        processorController?.stop()
-        processorController = null
-        audioSource?.stopCapture()
-        audioSource = null
-        isRunning.set(false)
-
-        if (stateMachine.currentState is SttLifecycleState.RECORDING) {
-            stateMachine.transitionTo(SttLifecycleState.FINALISING)
+    private fun shutdownPipelineOnAbnormal(code: SttReturnCode) {
+        synchronized(stateLock) {
+            processorController = null
+            isRunning.set(false)
         }
-        if (stateMachine.currentState is SttLifecycleState.FINALISING ||
-            stateMachine.currentState is SttLifecycleState.READY
-        ) {
-            stateMachine.transitionTo(SttLifecycleState.STOPPED)
-        }
-        if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
-            // Direct assignment: capture was started before lifecycle transition.
-            // We bypass the state machine here because we never entered RECORDING.
-            stateMachine.forceSet(SttLifecycleState.STOPPED)
-        }
-
-        if (pcm.isNotEmpty()) {
-            val vadMs = 0L
-            val utterMs = 0L
-            val capMs = if (timingPcmStartMs > 0) {
-                System.currentTimeMillis() - timingPcmStartMs
-            } else {
-                0L
-            }
-            submitInferenceAndDispatch(pcm, SttReturnCode.SUCCESS, vadMs, utterMs, capMs)
-        }
-    }
-
-    private fun shutdownPipeline() {
-        processorController?.stop()
-        processorController = null
-        audioSource?.stopCapture()
-        audioSource = null
-        isRunning.set(false)
-
-        if (stateMachine.currentState is SttLifecycleState.RECORDING) {
-            stateMachine.transitionTo(SttLifecycleState.FINALISING)
-        }
-        if (stateMachine.currentState is SttLifecycleState.FINALISING ||
-            stateMachine.currentState is SttLifecycleState.READY
-        ) {
-            stateMachine.transitionTo(SttLifecycleState.STOPPED)
-        }
-        if (stateMachine.currentState is SttLifecycleState.UNINITIALISED) {
-            stateMachine.forceSet(SttLifecycleState.STOPPED)
-        }
+        // PCM from accumulator was already dispatched via UtteranceHandler.
+        // No additional action needed.
     }
 
     /**

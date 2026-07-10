@@ -9,11 +9,11 @@ import org.junit.Test
 /**
  * Tests for STT lifecycle state transitions.
  *
- * Validates that the legal transition matrix (UNINITIALISED -> READY ->
- * RECORDING -> FINALISING -> READY) is enforced and that illegal
+ * Validates that the legal transition matrix (UNINITIALISED -> INITIALISED ->
+ * READY -> RECORDING -> FINALISING -> STOPPED) is enforced and that illegal
  * transitions are rejected.
  *
- * The transition logic replicates [SpeechToText.transitionTo] as a
+ * The transition logic replicates [SttLifecycleStateMachine.transitionTo] as a
  * pure function over a local [currentState] variable.
  *
  * All tests are PDP-aligned: linear arrange, act, assert.
@@ -42,12 +42,22 @@ class SttLifecycleStateTest {
     // ── Legal transitions ───────────────────────────────────────────────
 
     @Test
-    fun legalTransition_uninitialisedToReady() {
+    fun legalTransition_uninitialisedToInitialised() {
         currentState = SttLifecycleState.UNINITIALISED
+
+        val result = applyTransition(SttLifecycleState.INITIALISED)
+
+        assertTrue("UNINITIALISED -> INITIALISED must return true", result.allowed)
+        assertEquals(SttLifecycleState.INITIALISED, currentState)
+    }
+
+    @Test
+    fun legalTransition_initialisedToReady() {
+        currentState = SttLifecycleState.INITIALISED
 
         val result = applyTransition(SttLifecycleState.READY)
 
-        assertTrue("UNINITIALISED -> READY must return true", result.allowed)
+        assertTrue("INITIALISED -> READY must return true", result.allowed)
         assertEquals(SttLifecycleState.READY, currentState)
     }
 
@@ -134,6 +144,46 @@ class SttLifecycleStateTest {
         assertEquals(SttLifecycleState.UNINITIALISED, currentState)
     }
 
+    @Test
+    fun illegalTransition_uninitialisedToReady() {
+        currentState = SttLifecycleState.UNINITIALISED
+
+        val result = applyTransition(SttLifecycleState.READY)
+
+        assertFalse("UNINITIALISED -> READY must return false (must go through INITIALISED)", result.allowed)
+        assertEquals(SttLifecycleState.UNINITIALISED, currentState)
+    }
+
+    @Test
+    fun illegalTransition_initialisedToRecording() {
+        currentState = SttLifecycleState.INITIALISED
+
+        val result = applyTransition(SttLifecycleState.RECORDING)
+
+        assertFalse("INITIALISED -> RECORDING must return false (must go through READY)", result.allowed)
+        assertEquals(SttLifecycleState.INITIALISED, currentState)
+    }
+
+    @Test
+    fun illegalTransition_initialisedToFinalising() {
+        currentState = SttLifecycleState.INITIALISED
+
+        val result = applyTransition(SttLifecycleState.FINALISING)
+
+        assertFalse("INITIALISED -> FINALISING must return false", result.allowed)
+        assertEquals(SttLifecycleState.INITIALISED, currentState)
+    }
+
+    @Test
+    fun illegalTransition_initialisedToStopped() {
+        currentState = SttLifecycleState.INITIALISED
+
+        val result = applyTransition(SttLifecycleState.STOPPED)
+
+        assertFalse("INITIALISED -> STOPPED must return false", result.allowed)
+        assertEquals(SttLifecycleState.INITIALISED, currentState)
+    }
+
     // ── Error emission assertions ───────────────────────────────────────
 
     @Test
@@ -169,7 +219,7 @@ class SttLifecycleStateTest {
     )
 
     /**
-     * Apply a transition using the same logic as [SpeechToText.transitionTo].
+     * Apply a transition using the same logic as [SttLifecycleStateMachine.transitionTo].
      * Operates on the local [currentState] variable.
      * Returns a [TransitionResult] indicating whether the transition was allowed.
      */
@@ -184,7 +234,8 @@ class SttLifecycleStateTest {
         }
 
         val valid = when (from) {
-            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
+            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.INITIALISED
+            is SttLifecycleState.INITIALISED -> newState is SttLifecycleState.READY
             is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING
             is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
             is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED

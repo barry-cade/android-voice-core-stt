@@ -163,7 +163,8 @@ class SttStopPathTest {
         }
 
         val valid = when (from) {
-            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.READY
+            is SttLifecycleState.UNINITIALISED -> newState is SttLifecycleState.INITIALISED
+            is SttLifecycleState.INITIALISED -> newState is SttLifecycleState.READY
             is SttLifecycleState.READY -> newState is SttLifecycleState.RECORDING
             is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
             is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED

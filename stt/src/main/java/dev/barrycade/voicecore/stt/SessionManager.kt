@@ -1,0 +1,58 @@
+package dev.barrycade.voicecore.stt
+
+/**
+ * Interface for PCM session management.
+ *
+ * A session represents a single recording window: [begin] starts buffering
+ * PCM frames, [finalize] returns the accumulated raw PCM, and [reset] clears
+ * the session for reuse.
+ *
+ * Production: [CaptureManager].
+ * Tests: [FakeCaptureManager].
+ *
+ * This interface exists to decouple [SpeechToText] from the concrete
+ * [CaptureManager] implementation, enabling testability without Android
+ * dependencies.
+ */
+internal interface SessionManager : AudioSource {
+
+    /**
+     * Begin a session: start buffering PCM frames into the session buffer.
+     * Previous session data is cleared.
+     *
+     * @param mode [DrainMode] that determines how the initial PCM buffer
+     *        is handled. See [DrainMode] for details.
+     */
+    fun begin(mode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME)
+
+    /**
+     * Finalize the session: return all accumulated PCM as raw concatenated
+     * FloatArray. After this call, the session buffer is cleared.
+     *
+     * Returns an empty FloatArray if no frames were accumulated since [begin].
+     */
+    fun finalize(): FloatArray
+
+    /**
+     * Reset session state: clear the session buffer and queue.
+     * Capture continues running — only the session data is discarded.
+     */
+    fun reset()
+
+    /**
+     * Shut down capture permanently. After this call, no new sessions
+     * can be started. Called from [SpeechToText.destroy].
+     */
+    fun shutdown()
+
+    /**
+     * Restart the underlying audio capture after a prior [finalize] stopped it.
+     *
+     * Called from [SpeechToText.resetForNextSession] to prepare for the next
+     * utterance. After this call, [begin] can start a new session.
+     *
+     * Safe to call multiple times — idempotent if capture is already running.
+     * Must NOT be called after [shutdown].
+     */
+    fun restartCapture()
+}

@@ -13,8 +13,8 @@ import org.junit.Test
  *
  * Validates lifecycle, error handling, and idempotency.
  *
- * Since [CaptureController] depends on Android [AudioCapture], the
- * controller runs without real frames. Tests focus on:
+ * Uses [FakeCaptureManager] which implements [AudioSource].
+ * Tests focus on:
  * - Stop/freeze ordering (stopRequestedRef)
  * - Idempotency (double start, double stop)
  * - Initial value contracts
@@ -22,7 +22,7 @@ import org.junit.Test
  */
 class ProcessorControllerTest {
 
-    private lateinit var fakeAudioSource: FakeCaptureController
+    private lateinit var fakeAudioSource: FakeCaptureManager
     private lateinit var vad: Vad
     private lateinit var accumulator: UtteranceAccumulator
     private val capturedUtterances = mutableListOf<FloatArray>()
@@ -31,7 +31,7 @@ class ProcessorControllerTest {
 
     @Before
     fun setUp() {
-        fakeAudioSource = FakeCaptureController()
+        fakeAudioSource = FakeCaptureManager()
         vad = Vad(energyThreshold = 0.01)
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,

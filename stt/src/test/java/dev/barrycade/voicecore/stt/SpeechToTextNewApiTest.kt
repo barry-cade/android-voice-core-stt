@@ -24,7 +24,8 @@ class SpeechToTextNewApiTest {
 
         speechToText = SpeechToText(
             config = RuntimeSttConfig(),
-            modelPath = "/dummy/model/path.bin"
+            modelPath = "/dummy/model/path.bin",
+            captureManager = FakeCaptureManager()
         )
 
         speechToText.setOnResultListener { lastResult = it }
