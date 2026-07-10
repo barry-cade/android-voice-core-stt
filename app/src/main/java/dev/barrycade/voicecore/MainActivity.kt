@@ -152,6 +152,7 @@ class MainActivity : ComponentActivity() {
                     appendLine("energyThreshold: " + specific.energyThreshold)
                     appendLine("maxDurationMs:   " + specific.maxDurationMs)
                     appendLine("abnormalSilenceMs: " + specific.abnormalSilenceMs)
+                    appendLine("drainMode:      " + specific.drainMode)
                 }
                 is ManualAutoSpecific -> {
                     appendLine("mode: MANUAL_AUTO")
