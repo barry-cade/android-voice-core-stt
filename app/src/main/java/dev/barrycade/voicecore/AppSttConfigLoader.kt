@@ -2,6 +2,7 @@ package dev.barrycade.voicecore
 
 import android.content.Context
 import android.util.Log
+import dev.barrycade.voicecore.stt.DrainMode
 import dev.barrycade.voicecore.stt.ManualAutoSpecific
 import dev.barrycade.voicecore.stt.ManualManualSpecific
 import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
@@ -107,12 +108,23 @@ object AppSttConfigLoader {
         val maxDurationMs = specificObj.getInt("maxDurationMs")
         val maxSilenceMs = specificObj.getInt("maxSilenceMs")
 
+        // ── Parse drainMode (optional, defaults to DRAIN_FROM_NEXT_FRAME) ─
+        val drainModeString = specificObj.optString("drainMode", "DRAIN_FROM_NEXT_FRAME")
+        val drainMode = try {
+            DrainMode.valueOf(drainModeString)
+        } catch (_: IllegalArgumentException) {
+            throw IllegalStateException(
+                "Invalid drainMode='$drainModeString'. Allowed: DRAIN_FROM_NEXT_FRAME, DRAIN_FROM_HEAD."
+            )
+        }
+
         val strategySpecific: Any = when (lifeCycleStrategy) {
             SttLifeCycleStrategy.MANUAL_MANUAL -> {
                 ManualManualSpecific(
                     energyThreshold = energyThreshold,
                     maxDurationMs = maxDurationMs,
-                    abnormalSilenceMs = maxSilenceMs
+                    abnormalSilenceMs = maxSilenceMs,
+                    drainMode = drainMode
                 )
             }
             SttLifeCycleStrategy.MANUAL_AUTO -> {

@@ -1,5 +1,6 @@
 ﻿package dev.barrycade.voicecore
 
+import dev.barrycade.voicecore.stt.DrainMode
 import dev.barrycade.voicecore.stt.ManualAutoSpecific
 import dev.barrycade.voicecore.stt.ManualManualSpecific
 import dev.barrycade.voicecore.stt.SessionResult
@@ -36,7 +37,8 @@ class NewApiSmokeTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
     }
@@ -101,7 +103,8 @@ class NewApiSmokeTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = stt.setConfig(config)

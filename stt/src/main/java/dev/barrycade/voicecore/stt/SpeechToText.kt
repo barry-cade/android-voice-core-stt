@@ -36,7 +36,14 @@ class SpeechToText internal constructor(
     private val startTrigger: StartTriggerStrategy = ManualStartTrigger(),
     private val stopTrigger: StopTriggerStrategy = ManualStopTrigger(),
     private val captureManager: SessionManager = CaptureManager(),
-    private val captureStrategy: CaptureStrategy = ManualManualStrategy()
+    private val captureStrategy: CaptureStrategy = ManualManualStrategy(
+        ManualManualSpecific(
+            energyThreshold = 0.03f,
+            maxDurationMs = 30000,
+            abnormalSilenceMs = 5000,
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
+        )
+    )
 ) {
     companion object {
         /**

@@ -28,7 +28,8 @@ class PublicApiSmokeTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         assertEquals("/dummy/path", config.ttsEngineConfig.modelPath)
@@ -69,7 +70,8 @@ class PublicApiSmokeTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)

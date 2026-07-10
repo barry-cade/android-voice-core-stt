@@ -6,29 +6,32 @@ package dev.barrycade.voicecore.stt
  *
  * ## Drain mode
  *
- * Uses [DrainMode.DRAIN_FROM_NEXT_FRAME] — the session buffer is cleared on
- * [begin], discarding any PCM that accumulated before the start signal. This
- * matches user expectation: "I pressed start, capture from now."
+ * Uses [ManualManualSpecific.drainMode] — the session buffer is cleared on
+ * [begin] and the drain behaviour is determined by the config value.
+ * Default is [DrainMode.DRAIN_FROM_NEXT_FRAME] (start fresh).
  *
  * ## Stop behaviour
  *
- * [onStopPressed] calls [CaptureManager.stopCapture] to halt the microphone
- * after the STT layer has extracted PCM via [CaptureManager.finalize].
- * Inference submission is handled by the STT layer.
+ * [onStopPressed] calls [CaptureManager.finalize] to collect accumulated PCM,
+ * then stops capture. Inference submission is handled by the STT layer.
  *
+ * @param config [ManualManualSpecific] with [energyThreshold], [maxDurationMs],
+ *        [abnormalSilenceMs], and [drainMode].
  * @see ManualManualSpecific Configuration data class for this strategy.
  */
-internal class ManualManualStrategy : CaptureStrategy {
+internal class ManualManualStrategy(
+    private val config: ManualManualSpecific
+) : CaptureStrategy {
 
-    override val drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
+    override val drainMode = config.drainMode
 
     override fun onStartPressed(sessionManager: SessionManager) {
         sessionManager.begin(drainMode)
     }
 
     override fun onStopPressed(sessionManager: SessionManager) {
-        // Stop capture after STT has extracted PCM via finalize().
-        // Inference submission handled by STT layer.
+        // Finalize PCM and stop capture — inference handled by STT layer.
+        sessionManager.finalize()
         sessionManager.stopCapture()
     }
 }

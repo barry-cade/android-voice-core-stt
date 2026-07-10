@@ -28,7 +28,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
     }
@@ -107,7 +108,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -130,6 +132,47 @@ class SttRunConfigValidatorTest {
         assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
     }
 
+    // ── drainMode validation ──────────────────────────────────────────────
+
+    @Test
+    fun manualManual_drainModeDefault_isDrainFromNextFrame() {
+        val config = validManualManualConfig()
+        val specific = config.strategySpecific as ManualManualSpecific
+        assertEquals(
+            "Default drainMode must be DRAIN_FROM_NEXT_FRAME",
+            DrainMode.DRAIN_FROM_NEXT_FRAME,
+            specific.drainMode
+        )
+    }
+
+    @Test
+    fun manualManual_drainModeFromHead_isValid() {
+        val config = validManualManualConfig().copy(
+            strategySpecific = ManualManualSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_HEAD
+            )
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNull("Valid config with DRAIN_FROM_HEAD must return null", result)
+    }
+
+    @Test
+    fun manualManual_drainModeFromNextFrame_isValid() {
+        val config = validManualManualConfig().copy(
+            strategySpecific = ManualManualSpecific(
+                energyThreshold = 0.03f,
+                maxDurationMs = 30000,
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
+            )
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNull("Valid config with DRAIN_FROM_NEXT_FRAME must return null", result)
+    }
+
     // ── Numeric constraints — MANUAL_MANUAL ───────────────────────────────
 
     @Test
@@ -138,7 +181,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -152,7 +196,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = -0.01f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -166,7 +211,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 0,
-                abnormalSilenceMs = 5000
+                abnormalSilenceMs = 5000,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -180,7 +226,8 @@ class SttRunConfigValidatorTest {
             strategySpecific = ManualManualSpecific(
                 energyThreshold = 0.03f,
                 maxDurationMs = 30000,
-                abnormalSilenceMs = 0
+                abnormalSilenceMs = 0,
+                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
             )
         )
         val result = SttRunConfigValidator.validate(config)
