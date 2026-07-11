@@ -24,23 +24,6 @@ internal class ProcessorController(
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
-    /**
-     * Optional callback invoked when the processor stops due to a terminal
-     * timeout (maxUtteranceLengthMs exceeded) or abnormal silence.
-     * The callee should clean up audio capture and lifecycle state.
-     * The [code] parameter contains the [SttReturnCode] categorising the outcome.
-     */
-    @Volatile
-    internal var onAbnormalTermination: ((code: SttReturnCode) -> Unit)? = null
-
-    /**
-     * Optional callback invoked when the processor stops due to an automatic
-     * stop trigger (e.g. auto-silence). The callee should clean up audio
-     * capture and lifecycle state.
-     */
-    @Volatile
-    internal var onAutoStop: (() -> Unit)? = null
-
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
     var vadActiveMs: Long = 0L
@@ -145,7 +128,6 @@ internal class ProcessorController(
                 SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
                 SttLogger.error("code=INTERNAL_EXCEPTION, trace=${t.stackTraceToString()}")
                 isRunning.set(false)
-                onAbnormalTermination?.invoke(SttReturnCode.ENGINE_ERROR)
                 break
             }
         }
@@ -154,9 +136,9 @@ internal class ProcessorController(
     /**
      * Stop the processor worker thread.
      *
-     * If called from the processor's own worker thread (e.g. via [onAutoStop]
-     * or [onAbnormalTermination] callback), the self-join ([Thread.join]) is
-     * a no-op because a thread cannot join itself. No behavioural issue arises.
+     * If called from the processor's own worker thread, the self-join
+     * ([Thread.join]) is a no-op because a thread cannot join itself.
+     * No behavioural issue arises.
      *
      * Idempotent: multiple calls are safe after the thread has stopped.
      */

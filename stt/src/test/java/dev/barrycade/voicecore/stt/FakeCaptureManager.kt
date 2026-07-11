@@ -66,12 +66,33 @@ internal class FakeCaptureManager(
     /**
      * Begin a session: clear buffer and start accumulating.
      *
-     * @param mode Drain mode (logged for test verification; behaviour is
-     *        identical for both modes in the fake implementation).
+     * @param mode Drain mode that determines whether pre-existing frames
+     *        in the queue are included in the session buffer.
+     *        - [DrainMode.DRAIN_FROM_HEAD]: all frames currently in the queue
+     *          are drained into the session buffer before new frames are accepted.
+     *        - [DrainMode.DRAIN_FROM_NEXT_FRAME]: pre-existing frames in the queue
+     *          are discarded. Only frames arriving after this call are accumulated.
      */
     override fun begin(mode: DrainMode) {
         sessionBuffer.clear()
         sessionActive = true
+
+        when (mode) {
+            DrainMode.DRAIN_FROM_HEAD -> {
+                // Drain all pre-existing frames into the session buffer.
+                while (true) {
+                    val frame = frameQueue.poll() ?: break
+                    for (sample in frame) {
+                        sessionBuffer.add(sample)
+                    }
+                }
+            }
+            DrainMode.DRAIN_FROM_NEXT_FRAME -> {
+                // Discard any pre-existing frames.
+                frameQueue.clear()
+            }
+        }
+
         SttLogger.pcm("[CAPTURE] FakeCaptureManager.begin() — drainMode=${mode.name}")
     }
 

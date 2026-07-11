@@ -24,6 +24,14 @@ internal class FakeWhisperModel : WhisperModel {
     var unloadCount: Int = 0
         private set
 
+    /** Number of times [warmup] was called. */
+    var warmupCount: Int = 0
+        private set
+
+    /** Last [durationMs] passed to [warmup]. */
+    var lastWarmupDurationMs: Int = 0
+        private set
+
     /** The last model path passed to [loadModel]. */
     var lastModelPath: String? = null
         private set
@@ -62,6 +70,11 @@ internal class FakeWhisperModel : WhisperModel {
         if (failOnUnload) throw RuntimeException("Fake: unloadModel failed")
         unloadCount++
         isLoaded = false
+    }
+
+    override fun warmup(durationMs: Int) {
+        warmupCount++
+        lastWarmupDurationMs = durationMs
     }
 
     /** Reset all tracking state. */

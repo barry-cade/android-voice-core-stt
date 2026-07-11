@@ -564,48 +564,7 @@ class SpeechToText internal constructor(
             debugLogging = config.debugLoggingEnabled,
             stopRequestedRef = { this@SpeechToText.stopRequested }
         )
-        processor.onAutoStop = {
-            synchronized(stateLock) {
-                shutdownPipelineOnAutoStop()
-            }
-        }
-        processor.onAbnormalTermination = { code ->
-            synchronized(stateLock) {
-                shutdownPipelineOnAbnormal(code)
-            }
-        }
         return processor
-    }
-
-    /**
-     * Shutdown pipeline on auto-stop (auto-silence silence trigger).
-     * Captures PCM from accumulator and submits inference.
-     */
-    private fun shutdownPipelineOnAutoStop() {
-        val pcm: FloatArray?
-        synchronized(stateLock) {
-            processorController = null
-            isRunning.set(false)
-            pcm = null  // Auto-stop already has PCM in processor — finalize via CaptureManager
-        }
-        // Fallback: use CaptureManager finalize for any remaining PCM.
-        val remainingPcm = captureManager.finalize()
-        if (remainingPcm.isNotEmpty()) {
-            submitInferenceAndDispatch(remainingPcm, SttReturnCode.SUCCESS, 0L, 0L, 0L)
-        }
-    }
-
-    /**
-     * Shutdown pipeline on abnormal termination.
-     * Dispatches the error code without inference.
-     */
-    private fun shutdownPipelineOnAbnormal(code: SttReturnCode) {
-        synchronized(stateLock) {
-            processorController = null
-            isRunning.set(false)
-        }
-        // PCM from accumulator was already dispatched via UtteranceHandler.
-        // No additional action needed.
     }
 
     /**
