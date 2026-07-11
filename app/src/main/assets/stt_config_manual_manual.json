@@ -3,7 +3,7 @@
   "language": "en",
   "ttsEngineConfig": {
     "energyThreshold": 0.03,
-    "preRollMs": 100,
+    "preRollMs": 0,
     "stableChunkSizeMs": 500,
     "debugLoggingEnabled": true
   },
