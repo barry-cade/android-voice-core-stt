@@ -9,5 +9,9 @@ package dev.barrycade.voicecore.stt
 internal interface WhisperModel {
     fun loadModel(modelPath: String)
     fun transcribe(samples: ShortArray): String
+    fun warmup(durationMs: Int) {
+        // Default no-op. Override in implementations that support warm-up.
+    }
     fun unloadModel()
 }
+

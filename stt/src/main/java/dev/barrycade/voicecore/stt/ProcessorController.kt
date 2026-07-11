@@ -88,10 +88,8 @@ internal class ProcessorController(
      *
      * The [FrameResult] from processChunk drives the loop:
      * - Continue: keep processing
-     * - NormalFinalize: deliver PCM, continue (manual STOP path)
-     * - AutoStop: deliver PCM, stop (auto-silence)
-     * - AbnormalTerminateWithPcm: deliver PCM to listener, stop
-     * - AbnormalTerminate: no PCM available, stop
+     * - UtteranceReady: deliver PCM to listener for transcription, keep processing
+     *   (StopStrategy decides capture boundary)
      */
     private fun runProcessingLoop() {
         while (isRunning.get()) {
@@ -133,37 +131,11 @@ internal class ProcessorController(
                         // Keep processing
                     }
 
-                    is FrameResult.NormalFinalize -> {
+                    is FrameResult.UtteranceReady -> {
                         lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                        SttLogger.pcmD("Utterance finalized with ${result.pcm.size} samples")
-                        listener.onUtteranceReady(result.pcm, result.code)
-                        isRunning.set(false)
-                        break
-                    }
-
-                    is FrameResult.AutoStop -> {
-                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                        SttLogger.pcmD("Auto-silence finalized with ${result.pcm.size} samples")
-                        SttLogger.pcm("[AUTOSTOP] auto-stop trigger fired — stopping processor")
-                        isRunning.set(false)
-                        onAutoStop?.invoke()
-                        break
-                    }
-
-                    is FrameResult.AbnormalTerminateWithPcm -> {
-                        lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
-                        SttLogger.pcm("[TERMINATION] abnormal termination with PCM: size=${result.pcm.size}, code=${result.code}")
-                        listener.onUtteranceReady(result.pcm, result.code)
-                        isRunning.set(false)
-                        onAbnormalTermination?.invoke(result.code)
-                        break
-                    }
-
-                    is FrameResult.AbnormalTerminate -> {
-                        SttLogger.pcm("[TERMINATION] abnormal termination (no PCM): code=${result.code}")
-                        isRunning.set(false)
-                        onAbnormalTermination?.invoke(result.code)
-                        break
+                        SttLogger.pcmD("Utterance ready with ${result.pcm.size} samples")
+                        listener.onUtteranceReady(result.pcm, SttReturnCode.SUCCESS)
+                        // Do NOT stop the loop — StopStrategy decides capture boundary.
                     }
                 }
             } catch (_: InterruptedException) {
@@ -211,13 +183,7 @@ internal class ProcessorController(
             if (frame == null) break
             val isSpeech = vad.isSpeech(frame)
             val result = utteranceAccumulator.processChunk(frame, isSpeech)
-            if (result is FrameResult.NormalFinalize) {
-                drainFinalized = result.pcm
-            }
-            if (result is FrameResult.AutoStop) {
-                drainFinalized = result.pcm
-            }
-            if (result is FrameResult.AbnormalTerminateWithPcm) {
+            if (result is FrameResult.UtteranceReady) {
                 drainFinalized = result.pcm
             }
             drainedCount++

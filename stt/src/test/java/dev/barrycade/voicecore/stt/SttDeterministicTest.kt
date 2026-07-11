@@ -24,10 +24,9 @@ class SttDeterministicTest {
 
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
             preRollMs = 100,
-            manualMaxDurationMs = 30000,
-            manualAbnormalSilenceMs = 5000
+            utteranceMaxDurationMs = 30000,
+            utteranceSilenceTimeoutMs = 5000
         )
 
         val silenceFrame = FloatArray(frameSize) { 0.0f }
@@ -50,9 +49,8 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             preRollMs = 100,
-            stopTrigger = ManualStopTrigger(),
-            manualMaxDurationMs = 30000,
-            manualAbnormalSilenceMs = 5000
+            utteranceMaxDurationMs = 30000,
+            utteranceSilenceTimeoutMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -72,9 +70,8 @@ class SttDeterministicTest {
     fun forceFinalize_WithOnlyPreRoll_ReturnsNonEmptyBuffer() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualMaxDurationMs = 30000,
-            manualAbnormalSilenceMs = 5000
+            utteranceMaxDurationMs = 30000,
+            utteranceSilenceTimeoutMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -88,11 +85,10 @@ class SttDeterministicTest {
     }
 
     @Test
-    fun deterministicUtterance_WithSilenceFinalization_ReturnsAbnormalTerminateWithPcm() {
+    fun deterministicUtterance_WithSilenceFinalization_ReturnsUtteranceReady() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualAbnormalSilenceMs = 40
+            utteranceSilenceTimeoutMs = 40
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -108,10 +104,9 @@ class SttDeterministicTest {
         accumulator.processChunk(silenceFrame, false)
         val result = accumulator.processChunk(silenceFrame, false)
 
-        assertTrue("Abnormal silence must return AbnormalTerminateWithPcm",
-            result is FrameResult.AbnormalTerminateWithPcm)
-        val terminate = result as FrameResult.AbnormalTerminateWithPcm
-        assertTrue("Code must be SILENCE_TIMEOUT",
-            terminate.code == SttReturnCode.SILENCE_TIMEOUT)
+        assertTrue("Silence timeout must return UtteranceReady",
+            result is FrameResult.UtteranceReady)
+        val ready = result as FrameResult.UtteranceReady
+        assertTrue("PCM must not be empty", ready.pcm.isNotEmpty())
     }
 }

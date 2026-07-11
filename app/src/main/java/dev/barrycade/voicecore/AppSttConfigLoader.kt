@@ -109,32 +109,141 @@ object AppSttConfigLoader {
             )
         }
 
-        // ── startStrategy block ───────────────────────────────────────────
+        // ── startStrategy block (validated) ───────────────────────────────
         val startObj = root.getJSONObject("startStrategy")
         val startType = startObj.getString("type")
-        val startStrategy = StartStrategyConfig(type = startType)
+        val startStrategy = when (startType) {
+            "MANUAL" -> {
+                if (startObj.has("vadStartThreshold") || startObj.has("minSpeechMs") ||
+                    startObj.has("wakeWord") || startObj.has("confidenceThreshold")
+                ) {
+                    val extra = mutableListOf<String>()
+                    if (startObj.has("vadStartThreshold")) extra.add("vadStartThreshold")
+                    if (startObj.has("minSpeechMs")) extra.add("minSpeechMs")
+                    if (startObj.has("wakeWord")) extra.add("wakeWord")
+                    if (startObj.has("confidenceThreshold")) extra.add("confidenceThreshold")
+                    throw IllegalArgumentException(
+                        "MANUAL startStrategy must not have additional fields: ${extra.joinToString(", ")}"
+                    )
+                }
+                StartStrategyConfig(type = startType)
+            }
+            "VAD_START" -> {
+                if (!startObj.has("vadStartThreshold")) {
+                    throw IllegalArgumentException(
+                        "vadStartThreshold is required for VAD_START startStrategy"
+                    )
+                }
+                if (startObj.has("wakeWord") || startObj.has("confidenceThreshold")) {
+                    val extra = mutableListOf<String>()
+                    if (startObj.has("wakeWord")) extra.add("wakeWord")
+                    if (startObj.has("confidenceThreshold")) extra.add("confidenceThreshold")
+                    throw IllegalArgumentException(
+                        "VAD_START startStrategy must not have wake-word fields: ${extra.joinToString(", ")}"
+                    )
+                }
+                if (!startObj.has("minSpeechMs")) {
+                    throw IllegalArgumentException(
+                        "minSpeechMs is required for VAD_START startStrategy"
+                    )
+                }
+                StartStrategyConfig(
+                    type = startType,
+                    vadStartThreshold = startObj.getDouble("vadStartThreshold").toFloat(),
+                    minSpeechMs = startObj.getInt("minSpeechMs")
+                )
+            }
+            "WAKEWORD" -> {
+                if (!startObj.has("wakeWord")) {
+                    throw IllegalArgumentException(
+                        "wakeWord is required for WAKEWORD startStrategy"
+                    )
+                }
+                if (!startObj.has("confidenceThreshold")) {
+                    throw IllegalArgumentException(
+                        "confidenceThreshold is required for WAKEWORD startStrategy"
+                    )
+                }
+                if (startObj.has("vadStartThreshold") || startObj.has("minSpeechMs")) {
+                    val extra = mutableListOf<String>()
+                    if (startObj.has("vadStartThreshold")) extra.add("vadStartThreshold")
+                    if (startObj.has("minSpeechMs")) extra.add("minSpeechMs")
+                    throw IllegalArgumentException(
+                        "WAKEWORD startStrategy must not have VAD fields: ${extra.joinToString(", ")}"
+                    )
+                }
+                StartStrategyConfig(
+                    type = startType,
+                    wakeWord = startObj.getString("wakeWord"),
+                    confidenceThreshold = startObj.getDouble("confidenceThreshold").toFloat()
+                )
+            }
+            else -> throw IllegalArgumentException("Unknown startStrategy type: $startType")
+        }
 
-        // ── stopStrategy block ────────────────────────────────────────────
+        // ── stopStrategy block (validated) ────────────────────────────────
         val stopObj = root.getJSONObject("stopStrategy")
         val stopType = stopObj.getString("type")
         val stopStrategy = when (stopType) {
-            "MANUAL" -> StopStrategyConfig(type = stopType)
-            "AUTO_SILENCE" -> StopStrategyConfig(
-                type = stopType,
-                silenceMs = stopObj.getInt("silenceMs"),
-                maxDurationMs = stopObj.getInt("maxDurationMs")
-            )
-            else -> throw IllegalStateException(
-                "Unsupported stopStrategy.type='$stopType'. Allowed: MANUAL, AUTO_SILENCE."
-            )
+            "MANUAL" -> {
+                if (stopObj.has("silenceMs") || stopObj.has("maxDurationMs")) {
+                    val extra = mutableListOf<String>()
+                    if (stopObj.has("silenceMs")) extra.add("silenceMs")
+                    if (stopObj.has("maxDurationMs")) extra.add("maxDurationMs")
+                    throw IllegalArgumentException(
+                        "MANUAL stopStrategy must not have additional fields: ${extra.joinToString(", ")}"
+                    )
+                }
+                StopStrategyConfig(type = stopType)
+            }
+            "AUTO_SILENCE" -> {
+                if (!stopObj.has("silenceMs")) {
+                    throw IllegalArgumentException(
+                        "silenceMs is required for AUTO_SILENCE stopStrategy"
+                    )
+                }
+                if (!stopObj.has("maxDurationMs")) {
+                    throw IllegalArgumentException(
+                        "maxDurationMs is required for AUTO_SILENCE stopStrategy"
+                    )
+                }
+                StopStrategyConfig(
+                    type = stopType,
+                    silenceMs = stopObj.getInt("silenceMs"),
+                    maxDurationMs = stopObj.getInt("maxDurationMs")
+                )
+            }
+            "DURATION" -> {
+                if (stopObj.has("silenceMs")) {
+                    throw IllegalArgumentException(
+                        "DURATION stopStrategy must not have silenceMs field"
+                    )
+                }
+                if (!stopObj.has("maxDurationMs")) {
+                    throw IllegalArgumentException(
+                        "maxDurationMs is required for DURATION stopStrategy"
+                    )
+                }
+                StopStrategyConfig(
+                    type = stopType,
+                    maxDurationMs = stopObj.getInt("maxDurationMs")
+                )
+            }
+            else -> throw IllegalArgumentException("Unknown stopStrategy type: $stopType")
         }
+
+        // ── warmup block (optional) ──────────────────────────────────────
+        val warmupEnabled = root.optBoolean("warmupEnabled", false)
+        val warmupDurationMs = root.optInt("warmupDurationMs", 0)
 
         return SttRunConfig(
             ttsEngineConfig = engineConfig,
             vadConfig = vadConfig,
             drainMode = drainMode,
             startStrategy = startStrategy,
-            stopStrategy = stopStrategy
+            stopStrategy = stopStrategy,
+            warmupEnabled = warmupEnabled,
+            warmupDurationMs = warmupDurationMs
         )
     }
 }

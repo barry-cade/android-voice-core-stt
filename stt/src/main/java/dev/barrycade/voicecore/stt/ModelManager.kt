@@ -8,14 +8,16 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * ModelManager owns the Whisper model lifecycle: load, warm-up, unload, transcribe.
+ * ModelManager owns the Whisper model lifecycle: load, unload, transcribe.
  *
- * Warm-up runs asynchronously on a dedicated single-thread executor immediately
- * after model load (triggered by [initAsync]). [isReady] reports true only after
- * both load and warm-up complete.
+ * Model load runs asynchronously on a dedicated single-thread executor
+ * (triggered by [initAsync]). [isReady] reports true after load completes.
+ *
+ * Warm-up is handled by [SpeechToText] directly via [WhisperModel.warmup],
+ * before the first PCM frame is processed.
  *
  * No PCM, VAD, STOP, AudioCapture, or lifecycle transitions.
- * Only Whisper model operations and the warm-up flag.
+ * Only Whisper model operations.
  */
 internal class ModelManager(
     private val modelPath: String,
@@ -48,12 +50,6 @@ internal class ModelManager(
     @Volatile
     var initFailed: Boolean = false
         private set
-
-    /**
-     * Tracks whether warm-up has been performed in this session.
-     * Reset to false by [unload].
-     */
-    private var warmupPerformed: Boolean = false
 
     /**
      * Idempotency guard for executor shutdown.
@@ -97,10 +93,8 @@ internal class ModelManager(
 
             if (!loadModel()) return
 
-            performWarmup()
-
             isReady = true
-            SttLogger.lifecycle("ModelManager: model loaded, warm-up complete, isReady=true")
+            SttLogger.lifecycle("ModelManager: model loaded, isReady=true")
             readyListener?.onSttReady()
             onReady()
         } catch (t: Throwable) {
@@ -152,34 +146,6 @@ internal class ModelManager(
     }
 
     /**
-     * Perform Whisper warm-up on the whisperExecutor thread.
-     * Runs after model load, before [isReady] is set to true.
-     * Idempotent: runs exactly once per session until [unload] resets the flag.
-     */
-    private fun performWarmup() {
-        if (warmupPerformed) return
-
-        val warmupStartMs = System.currentTimeMillis()
-        try {
-            whisperModel.transcribe(WARMUP_PCM)
-            val warmupMs = System.currentTimeMillis() - warmupStartMs
-            SttLogger.whisper("warmUpMs=$warmupMs")
-            warmupPerformed = true
-        } catch (t: Throwable) {
-            SttLogger.whisperE("warmup failed: ${t.message}")
-            val error = SttError(
-                category = SttErrorCategory.UNKNOWN,
-                code = SttErrorCode.INFERENCE_FAILED,
-                message = "Whisper warm-up failed: ${t.message}",
-                cause = t,
-                context = mapOf("exception" to t::class.java.simpleName)
-            )
-            sttErrorListener?.onSttError(error)
-            throw RuntimeException("Whisper warm-up failed", t)
-        }
-    }
-
-    /**
      * Transcribe PCM samples by calling the native Whisper model.
      * Thread-safe: the C++ whisper mutex in whisper_bridge.cpp serialises
      * concurrent calls.
@@ -223,7 +189,6 @@ internal class ModelManager(
     fun unload() {
         SttLogger.whisperD("Unloading model")
         whisperModel.unloadModel()
-        warmupPerformed = false
         isReady = false
     }
 
@@ -260,10 +225,5 @@ internal class ModelManager(
         if (isReady) {
             readyListener?.onSttReady()
         }
-    }
-
-    companion object {
-        /** Tiny PCM buffer for warm-up (200ms of silence at 16kHz). */
-        private val WARMUP_PCM: ShortArray = ShortArray(3200)
     }
 }

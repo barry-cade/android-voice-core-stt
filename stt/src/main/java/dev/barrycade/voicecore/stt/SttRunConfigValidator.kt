@@ -54,7 +54,35 @@ internal object SttRunConfigValidator {
         val start = config.startStrategy
 
         when (start.type) {
-            "MANUAL" -> { /* no additional params needed */ }
+            "MANUAL" -> {
+                if (start.vadStartThreshold != null || start.minSpeechMs != null ||
+                    start.wakeWord != null || start.confidenceThreshold != null
+                ) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+            }
+            "VAD_START" -> {
+                if (start.vadStartThreshold == null || start.vadStartThreshold <= 0f) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+                if (start.minSpeechMs == null || start.minSpeechMs <= 0) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+                if (start.wakeWord != null || start.confidenceThreshold != null) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+            }
+            "WAKEWORD" -> {
+                if (start.wakeWord == null || start.wakeWord.isBlank()) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+                if (start.confidenceThreshold == null || start.confidenceThreshold <= 0f) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+                if (start.vadStartThreshold != null || start.minSpeechMs != null) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+            }
             else -> return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
@@ -62,9 +90,21 @@ internal object SttRunConfigValidator {
         val stop = config.stopStrategy
 
         when (stop.type) {
-            "MANUAL" -> { /* no additional params needed */ }
+            "MANUAL" -> {
+                if (stop.silenceMs != null || stop.maxDurationMs != null) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+            }
             "AUTO_SILENCE" -> {
                 if (stop.silenceMs == null || stop.silenceMs <= 0) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+                if (stop.maxDurationMs == null || stop.maxDurationMs <= 0) {
+                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+                }
+            }
+            "DURATION" -> {
+                if (stop.silenceMs != null) {
                     return SessionResult(SttReturnCode.INVALID_CONFIG, null)
                 }
                 if (stop.maxDurationMs == null || stop.maxDurationMs <= 0) {
@@ -78,3 +118,4 @@ internal object SttRunConfigValidator {
         return null
     }
 }
+

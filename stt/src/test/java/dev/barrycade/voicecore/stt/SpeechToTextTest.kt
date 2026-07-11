@@ -1,4 +1,4 @@
-﻿package dev.barrycade.voicecore.stt
+package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -11,12 +11,6 @@ import org.junit.Test
  *
  * Validates start/stop gates, state machine transitions, queued start,
  * queued stop, destroy ordering, and error dispatch.
- *
- * Since [SpeechToText] depends on [ModelManager] (JNI via [WhisperBridge])
- * and [AudioCapture] (Android AudioRecord), these tests verify the
- * orchestration logic using direct state inspection at the pure-Kotlin
- * level. The model is created with a dummy path; Android-dependent
- * operations will fail gracefully without crashing.
  */
 class SpeechToTextTest {
 
@@ -39,10 +33,6 @@ class SpeechToTextTest {
         speechToText.setOnErrorListener { lastError = it }
     }
 
-    /**
-     * Helper: runs [action] and catches UnsatisfiedLinkError from WhisperBridge
-     * external funs when native libraries are unavailable (unit test environment).
-     */
     private fun safeRun(action: () -> Unit) {
         try {
             action()
@@ -69,13 +59,13 @@ class SpeechToTextTest {
     }
 
     @Test
-    fun start_beforeReady_queuesStartRequest() {
-        safeRun { speechToText.start() }
+    fun processStart_beforeReady_queuesStartRequest() {
+        safeRun { speechToText.processStart() }
     }
 
     @Test
-    fun start_twice_isIdempotent() {
-        safeRun { speechToText.start(); speechToText.start() }
+    fun processStart_twice_isIdempotent() {
+        safeRun { speechToText.processStart(); speechToText.processStart() }
     }
 
     @Test
@@ -99,8 +89,8 @@ class SpeechToTextTest {
     }
 
     @Test
-    fun start_after_destroy_doesNotCrash() {
-        safeRun { speechToText.destroy(); speechToText.start() }
+    fun processStart_after_destroy_doesNotCrash() {
+        safeRun { speechToText.destroy(); speechToText.processStart() }
     }
 
     @Test
@@ -117,7 +107,7 @@ class SpeechToTextTest {
 
     @Test
     fun start_stop_destroy_sequence_noErrors() {
-        safeRun { speechToText.start(); speechToText.stop(); speechToText.destroy() }
+        safeRun { speechToText.processStart(); speechToText.stop(); speechToText.destroy() }
     }
 
     @Test

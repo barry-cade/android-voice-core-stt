@@ -29,8 +29,7 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
                     "SttTimingSnapshot",
                     "SttLifecycleState",
                     "SttReadyListener",
-                    "StartTriggerStrategy",
-                    "StopTriggerStrategy",
+
                     "SttReturnCode",
                     "SessionResult",
                     "TtsEngineConfig",

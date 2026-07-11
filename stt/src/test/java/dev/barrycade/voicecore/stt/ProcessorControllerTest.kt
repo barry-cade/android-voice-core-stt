@@ -1,4 +1,4 @@
-﻿package dev.barrycade.voicecore.stt
+package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,11 +14,6 @@ import org.junit.Test
  * Validates lifecycle, error handling, and idempotency.
  *
  * Uses [FakeCaptureManager] which implements [AudioSource].
- * Tests focus on:
- * - Stop/freeze ordering (stopRequestedRef)
- * - Idempotency (double start, double stop)
- * - Initial value contracts
- * - Error-free operation under stress
  */
 class ProcessorControllerTest {
 
@@ -35,13 +30,8 @@ class ProcessorControllerTest {
         vad = Vad(energyThreshold = 0.01)
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            config = RuntimeSttConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
-                manualStopMode = true
-            )
+            utteranceSilenceTimeoutMs = 500,
+            utteranceMaxDurationMs = 30000
         )
         capturedUtterances.clear()
         listener = object : UtteranceListener {
@@ -65,7 +55,7 @@ class ProcessorControllerTest {
         )
     }
 
-    // ── Initial value contracts (negative: must NOT be garbage) ──────────
+    // -- Initial value contracts ---------------------------------------------
 
     @Test
     fun vadActiveMs_initialValue_isZero() {
@@ -86,7 +76,7 @@ class ProcessorControllerTest {
         assertEquals(0f, controller.vadConfidence, 0.001f)
     }
 
-    // ── Idempotency / no-op tests (negative: must survive misuse) ────────
+    // -- Idempotency / no-op tests -------------------------------------------
 
     @Test
     fun start_twice_isNoop() {
@@ -119,7 +109,7 @@ class ProcessorControllerTest {
         }
     }
 
-    // ── Stop-and-finalize (negative: empty accumulator path) ─────────────
+    // -- Stop-and-finalize (negative: empty accumulator path) ----------------
 
     @Test
     fun stopAndFinalize_emptyAccumulator_returnsNull() {
@@ -130,7 +120,7 @@ class ProcessorControllerTest {
         assertNull("stopAndFinalize with empty accumulator must return null", pcm)
     }
 
-    // ── Accessor tests (must never return null / crash) ──────────────────
+    // -- Accessor tests ------------------------------------------------------
 
     @Test
     fun drainRemainingFrames_emptyQueue_returnsNull() {
@@ -144,9 +134,8 @@ class ProcessorControllerTest {
         fakeAudioSource.addSilenceFrames(5, 320)
         fakeAudioSource.addSpeechFrames(10, 320)
         val controller = createController()
-        // Pre-load some frames without starting the processor
         val result = controller.drainRemainingFrames()
-        // No crash is the assertion — may or may not produce PCM
+        // No crash is the assertion
     }
 
     @Test
@@ -155,7 +144,7 @@ class ProcessorControllerTest {
         assertNotNull("rmsSampler must be initialized", controller.rmsSampler)
     }
 
-    // ── Reset timing (negative: repeat reset is stable) ──────────────────
+    // -- Reset timing --------------------------------------------------------
 
     @Test
     fun resetVadActiveMs_repeatedly_isStable() {
@@ -167,24 +156,23 @@ class ProcessorControllerTest {
         }
     }
 
-    // ── StopRequested freeze (negative: must skip processing) ────────────
+    // -- StopRequested freeze ------------------------------------------------
 
     @Test
     fun stopRequestedTrue_startDoesNotProcess() {
         stopRequested = true
         val controller = createController()
         controller.start()
-        // No crash is the assertion
         controller.stop()
     }
 
-    // ── Pipeline tests with FakeCaptureController ───────────────────────
+    // -- Pipeline tests with FakeCaptureController ---------------------------
 
     @Test
     fun process_speechFrame_triggersListener() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(30, 320)
+        fakeAudioSource.addSilenceFrames(15, 320)
         val controller = createController()
         controller.start()
         Thread.sleep(500)
@@ -197,9 +185,9 @@ class ProcessorControllerTest {
 
     @Test
     fun process_multipleSpeechFrames_producesUtterance() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(40, 320)   // speech: 800ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(40, 320)
+        fakeAudioSource.addSilenceFrames(15, 320)
         val controller = createController()
         controller.start()
         Thread.sleep(600)
@@ -207,8 +195,8 @@ class ProcessorControllerTest {
         Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
-        assertNotNull("stopAndFinalize must return PCM after speech", pcm)
-        assertTrue("utterance PCM must be non-empty", pcm!!.isNotEmpty())
+        assertNotNull(pcm)
+        assertTrue(pcm!!.isNotEmpty())
     }
 
     @Test
@@ -221,17 +209,14 @@ class ProcessorControllerTest {
         Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
-        // Pre-roll accumulates silence samples, so stopAndFinalize returns PCM
-        // even for silence-only recording. This is expected: user presses STOP
-        // and gets whatever was accumulated.
-        assertNotNull("silence-only must still return PCM from stopAndFinalize (pre-roll accumulates)", pcm)
+        assertNotNull(pcm)
     }
 
     @Test
     fun process_speechThenSilence_accumulatesThenFinalizes() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(30, 320)
+        fakeAudioSource.addSilenceFrames(15, 320)
         val controller = createController()
         controller.start()
         Thread.sleep(600)
@@ -239,14 +224,14 @@ class ProcessorControllerTest {
         Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
-        assertNotNull("stopAndFinalize must return PCM after speech then silence", pcm)
+        assertNotNull(pcm)
     }
 
     @Test
     fun stopAndFinalize_withFrame_returnsPcm() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(30, 320)   // speech: 600ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // 300ms silence
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(30, 320)
+        fakeAudioSource.addSilenceFrames(15, 320)
         val controller = createController()
         controller.start()
         Thread.sleep(500)
@@ -254,24 +239,21 @@ class ProcessorControllerTest {
         Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
-        assertNotNull("stopAndFinalize must return PCM after speech frames", pcm)
-        assertTrue("returned PCM must be non-empty", pcm!!.isNotEmpty())
+        assertNotNull(pcm)
+        assertTrue(pcm!!.isNotEmpty())
     }
 
     @Test
     fun process_stopRequestedDuringProcessing_skipsFrame() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(10, 320)   // speech: 200ms
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(10, 320)
         val controller = createController()
         controller.start()
-        // Set stopRequested while processor is running
         stopRequested = true
         Thread.sleep(100)
-        // Additional frames should be ignored
         fakeAudioSource.addSpeechFrames(15, 320)
         Thread.sleep(200)
         controller.stop()
-        // No crash — the freeze may produce utterance from pre-freeze frames
     }
 
     @Test
@@ -279,15 +261,14 @@ class ProcessorControllerTest {
         fakeAudioSource.failOnStart = true
         val controller = createController()
         controller.start()
-        // start() should not crash when AudioSource.startCapture() fails
         controller.stop()
     }
 
     @Test
     fun process_rapidFrameInjection_noCrash() {
-        fakeAudioSource.addSilenceFrames(5, 320)   // pre-roll: 100ms
-        fakeAudioSource.addSpeechFrames(60, 320)   // speech: 1200ms
-        fakeAudioSource.addSilenceFrames(15, 320)  // silence: 300ms
+        fakeAudioSource.addSilenceFrames(5, 320)
+        fakeAudioSource.addSpeechFrames(60, 320)
+        fakeAudioSource.addSilenceFrames(15, 320)
         val controller = createController()
         controller.start()
         Thread.sleep(800)
@@ -295,6 +276,6 @@ class ProcessorControllerTest {
         Thread.sleep(200)
         controller.stop()
         val pcm = controller.stopAndFinalize()
-        assertNotNull("rapid frame injection must produce PCM", pcm)
+        assertNotNull(pcm)
     }
 }

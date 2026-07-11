@@ -6,10 +6,6 @@ import org.junit.Test
 
 /**
  * Tests for [RuntimeSttConfig] validation.
- *
- * Removed: manualManual/manualAuto-specific range tests since those fields
- * are now consolidated into [manualStopMode], [autoSilenceMs], [autoMaxDurationMs].
- * Validation now covers energy, preRollMs, and stableChunkSizeMs only.
  */
 class RuntimeSttConfigTest {
 
@@ -79,8 +75,7 @@ class RuntimeSttConfigTest {
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
-    // ── fromSttRunConfig smoke test ──────────────────────────────────────
-
+    // -- fromSttRunConfig smoke test -----------------------------------------
     @Test
     fun fromSttRunConfig_manualStop_populatesCorrectly() {
         val runConfig = SttRunConfig(
@@ -102,7 +97,8 @@ class RuntimeSttConfigTest {
         assertEquals(0.03f, runtime.energyThreshold, 0.001f)
         assertEquals(100, runtime.preRollMs)
         assertEquals(500, runtime.stableChunkSizeMs)
-        assertEquals(true, runtime.manualStopMode)
+        assertEquals(true, runtime.startStrategy is ManualStart)
+        assertEquals(true, runtime.stopStrategy is ManualStop)
     }
 
     @Test
@@ -130,7 +126,8 @@ class RuntimeSttConfigTest {
         assertEquals(0.05f, runtime.energyThreshold, 0.001f)
         assertEquals(200, runtime.preRollMs)
         assertEquals(600, runtime.stableChunkSizeMs)
-        assertEquals(false, runtime.manualStopMode)
+        assertEquals(true, runtime.startStrategy is ManualStart)
+        assertEquals(true, runtime.stopStrategy is AutoSilenceStop)
         assertEquals(1500, runtime.autoSilenceMs)
         assertEquals(40000, runtime.autoMaxDurationMs)
     }

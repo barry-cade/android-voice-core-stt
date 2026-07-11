@@ -60,7 +60,8 @@ class ModelManagerTest {
 
         assertTrue("model must be ready after init", modelManager.isReady)
         assertEquals("loadModel must be called exactly once", 1, fakeModel.loadCount)
-        assertEquals("transcribe (warm-up) must be called", 1, fakeModel.transcribeCount)
+        // Warm-up is handled by SpeechToText, not ModelManager.
+        assertEquals("transcribe must not be called during init", 0, fakeModel.transcribeCount)
         assertEquals("model path must match", "/test/model.bin", fakeModel.lastModelPath)
         assertTrue("ready listener must fire", readyFired)
         assertFalse("initFailed must be false", modelManager.initFailed)
@@ -85,20 +86,20 @@ class ModelManagerTest {
         assertFalse("ready listener must not fire", readyFired)
     }
 
-    // ── Negative: transcribe (warm-up) failure ──────────────────────────
+    // ── Negative: transcribe failure (no longer relevant — warm-up removed) ──
 
     @Test
-    fun initAsync_warmupFails_setsInitFailed() {
+    fun initAsync_transcribeFailure_doesNotAffectInit() {
         fakeModel.failOnTranscribe = true
         modelManager.initAsync()
-        Thread.sleep(100)
+        waitForReady()
 
-        assertTrue("initFailed must be true after warm-up failure", modelManager.initFailed)
-        assertFalse("model must not be ready after warm-up failure", modelManager.isReady)
+        // Warm-up is handled by SpeechToText, not ModelManager.
+        // ModelManager only loads the model — transcribe failures are irrelevant here.
+        assertFalse("initFailed must remain false", modelManager.initFailed)
+        assertTrue("model must be ready", modelManager.isReady)
         assertEquals("loadModel must be called", 1, fakeModel.loadCount)
-        // failOnTranscribe=true causes transcribe to throw before incrementing counter
-        assertEquals("transcribe must be attempted but failed", 0, fakeModel.transcribeCount)
-        assertFalse("ready listener must not fire", readyFired)
+        assertTrue("ready listener must fire", readyFired)
     }
 
     // ── Negative: forceWhisperLoadFailure hook ──────────────────────────
@@ -188,7 +189,8 @@ class ModelManagerTest {
         // transcribe on unloaded model — should still go through to WhisperModel
         val result = modelManager.transcribe(ShortArray(100))
         assertNotNull(result)
-        assertEquals("transcribeCount must increment", 2, fakeModel.transcribeCount)
+        // No warm-up in ModelManager; transcribe method called directly.
+        assertEquals("transcribeCount must increment to 1", 1, fakeModel.transcribeCount)
     }
 
     // ── Negative: transcribe with empty PCM ─────────────────────────────
@@ -200,8 +202,9 @@ class ModelManagerTest {
 
         val result = modelManager.transcribe(ShortArray(0))
         assertNotNull("transcribe must not return null for empty PCM", result)
+        // No warm-up in ModelManager; transcribe is called directly once.
         assertEquals("transcribe must be called even with PCM empty",
-            2, fakeModel.transcribeCount)  // 1 for warmup + 1 for this
+            1, fakeModel.transcribeCount)
     }
 
     // ── Negative: setReadyListener after ready ──────────────────────────

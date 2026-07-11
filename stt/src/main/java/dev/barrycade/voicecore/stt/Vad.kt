@@ -8,12 +8,23 @@ package dev.barrycade.voicecore.stt
  * Hysteresis: once speech is detected, the threshold drops by 30% to prevent
  * rapid on/off flickering at the edges of speech segments.
  *
+ * Duration tracking:
+ *   - [speechDurationMs]: total ms of consecutive speech detection since the
+ *     last silence transition. Resets when silence is detected.
+ *   - [silenceMs]: total ms of consecutive silence since the last speech frame.
+ *     Resets when speech is detected.
+ *
  * Diagnostic output:
  *   - [vadConfidence]: Float in 0.0..1.0 derived from energy-to-threshold proximity
  *     and consecutive speech frame count. Diagnostic only — does not affect VAD decisions.
+ *
+ * @param energyThreshold RMS energy threshold for speech detection.
+ * @param frameDurationMs Duration of a single frame in ms (default 10ms for 160-sample frames at 16kHz).
+ *        Used to accumulate [speechDurationMs] and [silenceMs].
  */
 internal class Vad(
-    private val energyThreshold: Double = 0.005
+    private val energyThreshold: Double = 0.005,
+    private val frameDurationMs: Int = 10
 ) {
     internal var debugLogging: Boolean = false
 
@@ -22,6 +33,22 @@ internal class Vad(
 
     /** Consecutive speech frames since last silence transition. */
     private var consecutiveSpeechFrames: Int = 0
+
+    /**
+     * Total ms of consecutive speech detection.
+     * Resets to 0 when a silence frame is detected.
+     */
+    @Volatile
+    internal var speechDurationMs: Int = 0
+        private set
+
+    /**
+     * Total ms of consecutive silence since the last speech frame.
+     * Resets to 0 when a speech frame is detected.
+     */
+    @Volatile
+    internal var silenceMs: Int = 0
+        private set
 
     /**
      * VAD confidence in [0.0, 1.0].
@@ -56,6 +83,15 @@ internal class Vad(
 
         val speech = energy >= activeThreshold.toFloat()
 
+        // ── Update duration counters ─────────────────────────────────────
+        if (speech) {
+            speechDurationMs += frameDurationMs
+            silenceMs = 0
+        } else {
+            silenceMs += frameDurationMs
+            speechDurationMs = 0
+        }
+
         // ── Update confidence (diagnostic only) ──────────────────────────
         if (speech) {
             consecutiveSpeechFrames += 1
@@ -82,4 +118,15 @@ internal class Vad(
         isCurrentlySpeech = speech
         return speech
     }
+
+    /** Reset all duration counters. Called between sessions. */
+    fun reset() {
+        speechDurationMs = 0
+        silenceMs = 0
+        consecutiveSpeechFrames = 0
+        isCurrentlySpeech = false
+        lastFrameEnergy = 0f
+        vadConfidence = 0f
+    }
 }
+

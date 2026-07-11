@@ -1,4 +1,4 @@
-﻿package dev.barrycade.voicecore.stt
+package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -10,8 +10,7 @@ class UtteranceAccumulatorTest {
     fun emitsUtteranceAfterSilence() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualAbnormalSilenceMs = 40  // 4 frames of 10ms = finalize
+            utteranceSilenceTimeoutMs = 40  // 4 frames of 10ms = finalize
         )
         val speechFrame = FloatArray(160) { 0.2f }  // 10ms at 16kHz
         val silenceFrame = FloatArray(160) { 0.0f }
@@ -26,36 +25,27 @@ class UtteranceAccumulatorTest {
             accumulator.processFrame(speechFrame)
         }
 
-        // Four silence frames (40ms total) should trigger abnormal silence fallback.
-        // Each frame is 10ms, so abnormalSilenceFramesFor(10) = 40 / 10 = 4.
-        // Frame 1: silenceFrameCount = 1 (< 4), returns Continue
-        // Frame 2: silenceFrameCount = 2 (< 4), returns Continue
-        // Frame 3: silenceFrameCount = 3 (< 4), returns Continue
-        // Frame 4: silenceFrameCount = 4 >= 4, triggers handleAbnormalSilence -> AbnormalTerminate
+        // Four silence frames (40ms total) should trigger silence timeout.
         for (i in 0 until 3) {
             accumulator.processFrame(silenceFrame)
         }
 
-        // After handleAbnormalSilence, processFrame returns AbnormalTerminateWithPcm
+        // After handleUtteranceReady, processFrame returns UtteranceReady
         val result = accumulator.processFrame(silenceFrame)
-        assertTrue("Abnormal silence must return AbnormalTerminateWithPcm",
-            result is FrameResult.AbnormalTerminateWithPcm)
-        val terminate = result as FrameResult.AbnormalTerminateWithPcm
-        assertTrue("Code must be SILENCE_TIMEOUT",
-            terminate.code == SttReturnCode.SILENCE_TIMEOUT)
-        assertTrue("PCM must not be empty", terminate.pcm.isNotEmpty())
+        assertTrue("Silence timeout must return UtteranceReady",
+            result is FrameResult.UtteranceReady)
+        val ready = result as FrameResult.UtteranceReady
+        assertTrue("PCM must not be empty", ready.pcm.isNotEmpty())
     }
 
     @Test
     fun doesNotEmitUtteranceOnSilenceOnly() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualAbnormalSilenceMs = 5000
+            utteranceSilenceTimeoutMs = 5000
         )
         val silenceFrame = FloatArray(160) { 0.0f }
 
-        // Even after pre-roll (100ms = 10 frames at 10ms), silence should not trigger
         for (i in 0 until 100) {
             val result = accumulator.processFrame(silenceFrame)
             assertTrue("Must return Continue on silence only (frame $i)",
@@ -67,13 +57,11 @@ class UtteranceAccumulatorTest {
     fun forceFinalizeReturnsBufferedContent() {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
-            stopTrigger = ManualStopTrigger(),
-            manualMaxDurationMs = 4000,
-            manualAbnormalSilenceMs = 5000
+            utteranceSilenceTimeoutMs = 5000,
+            utteranceMaxDurationMs = 4000
         )
         val speechFrame = FloatArray(160) { 0.2f }
 
-        // Pre-roll is 100ms = 10 frames of 10ms. Pass pre-roll first, then send speech.
         for (i in 0 until 10) {
             accumulator.processFrame(speechFrame)
         }
@@ -81,16 +69,13 @@ class UtteranceAccumulatorTest {
         accumulator.processFrame(speechFrame)
 
         val result = accumulator.forceFinalize()
-        assertNotNull("forceFinalize must return buffered content", result)
-        assertTrue("forceFinalize result must not be empty", result!!.isNotEmpty())
+        assertNotNull(result)
+        assertTrue(result!!.isNotEmpty())
     }
 
     @Test
     fun forceFinalizeReturnsNullWhenEmpty() {
-        val accumulator = UtteranceAccumulator(
-            sampleRate = 16000,
-            stopTrigger = ManualStopTrigger()
-        )
+        val accumulator = UtteranceAccumulator(sampleRate = 16000)
         val result = accumulator.forceFinalize()
         assertNull("forceFinalize must return null when no frames were ever fed", result)
     }

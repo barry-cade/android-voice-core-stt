@@ -7,65 +7,56 @@ package dev.barrycade.voicecore.stt
  *
  * The accumulator follows a simple linear flow:
  *
- *   preRoll → (speech detection) → speech accumulation → silence accumulation → finalize
+ *   preRoll → (speech detection) → speech accumulation → silence accumulation → utterance ready
  *
- * ## Termination Rules
+ * ## Responsibility
  *
- * ### Manual/manual mode (stopStrategy = "manual")
- * A. User presses STOP → finalizeUtterance() → FrameResult.NormalFinalize
- * B. Silence >= abnormalSilenceMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.SILENCE_TIMEOUT, pcm)
- * C. Duration >= maxDurationMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
+ * The accumulator manages **utterance boundaries only** — it decides when a complete
+ * utterance has been accumulated. Capture (session) boundaries are the exclusive
+ * responsibility of [StopStrategy].
  *
- * ### Manual/auto mode (stopStrategy = "autoSilence")
- * A. Silence >= autoSilenceMs -> normalize -> FrameResult.AutoStop(pcm)
- * B. Duration >= maxDurationMs -> FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
- * C. No abnormal silence rule in this mode.
+ * The accumulator NEVER:
+ * - Checks strategy types (manual vs auto)
+ * - Drives capture stop
+ * - Calls sessionManager.end()
+ * - Produces result types other than [FrameResult.Continue] and
+ *   [FrameResult.UtteranceReady]
  *
  * ## FrameResult
  *
- * Each call to [processChunk] returns a [FrameResult] sealed type that
- * encodes the next action for the caller (ProcessorController):
+ * Each call to [processChunk] returns a [FrameResult] sealed type:
  *
  * - [FrameResult.Continue]: keep processing frames
- * - [FrameResult.NormalFinalize]: PCM ready for transcription (manual STOP)
- * - [FrameResult.AutoStop]: PCM ready, caller must stop the loop (auto-silence)
- * - [FrameResult.AbnormalTerminateWithPcm]: PCM preserved, caller must run inference
- * - [FrameResult.AbnormalTerminate]: PCM was empty or discarded, do NOT call Whisper
+ * - [FrameResult.UtteranceReady]: complete utterance buffer ready for transcription
+ *   (caller should transcribe but NOT stop the session — [StopStrategy] decides that)
  *
- * ## No hysteresis, no minimum speech duration, no timing guards
+ * ## No hysteresis, no minimum speech duration
  *
- * SilenceFrameCount is the sole threshold. Speech -> silence -> threshold -> finalize.
+ * SilenceFrameCount is the sole threshold for utterance finalization.
+ * Speech -> silence -> threshold -> finalize.
  * No minimum speech duration, no trailing silence padding, no stable-block alignment.
  *
- * Testing hook: internal [forceTimeout] flag causes immediate max-utterance finalization
+ * Testing hook: internal [forceTimeout] flag causes immediate utterance finalization
  * the next time speech is detected.
  */
 internal class UtteranceAccumulator(
     private val sampleRate: Int = 16000,
     private val preRollMs: Int = 100,
     private val vad: Vad = Vad(),
-    internal var stopTrigger: StopTriggerStrategy? = null,
-    // ── Stop-strategy-specific timing fields ────────────────────────────
-    private val manualMaxDurationMs: Int = 30000,
-    private val manualAbnormalSilenceMs: Int = 5000,
-    private val autoSilenceMs: Int = 1200,
-    private val autoMaxDurationMs: Int = 30000,
+    private val utteranceMaxDurationMs: Int = 30000,
+    private val utteranceSilenceTimeoutMs: Int = 5000,
     private val debugLoggingEnabled: Boolean = false
 ) {
     constructor(
         config: RuntimeSttConfig,
         sampleRate: Int = 16000,
-        vad: Vad = Vad(config),
-        stopTrigger: StopTriggerStrategy? = null
+        vad: Vad = Vad(config)
     ) : this(
         sampleRate = sampleRate,
         preRollMs = config.preRollMs,
         vad = vad,
-        stopTrigger = stopTrigger,
-        manualMaxDurationMs = config.autoMaxDurationMs,
-        manualAbnormalSilenceMs = config.stableChunkSizeMs,
-        autoSilenceMs = config.autoSilenceMs,
-        autoMaxDurationMs = config.autoMaxDurationMs,
+        utteranceMaxDurationMs = config.autoMaxDurationMs,
+        utteranceSilenceTimeoutMs = config.stableChunkSizeMs,
         debugLoggingEnabled = config.debugLoggingEnabled
     )
 
@@ -82,19 +73,6 @@ internal class UtteranceAccumulator(
      */
     internal var onSpeechStart: (() -> Unit)? = null
 
-    /**
-     * Max utterance length is mode-specific:
-     * - Manual/manual: uses [manualManualMaxDurationMs]
-     * - Manual/auto:   uses [manualAutoMaxDurationMs]
-     */
-    private val effectiveMaxUtteranceLengthMs: Int by lazy {
-        when (stopTrigger) {
-            is ManualStopTrigger -> manualMaxDurationMs
-            is AutoSilenceStopTrigger -> autoMaxDurationMs
-            else -> manualMaxDurationMs
-        }
-    }
-
     // Buffer that accumulates PCM for the current utterance.
     private val speechAccumulator = mutableListOf<Float>()
     private var speechActive = false
@@ -108,8 +86,8 @@ internal class UtteranceAccumulator(
     private var silenceFrameCount = 0
 
     /**
-     * Total accumulated duration since utterance start, including both speech and silence ms.
-     * Incremented every frame -- used for the max-duration termination check.
+     * Total accumulated duration since utterance start (ms).
+     * Includes both speech and silence. Incremented every frame.
      * Duration starts counting when speech is first detected (speechActive = true).
      */
     private var durationMs = 0
@@ -141,17 +119,6 @@ internal class UtteranceAccumulator(
         appendSamples(frame)
 
         if (speechActive) {
-            // ══════════════════════════════════════════════════════════════
-            // CORRECT ORDER -- do not reorder
-            // ══════════════════════════════════════════════════════════════
-            //
-            // 1. Update silence counter (reset BEFORE termination checks)
-            // 2. Update duration
-            // 3. Compute threshold frames once for this frame
-            // 4. Run termination checks (abnormal silence, auto-silence, max duration)
-            // 5. Continue
-            // ══════════════════════════════════════════════════════════════
-
             // ── 1. Update silence counter ────────────────────────────────
             if (isSpeechFrame) {
                 silenceFrameCount = 0
@@ -164,31 +131,20 @@ internal class UtteranceAccumulator(
             // ── 2. Update duration ───────────────────────────────────────
             durationMs += frameDurationMs
 
-            // ── 3. Compute threshold frames once per frame ───────────────
-            val abnormalSilenceFrames =
-                manualAbnormalSilenceMs / frameDurationMs
-            val autoSilenceFrames =
-                autoSilenceMs / frameDurationMs
+            // ── 3. Utterance boundary checks ─────────────────────────────
+            val silenceTimeoutFrames = utteranceSilenceTimeoutMs / frameDurationMs
 
-            // ── 4. Termination checks (correct order) ────────────────────
-            // 4a. Manual/manual: abnormal silence
-            if (stopTrigger is ManualStopTrigger &&
-                silenceFrameCount >= abnormalSilenceFrames) {
-                return handleAbnormalSilence()
+            // Check silence timeout within utterance.
+            if (silenceFrameCount >= silenceTimeoutFrames) {
+                return handleUtteranceReady()
             }
 
-            // 4b. Manual/auto: auto-silence
-            if (stopTrigger is AutoSilenceStopTrigger &&
-                silenceFrameCount >= autoSilenceFrames) {
-                return handleAutoSilenceFinalize()
+            // Check max utterance duration (safety limit).
+            if (durationMs >= utteranceMaxDurationMs) {
+                return handleUtteranceReady()
             }
 
-            // 4c. Max duration (both modes)
-            if (durationMs >= effectiveMaxUtteranceLengthMs) {
-                return handleMaxUtteranceTimeout()
-            }
-
-            // ── 5. Debug logging ─────────────────────────────────────────
+            // ── 4. Debug logging ─────────────────────────────────────────
             if (debugLoggingEnabled) {
                 android.util.Log.i("STT",
                     "[DEBUG] speech=$isSpeechFrame silenceFrames=$silenceFrameCount " +
@@ -266,7 +222,7 @@ internal class UtteranceAccumulator(
                 context = mapOf("forcedFailure" to "forceTimeout")
             )
             sttErrorListener?.onSttError(error)
-            return handleMaxUtteranceTimeout()
+            return handleUtteranceReady()
         }
         return FrameResult.Continue
     }
@@ -281,41 +237,12 @@ internal class UtteranceAccumulator(
     }
 
     /**
-     * Handle auto-silence finalization (manual/auto mode):
-     * Returns [FrameResult.AutoStop] with accumulated PCM.
+     * Handle utterance ready: finalize PCM, return [FrameResult.UtteranceReady].
      */
-    private fun handleAutoSilenceFinalize(): FrameResult {
-        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${autoSilenceMs}ms, durationMs=$durationMs")
-        return FrameResult.AutoStop(finalizeUtterancePcm())
-    }
-
-    /**
-     * Handle max utterance timeout: finalize PCM, return [FrameResult.AbnormalTerminateWithPcm].
-     * PCM is preserved so inference can still produce a transcript for whatever
-     * was captured before the timeout.
-     */
-    private fun handleMaxUtteranceTimeout(): FrameResult {
-        SttLogger.pcm("max utterance exceeded: durationMs=$durationMs, limit=$effectiveMaxUtteranceLengthMs")
-
+    private fun handleUtteranceReady(): FrameResult {
         val pcm = finalizeUtterancePcm()
-
-        SttLogger.pcm("[TIMEOUT] abnormal termination with PCM: size=${pcm.size}, code=UTTERANCE_TOO_LONG")
-        return FrameResult.AbnormalTerminateWithPcm(SttReturnCode.UTTERANCE_TOO_LONG, pcm)
-    }
-
-    /**
-     * Handle abnormal silence (manual/manual mode): finalize PCM,
-     * return [FrameResult.AbnormalTerminateWithPcm].
-     * PCM is preserved so inference can still produce a transcript for
-     * whatever was captured before silence timeout.
-     */
-    private fun handleAbnormalSilence(): FrameResult {
-        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualAbnormalSilenceMs}")
-
-        val pcm = finalizeUtterancePcm()
-
-        SttLogger.pcm("[ABNORMAL_SILENCE] abnormal termination with PCM: size=${pcm.size}, code=SILENCE_TIMEOUT")
-        return FrameResult.AbnormalTerminateWithPcm(SttReturnCode.SILENCE_TIMEOUT, pcm)
+        SttLogger.pcm("[UTTERANCE] utterance ready: size=${pcm.size}, durationMs=$durationMs")
+        return FrameResult.UtteranceReady(pcm)
     }
 
     fun processFrame(frame: FloatArray): FrameResult = processChunk(frame, vad.isSpeech(frame))
@@ -352,7 +279,6 @@ internal class UtteranceAccumulator(
 
     /**
      * resetForNextUtterance clears all state for the next utterance cycle.
-     * Used in Streaming Mode after an utterance has been transcribed and dispatched.
      * Delegates to [reset] then logs the stream reset.
      */
     fun resetForNextUtterance() {
