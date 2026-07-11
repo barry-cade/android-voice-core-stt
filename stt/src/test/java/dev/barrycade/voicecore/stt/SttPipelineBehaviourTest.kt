@@ -67,7 +67,7 @@ class SttPipelineBehaviourTest {
             preRollMs = PRE_ROLL_MS,
             vad = vad,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 40
+            manualAbnormalSilenceMs = 40
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.3f }
@@ -75,7 +75,7 @@ class SttPipelineBehaviourTest {
 
         // ── Phase 1: Pre-roll (100 ms = 10 frames) ──────────────────────
         for (i in 0 until PRE_ROLL_FRAMES) {
-            val result = accumulator.processFrame(speechFrame)
+            val result = accumulator.processChunk(speechFrame, true)
             assertTrue(
                 "Pre-roll frame $i must return Continue, got ${result.javaClass.simpleName}",
                 result is FrameResult.Continue
@@ -84,7 +84,7 @@ class SttPipelineBehaviourTest {
 
         // ── Phase 2: Accumulate speech (350 ms = 35 frames) ──────────────
         for (i in 0 until 35) {
-            val result = accumulator.processFrame(speechFrame)
+            val result = accumulator.processChunk(speechFrame, true)
             assertTrue(
                 "Speech frame $i must return Continue, got ${result.javaClass.simpleName}",
                 result is FrameResult.Continue
@@ -95,7 +95,7 @@ class SttPipelineBehaviourTest {
         // abnormalSilenceMs = 40 ms = 4 frames at 10 ms/frame
         // Frames 1-3: Continue
         for (i in 0 until 3) {
-            val result = accumulator.processFrame(silenceFrame)
+            val result = accumulator.processChunk(silenceFrame, false)
             assertTrue(
                 "Silence frame $i must return Continue, got ${result.javaClass.simpleName}",
                 result is FrameResult.Continue
@@ -103,7 +103,7 @@ class SttPipelineBehaviourTest {
         }
 
         // Frame 4: AbnormalTerminateWithPcm (silence threshold reached)
-        val result = accumulator.processFrame(silenceFrame)
+        val result = accumulator.processChunk(silenceFrame, false)
 
         assertTrue(
             "Silence threshold must produce AbnormalTerminateWithPcm, " +
@@ -154,19 +154,19 @@ class SttPipelineBehaviourTest {
             sampleRate = SAMPLE_RATE,
             preRollMs = PRE_ROLL_MS,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = DEFAULT_ABNORMAL_SILENCE_MS
+            manualAbnormalSilenceMs = DEFAULT_ABNORMAL_SILENCE_MS
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.3f }
 
         // ── Phase 1: Pre-roll ────────────────────────────────────────────
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 2: Accumulate speech frames ────────────────────────────
         for (i in 0 until 35) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 3: STOP (forceFinalize) ────────────────────────────────
@@ -196,7 +196,7 @@ class SttPipelineBehaviourTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 40  // 4 frames of 10ms
+            manualAbnormalSilenceMs = 40  // 4 frames of 10ms
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.3f }
@@ -204,18 +204,18 @@ class SttPipelineBehaviourTest {
 
         // ── Phase 1: Pre-roll ────────────────────────────────────────────
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 2: Accumulate speech ───────────────────────────────────
         for (i in 0 until 35) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 3: Silence until abnormal silence threshold ────────────
         // abnormalSilenceMs=40, frame duration=10ms, so 4 frames of silence.
         for (i in 0 until 3) {
-            val result = accumulator.processFrame(silenceFrame)
+            val result = accumulator.processChunk(silenceFrame, false)
             assertTrue(
                 "Silence frame $i must return Continue",
                 result is FrameResult.Continue
@@ -223,7 +223,7 @@ class SttPipelineBehaviourTest {
         }
 
         // Frame 4 should trigger abnormal silence
-        val result = accumulator.processFrame(silenceFrame)
+        val result = accumulator.processChunk(silenceFrame, false)
 
         assertTrue(
             "Silence timeout must produce AbnormalTerminateWithPcm, " +
@@ -252,7 +252,7 @@ class SttPipelineBehaviourTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 40  // 4 frames
+            manualAbnormalSilenceMs = 40  // 4 frames
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.3f }
@@ -260,12 +260,12 @@ class SttPipelineBehaviourTest {
 
         // ── Phase 1: Pre-roll ────────────────────────────────────────────
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 2: Accumulate significant speech ───────────────────────
         for (i in 0 until 35) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Verify: speechAccumulator contains PCM before silence ────────
@@ -283,18 +283,18 @@ class SttPipelineBehaviourTest {
 
         // Re-feed the same content since forceFinalize clears the buffer.
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
         for (i in 0 until 35) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // ── Phase 3: Silence triggers abnormal termination ───────────────
         for (i in 0 until 3) {
-            accumulator.processFrame(silenceFrame)
+            accumulator.processChunk(silenceFrame, false)
         }
 
-        val result = accumulator.processFrame(silenceFrame)
+        val result = accumulator.processChunk(silenceFrame, false)
 
         assertTrue(
             "Abnormal silence must return AbnormalTerminateWithPcm, " +
@@ -608,20 +608,20 @@ class SttPipelineBehaviourTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 10000,
-            manualManualAbnormalSilenceMs = 5000
+            manualMaxDurationMs = 10000,
+            manualAbnormalSilenceMs = 5000
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.3f }
 
         // Pre-roll
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // Significant speech
         for (i in 0 until 50) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // forceFinalize simulates manual stop
@@ -643,7 +643,7 @@ class SttPipelineBehaviourTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 40  // very low threshold
+            manualAbnormalSilenceMs = 40  // very low threshold
         )
 
         val silenceFrame = FloatArray(FRAME_SIZE) { 0.0f }
@@ -651,7 +651,7 @@ class SttPipelineBehaviourTest {
         // Even though pre-roll completes, no speech → silence should not trigger.
         // Send 20 frames of silence (beyond pre-roll).
         for (i in 0 until 30) {
-            val result = accumulator.processFrame(silenceFrame)
+            val result = accumulator.processChunk(silenceFrame, false)
             assertTrue(
                 "Pre-speech silence must return Continue (frame $i), " +
                         "got ${result.javaClass.simpleName}",
@@ -665,7 +665,7 @@ class SttPipelineBehaviourTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 30  // 3 frames of 10ms
+            manualAbnormalSilenceMs = 30  // 3 frames of 10ms
         )
 
         val speechFrame = FloatArray(FRAME_SIZE) { 0.5f }
@@ -673,22 +673,22 @@ class SttPipelineBehaviourTest {
 
         // Pre-roll with speech frames
         for (i in 0 until PRE_ROLL_FRAMES) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // Accumulate speech
         for (i in 0 until 50) {
-            accumulator.processFrame(speechFrame)
+            accumulator.processChunk(speechFrame, true)
         }
 
         // 2 silence frames: Continue
         for (i in 0 until 2) {
-            val result = accumulator.processFrame(silenceFrame)
+            val result = accumulator.processChunk(silenceFrame, false)
             assertTrue(result is FrameResult.Continue)
         }
 
         // 3rd silence frame: AbnormalTerminateWithPcm (30ms threshold)
-        val result = accumulator.processFrame(silenceFrame)
+        val result = accumulator.processChunk(silenceFrame, false)
 
         assertTrue(
             "Abnormal silence must produce AbnormalTerminateWithPcm",

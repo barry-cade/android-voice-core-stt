@@ -9,69 +9,37 @@ package dev.barrycade.voicecore.stt
  * Internal only — external callers use [SttRunConfig].
  */
 internal data class RuntimeSttConfig(
-    // ── Shared engine fields ──────────────────────────────────────────────
+    // ── VAD fields ───────────────────────────────────────────────────────
     val energyThreshold: Float = 0.03f,
     val preRollMs: Int = 100,
     val stableChunkSizeMs: Int = 500,
     val debugLoggingEnabled: Boolean = false,
 
-    // ── Manual/manual-specific fields ────────────────────────────────────
-    val manualManualMaxDurationMs: Int = 30000,
-    val manualManualAbnormalSilenceMs: Int = 5000,
-
-    // ── Manual/auto-specific fields ──────────────────────────────────────
-    val manualAutoMaxDurationMs: Int = 30000,
-    val manualAutoAutoSilenceMs: Int = 1200
+    // ── Stop-strategy fields ─────────────────────────────────────────────
+    val manualStopMode: Boolean = true,
+    val autoSilenceMs: Int = 1200,
+    val autoMaxDurationMs: Int = 30000
 ) {
     companion object {
         /**
          * Build a [RuntimeSttConfig] from a [SttRunConfig].
          */
         fun fromSttRunConfig(runCfg: SttRunConfig): RuntimeSttConfig {
-            val engine = runCfg.ttsEngineConfig
-            val specific = runCfg.strategySpecific
+            val vad = runCfg.vadConfig
+            val stop = runCfg.stopStrategy
 
-            val energyThreshold = when (specific) {
-                is ManualManualSpecific -> specific.energyThreshold
-                is ManualAutoSpecific -> specific.energyThreshold
-                else -> 0.03f
-            }
-
-            val manualManualMaxDurationMs: Int
-            val manualManualAbnormalSilenceMs: Int
-            val manualAutoMaxDurationMs: Int
-            val manualAutoAutoSilenceMs: Int
-
-            when (specific) {
-                is ManualManualSpecific -> {
-                    manualManualMaxDurationMs = specific.maxDurationMs
-                    manualManualAbnormalSilenceMs = specific.abnormalSilenceMs
-                    manualAutoMaxDurationMs = 30000
-                    manualAutoAutoSilenceMs = 1200
-                }
-                is ManualAutoSpecific -> {
-                    manualManualMaxDurationMs = 30000
-                    manualManualAbnormalSilenceMs = 5000
-                    manualAutoMaxDurationMs = specific.maxDurationMs
-                    manualAutoAutoSilenceMs = specific.autoSilenceMs
-                }
-                else -> {
-                    manualManualMaxDurationMs = 30000
-                    manualManualAbnormalSilenceMs = 5000
-                    manualAutoMaxDurationMs = 30000
-                    manualAutoAutoSilenceMs = 1200
-                }
-            }
+            val manualStopMode = stop.type == "MANUAL"
+            val autoSilenceMs = if (!manualStopMode) stop.silenceMs ?: 1200 else 1200
+            val autoMaxDurationMs = if (!manualStopMode) stop.maxDurationMs ?: 30000 else 30000
 
             return RuntimeSttConfig(
-                energyThreshold = energyThreshold,
-                preRollMs = engine.preRollMs,
-                stableChunkSizeMs = engine.stableChunkSizeMs,
-                debugLoggingEnabled = engine.debugLoggingEnabled,
-                manualManualMaxDurationMs = manualManualMaxDurationMs,
-                manualManualAbnormalSilenceMs = manualManualAbnormalSilenceMs,
-                manualAutoMaxDurationMs = manualAutoMaxDurationMs,
-                manualAutoAutoSilenceMs = manualAutoAutoSilenceMs
+                energyThreshold = vad.energyThreshold,
+                preRollMs = vad.preRollMs,
+                stableChunkSizeMs = vad.stableChunkSizeMs,
+                debugLoggingEnabled = runCfg.ttsEngineConfig.debugLoggingEnabled,
+                manualStopMode = manualStopMode,
+                autoSilenceMs = autoSilenceMs,
+                autoMaxDurationMs = autoMaxDurationMs
             )
         }
     }
@@ -87,22 +55,6 @@ internal fun RuntimeSttConfig.validate() {
 
     require(stableChunkSizeMs in 50..2000) {
         "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
-    }
-
-    require(manualManualMaxDurationMs in 1000..60000) {
-        "manualManualMaxDurationMs=$manualManualMaxDurationMs must be in [1000, 60000] ms"
-    }
-
-    require(manualManualAbnormalSilenceMs in 50..30000) {
-        "manualManualAbnormalSilenceMs=$manualManualAbnormalSilenceMs must be in [50, 30000] ms"
-    }
-
-    require(manualAutoMaxDurationMs in 1000..60000) {
-        "manualAutoMaxDurationMs=$manualAutoMaxDurationMs must be in [1000, 60000] ms"
-    }
-
-    require(manualAutoAutoSilenceMs in 50..10000) {
-        "manualAutoAutoSilenceMs=$manualAutoAutoSilenceMs must be in [50, 10000] ms"
     }
 }
 

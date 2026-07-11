@@ -13,13 +13,12 @@ import androidx.activity.result.contract.ActivityResultContracts.RequestPermissi
 import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
-import dev.barrycade.voicecore.stt.ManualAutoSpecific
-import dev.barrycade.voicecore.stt.ManualManualSpecific
+import dev.barrycade.voicecore.stt.DrainMode
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.stt.SessionResult
-import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
 import dev.barrycade.voicecore.stt.SttReturnCode
 import dev.barrycade.voicecore.stt.SttRunConfig
+import dev.barrycade.voicecore.stt.StopStrategyConfig
 import java.io.File
 import java.io.FileOutputStream
 
@@ -32,7 +31,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtConfigDisplay: TextView
     private lateinit var radioGroupStrategy: RadioGroup
 
-    private var selectedStrategy: SttLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL
+    private var selectedStopType: String = "MANUAL"
 
         private var stt: SpeechToText? = null
         private var isRecording = false
@@ -61,12 +60,12 @@ class MainActivity : ComponentActivity() {
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
-            val newStrategy: SttLifeCycleStrategy = when (checkedId) {
-                R.id.radioManualAuto -> SttLifeCycleStrategy.MANUAL_AUTO
-                else -> SttLifeCycleStrategy.MANUAL_MANUAL
+            val newStopType: String = when (checkedId) {
+                R.id.radioManualAuto -> "AUTO_SILENCE"
+                else -> "MANUAL"
             }
-            selectedStrategy = newStrategy
-            loadAndApplyConfig(newStrategy)
+            selectedStopType = newStopType
+            loadAndApplyConfig(newStopType)
         }
 
         btnStart.setOnClickListener {
@@ -94,14 +93,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        loadAndApplyConfig(SttLifeCycleStrategy.MANUAL_MANUAL)
+        loadAndApplyConfig("MANUAL")
         updateUi()
     }
 
-    private fun loadAndApplyConfig(strategy: SttLifeCycleStrategy) {
-        val configFileName = when (strategy) {
-            SttLifeCycleStrategy.MANUAL_MANUAL -> "stt_config_manual_manual.json"
-            SttLifeCycleStrategy.MANUAL_AUTO -> "stt_config_manual_auto.json"
+    private fun loadAndApplyConfig(stopType: String) {
+        val configFileName = when (stopType) {
+            "AUTO_SILENCE" -> "stt_config_manual_auto.json"
+            else -> "stt_config_manual_manual.json"
         }
 
         val modelPath = getModelPath()
@@ -141,24 +140,20 @@ class MainActivity : ComponentActivity() {
         txtConfigDisplay.visibility = View.VISIBLE
         txtConfigDisplay.text = buildString {
             appendLine("=== Active Config ===")
-            appendLine("strategy:  " + runConfig.ttsLifeCycleStrategy)
             appendLine("model:     " + runConfig.ttsEngineConfig.modelPath)
             appendLine("language:  " + runConfig.ttsEngineConfig.language)
-            appendLine("preRollMs: " + runConfig.ttsEngineConfig.preRollMs)
-            appendLine("stableChunkSizeMs: " + runConfig.ttsEngineConfig.stableChunkSizeMs)
-            when (val specific = runConfig.strategySpecific) {
-                is ManualManualSpecific -> {
-                    appendLine("mode: MANUAL_MANUAL")
-                    appendLine("energyThreshold: " + specific.energyThreshold)
-                    appendLine("maxDurationMs:   " + specific.maxDurationMs)
-                    appendLine("abnormalSilenceMs: " + specific.abnormalSilenceMs)
-                    appendLine("drainMode:      " + specific.drainMode)
-                }
-                is ManualAutoSpecific -> {
-                    appendLine("mode: MANUAL_AUTO")
-                    appendLine("energyThreshold: " + specific.energyThreshold)
-                    appendLine("maxDurationMs:   " + specific.maxDurationMs)
-                    appendLine("autoSilenceMs:   " + specific.autoSilenceMs)
+            appendLine("drainMode: " + runConfig.drainMode)
+            appendLine("start:     " + runConfig.startStrategy.type)
+            appendLine("stop:      " + runConfig.stopStrategy.type)
+            appendLine("--- VAD ---")
+            appendLine("energyThreshold: " + runConfig.vadConfig.energyThreshold)
+            appendLine("preRollMs:       " + runConfig.vadConfig.preRollMs)
+            appendLine("stableChunkSizeMs: " + runConfig.vadConfig.stableChunkSizeMs)
+            when (runConfig.stopStrategy.type) {
+                "AUTO_SILENCE" -> {
+                    appendLine("--- Auto-silence ---")
+                    appendLine("silenceMs:     " + runConfig.stopStrategy.silenceMs)
+                    appendLine("maxDurationMs: " + runConfig.stopStrategy.maxDurationMs)
                 }
             }
         }
@@ -169,9 +164,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRecording() {
-        val configFileName = when (selectedStrategy) {
-            SttLifeCycleStrategy.MANUAL_MANUAL -> "stt_config_manual_manual.json"
-            SttLifeCycleStrategy.MANUAL_AUTO -> "stt_config_manual_auto.json"
+        val configFileName = when (selectedStopType) {
+            "AUTO_SILENCE" -> "stt_config_manual_auto.json"
+            else -> "stt_config_manual_manual.json"
         }
 
         val modelPath = getModelPath()

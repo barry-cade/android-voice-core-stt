@@ -3,11 +3,11 @@ package dev.barrycade.voicecore
 import android.content.Context
 import android.util.Log
 import dev.barrycade.voicecore.stt.DrainMode
-import dev.barrycade.voicecore.stt.ManualAutoSpecific
-import dev.barrycade.voicecore.stt.ManualManualSpecific
-import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
+import dev.barrycade.voicecore.stt.StartStrategyConfig
+import dev.barrycade.voicecore.stt.StopStrategyConfig
 import dev.barrycade.voicecore.stt.SttRunConfig
 import dev.barrycade.voicecore.stt.TtsEngineConfig
+import dev.barrycade.voicecore.stt.VadConfig
 import org.json.JSONObject
 
 /**
@@ -17,24 +17,25 @@ import org.json.JSONObject
  * The JSON format is:
  * ```json
  * {
- *   "modelPath": "/path/to/model",
- *   "language": "en",
  *   "ttsEngineConfig": {
- *     "energyThreshold": 0.03,
- *     "preRollMs": 100,
- *     "stableChunkSizeMs": 500,
+ *     "modelPath": "/path/to/model",
+ *     "language": "en",
  *     "debugLoggingEnabled": false
  *   },
- *   "lifeCycleStrategy": "MANUAL_MANUAL",
- *   "strategySpecific": {
- *     "maxDurationMs": 30000,
- *     "maxSilenceMs": 5000
+ *   "vadConfig": {
+ *     "energyThreshold": 0.03,
+ *     "preRollMs": 100,
+ *     "stableChunkSizeMs": 500
+ *   },
+ *   "drainMode": "DRAIN_FROM_NEXT_FRAME",
+ *   "startStrategy": { "type": "MANUAL" },
+ *   "stopStrategy": {
+ *     "type": "AUTO_SILENCE",
+ *     "silenceMs": 1200,
+ *     "maxDurationMs": 30000
  *   }
  * }
  * ```
- *
- * Does NOT reference any legacy config types or fields (startStrategy, stopStrategy,
- * manualManual, manualAuto, reasonMessages).
  */
 object AppSttConfigLoader {
     private const val TAG = "STT_CONFIG"
@@ -76,40 +77,30 @@ object AppSttConfigLoader {
     ): SttRunConfig {
         val root = JSONObject(json)
 
-        // ── ttsEngineConfig block (fail fast if missing) ──────────────────
+        // ── ttsEngineConfig block ─────────────────────────────────────────
         val engineObj = root.getJSONObject("ttsEngineConfig")
-        val energyThreshold = engineObj.getDouble("energyThreshold").toFloat()
-        val preRollMs = engineObj.getInt("preRollMs")
-        val stableChunkSizeMs = engineObj.getInt("stableChunkSizeMs")
         val debugLoggingEnabled = engineObj.optBoolean("debugLoggingEnabled", false)
 
-        // ── Build TtsEngineConfig ─────────────────────────────────────────
         val engineConfig = TtsEngineConfig(
             modelPath = modelPath,
             language = language,
-            preRollMs = preRollMs,
-            stableChunkSizeMs = stableChunkSizeMs,
             debugLoggingEnabled = debugLoggingEnabled
         )
 
-        // ── Determine lifecycle strategy ──────────────────────────────────
-        val lifeCycleStrategyStr = root.getString("lifeCycleStrategy")
-        val lifeCycleStrategy = when (lifeCycleStrategyStr) {
-            "MANUAL_MANUAL" -> SttLifeCycleStrategy.MANUAL_MANUAL
-            "MANUAL_AUTO" -> SttLifeCycleStrategy.MANUAL_AUTO
-            else -> throw IllegalStateException(
-                "Unsupported lifeCycleStrategy='$lifeCycleStrategyStr'. " +
-                    "Allowed: MANUAL_MANUAL, MANUAL_AUTO."
-            )
-        }
+        // ── vadConfig block ───────────────────────────────────────────────
+        val vadObj = root.getJSONObject("vadConfig")
+        val energyThreshold = vadObj.getDouble("energyThreshold").toFloat()
+        val preRollMs = vadObj.getInt("preRollMs")
+        val stableChunkSizeMs = vadObj.getInt("stableChunkSizeMs")
 
-        // ── Build strategy-specific config from strategySpecific block ────
-        val specificObj = root.getJSONObject("strategySpecific")
-        val maxDurationMs = specificObj.getInt("maxDurationMs")
-        val maxSilenceMs = specificObj.getInt("maxSilenceMs")
+        val vadConfig = VadConfig(
+            energyThreshold = energyThreshold,
+            preRollMs = preRollMs,
+            stableChunkSizeMs = stableChunkSizeMs
+        )
 
-        // ── Parse drainMode (required field) ──────────────────────────────
-        val drainModeString = specificObj.getString("drainMode")
+        // ── drainMode ─────────────────────────────────────────────────────
+        val drainModeString = root.getString("drainMode")
         val drainMode = try {
             DrainMode.valueOf(drainModeString)
         } catch (_: IllegalArgumentException) {
@@ -118,28 +109,32 @@ object AppSttConfigLoader {
             )
         }
 
-        val strategySpecific: Any = when (lifeCycleStrategy) {
-            SttLifeCycleStrategy.MANUAL_MANUAL -> {
-                ManualManualSpecific(
-                    energyThreshold = energyThreshold,
-                    maxDurationMs = maxDurationMs,
-                    abnormalSilenceMs = maxSilenceMs,
-                    drainMode = drainMode
-                )
-            }
-            SttLifeCycleStrategy.MANUAL_AUTO -> {
-                ManualAutoSpecific(
-                    energyThreshold = energyThreshold,
-                    maxDurationMs = maxDurationMs,
-                    autoSilenceMs = maxSilenceMs
-                )
-            }
+        // ── startStrategy block ───────────────────────────────────────────
+        val startObj = root.getJSONObject("startStrategy")
+        val startType = startObj.getString("type")
+        val startStrategy = StartStrategyConfig(type = startType)
+
+        // ── stopStrategy block ────────────────────────────────────────────
+        val stopObj = root.getJSONObject("stopStrategy")
+        val stopType = stopObj.getString("type")
+        val stopStrategy = when (stopType) {
+            "MANUAL" -> StopStrategyConfig(type = stopType)
+            "AUTO_SILENCE" -> StopStrategyConfig(
+                type = stopType,
+                silenceMs = stopObj.getInt("silenceMs"),
+                maxDurationMs = stopObj.getInt("maxDurationMs")
+            )
+            else -> throw IllegalStateException(
+                "Unsupported stopStrategy.type='$stopType'. Allowed: MANUAL, AUTO_SILENCE."
+            )
         }
 
         return SttRunConfig(
             ttsEngineConfig = engineConfig,
-            ttsLifeCycleStrategy = lifeCycleStrategy,
-            strategySpecific = strategySpecific
+            vadConfig = vadConfig,
+            drainMode = drainMode,
+            startStrategy = startStrategy,
+            stopStrategy = stopStrategy
         )
     }
 }

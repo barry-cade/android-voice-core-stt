@@ -34,22 +34,21 @@ class SpeechToTextNewApiTest {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private fun validManualManualConfig(): SttRunConfig {
+    private fun validManualStopConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
     }
 
@@ -58,17 +57,16 @@ class SpeechToTextNewApiTest {
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
     }
 
@@ -88,7 +86,7 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun setConfig_withValidConfig_returnsSuccess() {
-        val result = speechToText.setConfig(validManualManualConfig())
+        val result = speechToText.setConfig(validManualStopConfig())
         assertNotNull("setConfig must return a SessionResult", result)
         assertEquals(
             "Valid config must return SUCCESS",
@@ -111,12 +109,12 @@ class SpeechToTextNewApiTest {
     @Test
     fun setConfig_twiceWithValidConfig_overwritesPrevious() {
         // First call
-        val first = speechToText.setConfig(validManualManualConfig())
+        val first = speechToText.setConfig(validManualStopConfig())
         assertEquals(SttReturnCode.SUCCESS, first.code)
 
         // Second call with a different valid config
-        val secondConfig = validManualManualConfig().copy(
-            ttsEngineConfig = validManualManualConfig().ttsEngineConfig.copy(
+        val secondConfig = validManualStopConfig().copy(
+            ttsEngineConfig = validManualStopConfig().ttsEngineConfig.copy(
                 language = "fr"
             )
         )
@@ -125,19 +123,21 @@ class SpeechToTextNewApiTest {
     }
 
     @Test
-    fun setConfig_withNullConfig_usesValidator() {
-        // setConfig does not accept null (Kotlin non-null type),
-        // but passing a config with null-like values is handled by the validator.
+    fun setConfig_withInvalidValues_returnsInvalidConfig() {
         val nullLikeConfig = SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "",
                 language = "",
-                preRollMs = -1,
-                stableChunkSizeMs = -1,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = "wrong type"
+            vadConfig = VadConfig(
+                energyThreshold = 0.03f,
+                preRollMs = -1,
+                stableChunkSizeMs = -1
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
         val result = speechToText.setConfig(nullLikeConfig)
         assertNotNull(result)
@@ -159,7 +159,7 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_afterSettingConfig_doesNotThrow() {
-        speechToText.setConfig(validManualManualConfig())
+        speechToText.setConfig(validManualStopConfig())
         safeRun {
             val result = speechToText.startSession()
             assertNotNull("startSession with config must return a SessionResult", result)
@@ -167,41 +167,45 @@ class SpeechToTextNewApiTest {
     }
 
     @Test
-    fun startSession_withManualManual_routesToManualTriggers() {
-        speechToText.setConfig(validManualManualConfig())
+    fun startSession_withManualStop_routesToManualTriggers() {
+        speechToText.setConfig(validManualStopConfig())
         safeRun {
             val result = speechToText.startSession()
-            assertNotNull("startSession with MANUAL_MANUAL must return a SessionResult", result)
+            assertNotNull("startSession with MANUAL stop must return a SessionResult", result)
         }
     }
 
     @Test
-    fun startSession_withManualAuto_routesToAutoTriggers() {
+    fun startSession_withAutoSilence_routesToAutoTriggers() {
         val config = SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
-            strategySpecific = ManualAutoSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(
+                type = "AUTO_SILENCE",
+                silenceMs = 1200,
+                maxDurationMs = 30000
             )
         )
         speechToText.setConfig(config)
         safeRun {
             val result = speechToText.startSession()
-            assertNotNull("startSession with MANUAL_AUTO must return a SessionResult", result)
+            assertNotNull("startSession with AUTO_SILENCE must return a SessionResult", result)
         }
     }
 
     @Test
     fun startSession_twice_doesNotThrow() {
-        speechToText.setConfig(validManualManualConfig())
+        speechToText.setConfig(validManualStopConfig())
         safeRun {
             speechToText.startSession()
             speechToText.startSession()
@@ -210,7 +214,7 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_afterDestroy_doesNotThrow() {
-        speechToText.setConfig(validManualManualConfig())
+        speechToText.setConfig(validManualStopConfig())
         safeRun {
             speechToText.destroy()
             val result = speechToText.startSession()
@@ -222,7 +226,7 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun setConfigThenStartSession_returnsSuccess() {
-        speechToText.setConfig(validManualManualConfig())
+        speechToText.setConfig(validManualStopConfig())
         safeRun {
             val result = speechToText.startSession()
             assertNotNull(result)

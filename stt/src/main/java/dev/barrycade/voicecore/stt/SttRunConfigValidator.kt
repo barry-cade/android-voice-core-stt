@@ -32,55 +32,46 @@ internal object SttRunConfigValidator {
             return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
-        if (engine.preRollMs < 0) {
+        // ── Validate vadConfig ────────────────────────────────────────────
+        val vad = config.vadConfig
+
+        if (vad.energyThreshold <= 0f) {
             return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
-        if (engine.stableChunkSizeMs < 0) {
+        if (vad.preRollMs < 0) {
             return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
-        // debugLoggingEnabled is Boolean — no range check needed, type is enforced by Kotlin.
+        if (vad.stableChunkSizeMs < 0) {
+            return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+        }
 
-        // ── Validate ttsLifeCycleStrategy ─────────────────────────────────
-        // Enum type is enforced by Kotlin at compile time, so any value is valid.
+        // ── Validate drainMode ────────────────────────────────────────────
+        // Enum type enforced by Kotlin, so any DrainMode value is valid.
 
-        // ── Validate strategySpecific type contract ───────────────────────
-        val strategy = config.ttsLifeCycleStrategy
-        val specific = config.strategySpecific
+        // ── Validate startStrategy ────────────────────────────────────────
+        val start = config.startStrategy
 
-        when (strategy) {
-            SttLifeCycleStrategy.MANUAL_MANUAL -> {
-                if (specific !is ManualManualSpecific) {
+        when (start.type) {
+            "MANUAL" -> { /* no additional params needed */ }
+            else -> return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+        }
+
+        // ── Validate stopStrategy ─────────────────────────────────────────
+        val stop = config.stopStrategy
+
+        when (stop.type) {
+            "MANUAL" -> { /* no additional params needed */ }
+            "AUTO_SILENCE" -> {
+                if (stop.silenceMs == null || stop.silenceMs <= 0) {
                     return SessionResult(SttReturnCode.INVALID_CONFIG, null)
                 }
-                val mm = specific
-                if (mm.energyThreshold <= 0f) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-                if (mm.maxDurationMs <= 0) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-                if (mm.abnormalSilenceMs <= 0) {
+                if (stop.maxDurationMs == null || stop.maxDurationMs <= 0) {
                     return SessionResult(SttReturnCode.INVALID_CONFIG, null)
                 }
             }
-
-            SttLifeCycleStrategy.MANUAL_AUTO -> {
-                if (specific !is ManualAutoSpecific) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-                val ma = specific
-                if (ma.energyThreshold <= 0f) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-                if (ma.maxDurationMs <= 0) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-                if (ma.autoSilenceMs <= 0) {
-                    return SessionResult(SttReturnCode.INVALID_CONFIG, null)
-                }
-            }
+            else -> return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
         // All validations passed.

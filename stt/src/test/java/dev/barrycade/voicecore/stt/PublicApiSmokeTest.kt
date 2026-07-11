@@ -20,17 +20,16 @@ class PublicApiSmokeTest {
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/path",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
         assertEquals("/dummy/path", config.ttsEngineConfig.modelPath)
     }
@@ -41,15 +40,19 @@ class PublicApiSmokeTest {
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/path",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
-            strategySpecific = ManualAutoSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(
+                type = "AUTO_SILENCE",
+                silenceMs = 1200,
+                maxDurationMs = 30000
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -62,17 +65,16 @@ class PublicApiSmokeTest {
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
         val result = SttRunConfigValidator.validate(config)
         assertNotNull("Config with blank modelPath must be rejected", result)
@@ -105,9 +107,9 @@ class PublicApiSmokeTest {
         // Verify the new config types are accessible from the stt package
         assertNotNull(SttRunConfig::class.java)
         assertNotNull(TtsEngineConfig::class.java)
-        assertNotNull(SttLifeCycleStrategy::class.java)
-        assertNotNull(ManualManualSpecific::class.java)
-        assertNotNull(ManualAutoSpecific::class.java)
+        assertNotNull(VadConfig::class.java)
+        assertNotNull(StartStrategyConfig::class.java)
+        assertNotNull(StopStrategyConfig::class.java)
     }
 
     @Test

@@ -4,22 +4,47 @@ package dev.barrycade.voicecore.stt
  * Single configuration object for an STT session.
  *
  * Every field is required — no defaults, no optional fields, no inference.
- * The strategy-specific config is passed as [strategySpecific] with an
- * enforced type contract (see [SttRunConfigValidator]):
  *
- * - If [ttsLifeCycleStrategy] == [SttLifeCycleStrategy.MANUAL_MANUAL],
- *   [strategySpecific] must be [ManualManualSpecific].
- * - If [ttsLifeCycleStrategy] == [SttLifeCycleStrategy.MANUAL_AUTO],
- *   [strategySpecific] must be [ManualAutoSpecific].
+ * Start and stop are independent orthogonal axes:
+ * - [startStrategy] defines when capture begins
+ * - [stopStrategy] defines when capture ends
+ * - [drainMode] defines how the PCM buffer is handled at begin time
+ * - [vadConfig] defines VAD parameters shared by both strategies
  *
- * Any other type will be rejected.
- *
- * @property ttsEngineConfig Engine-level configuration (model path, language, timing).
- * @property ttsLifeCycleStrategy Determines how recording starts and stops.
- * @property strategySpecific Mode-specific parameters, typed per [ttsLifeCycleStrategy].
+ * @property ttsEngineConfig Engine-level configuration (model path, language).
+ * @property vadConfig VAD parameters (energy threshold, pre-roll, chunk size).
+ * @property drainMode Drain mode for PCM buffering at begin time.
+ * @property startStrategy Start strategy config (type + params).
+ * @property stopStrategy Stop strategy config (type + params).
  */
 data class SttRunConfig(
     val ttsEngineConfig: TtsEngineConfig,
-    val ttsLifeCycleStrategy: SttLifeCycleStrategy,
-    val strategySpecific: Any
+    val vadConfig: VadConfig,
+    val drainMode: DrainMode,
+    val startStrategy: StartStrategyConfig,
+    val stopStrategy: StopStrategyConfig
+)
+
+/**
+ * Start strategy configuration.
+ *
+ * @property type Start trigger type: "MANUAL" (explicit caller request).
+ *         Future: "VAD" (energy-based auto-start).
+ */
+data class StartStrategyConfig(
+    val type: String
+)
+
+/**
+ * Stop strategy configuration.
+ *
+ * @property type Stop trigger type: "MANUAL" (explicit caller request) or
+ *         "AUTO_SILENCE" (silence-based auto-stop).
+ * @property silenceMs Silence duration that triggers stop (ms). Required for AUTO_SILENCE.
+ * @property maxDurationMs Maximum allowed speech duration (ms). Required for AUTO_SILENCE.
+ */
+data class StopStrategyConfig(
+    val type: String,
+    val silenceMs: Int? = null,
+    val maxDurationMs: Int? = null
 )

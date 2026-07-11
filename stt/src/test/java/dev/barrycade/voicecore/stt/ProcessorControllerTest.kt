@@ -36,7 +36,12 @@ class ProcessorControllerTest {
         accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 30000, manualManualAbnormalSilenceMs = 5000
+            config = RuntimeSttConfig(
+                energyThreshold = 0.03f,
+                preRollMs = 100,
+                stableChunkSizeMs = 500,
+                manualStopMode = true
+            )
         )
         capturedUtterances.clear()
         listener = object : UtteranceListener {

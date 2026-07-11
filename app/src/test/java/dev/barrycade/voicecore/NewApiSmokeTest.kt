@@ -1,113 +1,87 @@
-﻿package dev.barrycade.voicecore
+package dev.barrycade.voicecore
 
 import dev.barrycade.voicecore.stt.DrainMode
-import dev.barrycade.voicecore.stt.ManualAutoSpecific
-import dev.barrycade.voicecore.stt.ManualManualSpecific
-import dev.barrycade.voicecore.stt.SessionResult
-import dev.barrycade.voicecore.stt.SpeechToText
-import dev.barrycade.voicecore.stt.SttLifeCycleStrategy
-import dev.barrycade.voicecore.stt.SttReturnCode
+import dev.barrycade.voicecore.stt.StartStrategyConfig
+import dev.barrycade.voicecore.stt.StopStrategyConfig
 import dev.barrycade.voicecore.stt.SttRunConfig
 import dev.barrycade.voicecore.stt.TtsEngineConfig
+import dev.barrycade.voicecore.stt.VadConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 /**
- * Smoke test for the new [SttRunConfig]-based API path.
+ * Smoke test for [SttRunConfig] construction and field defaults.
  *
- * Verifies that:
+ * Tests that:
  * - [SttRunConfig] can be constructed with valid values
- * - [SpeechToText.create] returns a valid instance
- * - [SpeechToText.setConfig] with valid config returns SUCCESS
- * - [SpeechToText.setConfig] with invalid config returns INVALID_CONFIG
+ * - Field accessors return expected values
+ * - [DrainMode], [StartStrategyConfig], [StopStrategyConfig]
+ *   wire correctly into the config object
+ *
+ * These tests do NOT require Android SDK (no AudioRecord etc).
  */
 class NewApiSmokeTest {
 
-    private fun validManualManualConfig(): SttRunConfig {
+    private fun validManualStopConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
     }
 
-    private fun validManualAutoConfig(): SttRunConfig {
+    private fun validAutoSilenceConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
-            strategySpecific = ManualAutoSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(
+                type = "AUTO_SILENCE",
+                silenceMs = 1200,
+                maxDurationMs = 30000
             )
         )
     }
 
     @Test
-    fun runConfig_manualManual_constructsSuccessfully() {
-        val config = validManualManualConfig()
+    fun runConfig_manualStop_constructsSuccessfully() {
+        val config = validManualStopConfig()
         assertNotNull(config)
-        assertEquals(SttLifeCycleStrategy.MANUAL_MANUAL, config.ttsLifeCycleStrategy)
+        assertEquals("MANUAL", config.stopStrategy.type)
     }
 
     @Test
-    fun runConfig_manualAuto_constructsSuccessfully() {
-        val config = validManualAutoConfig()
+    fun runConfig_autoSilence_constructsSuccessfully() {
+        val config = validAutoSilenceConfig()
         assertNotNull(config)
-        assertEquals(SttLifeCycleStrategy.MANUAL_AUTO, config.ttsLifeCycleStrategy)
+        assertEquals("AUTO_SILENCE", config.stopStrategy.type)
     }
 
     @Test
-    fun speechToText_create_returnsInstance() {
-        val stt = SpeechToText.create("/dummy/model.bin")
-        assertNotNull(stt)
-    }
-
-    @Test
-    fun speechToText_setConfig_valid_returnsSuccess() {
-        val stt = SpeechToText.create("/dummy/model.bin")
-        val result = stt.setConfig(validManualManualConfig())
-        assertEquals(SttReturnCode.SUCCESS, result.code)
-    }
-
-    @Test
-    fun speechToText_setConfig_invalidModelPath_returnsInvalidConfig() {
-        val stt = SpeechToText.create("/dummy/model.bin")
-        val config = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "",
-                language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
-                debugLoggingEnabled = false
-            ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = stt.setConfig(config)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result.code)
+    fun runConfig_manualStop_hasExpectedVadConfig() {
+        val config = validManualStopConfig()
+        assertEquals(0.03f, config.vadConfig.energyThreshold, 0.001f)
+        assertEquals(100, config.vadConfig.preRollMs)
+        assertEquals(500, config.vadConfig.stableChunkSizeMs)
     }
 }

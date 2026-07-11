@@ -35,15 +35,7 @@ class SpeechToText internal constructor(
     private val whisperModel: WhisperModel = WhisperBridge,
     private val startTrigger: StartTriggerStrategy = ManualStartTrigger(),
     private val stopTrigger: StopTriggerStrategy = ManualStopTrigger(),
-    private val captureManager: SessionManager = CaptureManager(),
-    private var captureStrategy: CaptureStrategy = ManualManualStrategy(
-        ManualManualSpecific(
-            energyThreshold = 0.03f,
-            maxDurationMs = 30000,
-            abnormalSilenceMs = 5000,
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-        )
-    )
+    private val captureManager: SessionManager = CaptureManager()
 ) {
     companion object {
         /**
@@ -104,6 +96,9 @@ class SpeechToText internal constructor(
 
     /** [SttRunConfig] set via [setConfig]. */
     private var runConfig: SttRunConfig? = null
+
+    /** DrainMode from the active [SttRunConfig]. */
+    private var currentDrainMode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
 
     // ── Session-scoped state (reset by resetForNextSession) ────────────────
     private var processorController: ProcessorController? = null
@@ -234,8 +229,7 @@ class SpeechToText internal constructor(
      *
      * Validates [config] deterministically via [SttRunConfigValidator].
      * On failure, returns [SessionResult] with [SttReturnCode.INVALID_CONFIG].
-     * On success, stores [config] internally, rebuilds the capture strategy
-     * from the parsed strategy-specific config, and returns [SessionResult]
+     * On success, stores [config] internally and returns [SessionResult]
      * with [SttReturnCode.SUCCESS].
      * Does NOT start recording. Call [startSession] after this.
      */
@@ -245,15 +239,7 @@ class SpeechToText internal constructor(
             return validationResult
         }
         runConfig = config
-
-        // Rebuild capture strategy from parsed config so drainMode and other
-        // strategy-specific fields take effect immediately.
-        val specific = config.strategySpecific
-        if (specific is ManualManualSpecific) {
-            captureStrategy = ManualManualStrategy(specific)
-        }
-        // Future strategies (e.g. ManualAuto) would be handled here.
-
+        currentDrainMode = config.drainMode
         return SessionResult(SttReturnCode.SUCCESS, null)
     }
 
@@ -285,8 +271,9 @@ class SpeechToText internal constructor(
             if (stateMachine.currentState is SttLifecycleState.READY ||
                 stateMachine.currentState is SttLifecycleState.INITIALISED
             ) {
-                // Capture is already running. Begin buffering frames via strategy.
-                captureStrategy.onStartPressed(captureManager)
+                // Capture is already running. Begin buffering frames with
+                // the drainMode from the active config.
+                captureManager.begin(currentDrainMode)
 
                 if (stateMachine.currentState is SttLifecycleState.READY) {
                     // Model is ready, start the processor immediately.
@@ -350,11 +337,11 @@ class SpeechToText internal constructor(
             processorController?.stop()
             processorController = null
 
-            // Extract PCM before invoking the stop callback.
+            // Extract PCM before stopping capture.
             finalPcm = captureManager.finalize()
 
-            // Invoke strategy stop callback (e.g. stop capture).
-            captureStrategy.onStopPressed(captureManager)
+            // Stop capture — microphone off until restartCapture.
+            captureManager.stopCapture()
 
             if (finalPcm.isEmpty()) {
                 SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED")
@@ -593,9 +580,10 @@ class SpeechToText internal constructor(
     ) {
         val shortPcm = pcm.toShortArray()
         val pipelineStartMs = if (timingUtteranceStartMs > 0) timingUtteranceStartMs else System.currentTimeMillis()
-        val effectiveSilenceMs = when (stopTrigger) {
-            is AutoSilenceStopTrigger -> config.manualAutoAutoSilenceMs.toLong()
-            else -> config.manualManualAbnormalSilenceMs.toLong()
+        val effectiveSilenceMs = if (config.manualStopMode) {
+            config.stableChunkSizeMs.toLong()
+        } else {
+            config.autoSilenceMs.toLong()
         }
 
         val onResultCallback: (String) -> Unit = { text ->

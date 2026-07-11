@@ -11,7 +11,7 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 40  // 4 frames of 10ms = finalize
+            manualAbnormalSilenceMs = 40  // 4 frames of 10ms = finalize
         )
         val speechFrame = FloatArray(160) { 0.2f }  // 10ms at 16kHz
         val silenceFrame = FloatArray(160) { 0.0f }
@@ -51,7 +51,7 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualAbnormalSilenceMs = 5000
+            manualAbnormalSilenceMs = 5000
         )
         val silenceFrame = FloatArray(160) { 0.0f }
 
@@ -68,8 +68,8 @@ class UtteranceAccumulatorTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 4000,
-            manualManualAbnormalSilenceMs = 5000
+            manualMaxDurationMs = 4000,
+            manualAbnormalSilenceMs = 5000
         )
         val speechFrame = FloatArray(160) { 0.2f }
 

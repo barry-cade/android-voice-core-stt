@@ -1,4 +1,4 @@
-﻿package dev.barrycade.voicecore.stt
+package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * Deterministic test for [UtteranceAccumulator] with pre-roll and
- * silence-based finalization.
+ * silence-based finalization, using primary constructor params.
  */
 class SttDeterministicTest {
 
@@ -25,8 +25,9 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 10000,
-            manualManualAbnormalSilenceMs = 5000
+            preRollMs = 100,
+            manualMaxDurationMs = 30000,
+            manualAbnormalSilenceMs = 5000
         )
 
         val silenceFrame = FloatArray(frameSize) { 0.0f }
@@ -46,13 +47,12 @@ class SttDeterministicTest {
 
     @Test
     fun deterministicUtterance_WithCustomPreRoll_EmitsNonEmptyBuffer() {
-        val vad = Vad(energyThreshold = 0.05)
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             preRollMs = 100,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 4000,
-            manualManualAbnormalSilenceMs = 5000
+            manualMaxDurationMs = 30000,
+            manualAbnormalSilenceMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -73,8 +73,8 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 4000,
-            manualManualAbnormalSilenceMs = 5000
+            manualMaxDurationMs = 30000,
+            manualAbnormalSilenceMs = 5000
         )
 
         val speechFrame = FloatArray(320) { 0.2f }
@@ -92,8 +92,7 @@ class SttDeterministicTest {
         val accumulator = UtteranceAccumulator(
             sampleRate = 16000,
             stopTrigger = ManualStopTrigger(),
-            manualManualMaxDurationMs = 10000,
-            manualManualAbnormalSilenceMs = 40
+            manualAbnormalSilenceMs = 40
         )
 
         val speechFrame = FloatArray(320) { 0.2f }

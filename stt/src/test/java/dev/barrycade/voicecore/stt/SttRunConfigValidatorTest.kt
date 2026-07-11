@@ -15,39 +15,42 @@ class SttRunConfigValidatorTest {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private fun validManualManualConfig(): SttRunConfig {
+    private fun validManualStopConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualManualSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL")
         )
     }
 
-    private fun validManualAutoConfig(): SttRunConfig {
+    private fun validAutoSilenceConfig(): SttRunConfig {
         return SttRunConfig(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             ),
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
-            strategySpecific = ManualAutoSpecific(
+            vadConfig = VadConfig(
                 energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(
+                type = "AUTO_SILENCE",
+                silenceMs = 1200,
+                maxDurationMs = 30000
             )
         )
     }
@@ -55,15 +58,15 @@ class SttRunConfigValidatorTest {
     // ── Valid configs ─────────────────────────────────────────────────────
 
     @Test
-    fun validManualManualConfig_returnsNull() {
-        val result = SttRunConfigValidator.validate(validManualManualConfig())
-        assertNull("Valid MANUAL_MANUAL config must return null", result)
+    fun validManualStopConfig_returnsNull() {
+        val result = SttRunConfigValidator.validate(validManualStopConfig())
+        assertNull("Valid MANUAL stop config must return null", result)
     }
 
     @Test
-    fun validManualAutoConfig_returnsNull() {
-        val result = SttRunConfigValidator.validate(validManualAutoConfig())
-        assertNull("Valid MANUAL_AUTO config must return null", result)
+    fun validAutoSilenceConfig_returnsNull() {
+        val result = SttRunConfigValidator.validate(validAutoSilenceConfig())
+        assertNull("Valid AUTO_SILENCE config must return null", result)
     }
 
     // ── Null config ───────────────────────────────────────────────────────
@@ -79,216 +82,14 @@ class SttRunConfigValidatorTest {
         )
     }
 
-    // ── Wrong type for strategySpecific ───────────────────────────────────
-
-    @Test
-    fun manualManual_withAutoSpecific_returnsInvalidConfig() {
-        val config = SttRunConfig(
-            ttsEngineConfig = validManualManualConfig().ttsEngineConfig,
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = ManualAutoSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull(
-            "MANUAL_MANUAL with ManualAutoSpecific must return INVALID_CONFIG",
-            result
-        )
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualAuto_withManualSpecific_returnsInvalidConfig() {
-        val config = SttRunConfig(
-            ttsEngineConfig = validManualAutoConfig().ttsEngineConfig,
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_AUTO,
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull(
-            "MANUAL_AUTO with ManualManualSpecific must return INVALID_CONFIG",
-            result
-        )
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun strategySpecific_withWrongType_returnsInvalidConfig() {
-        val config = SttRunConfig(
-            ttsEngineConfig = validManualManualConfig().ttsEngineConfig,
-            ttsLifeCycleStrategy = SttLifeCycleStrategy.MANUAL_MANUAL,
-            strategySpecific = "not a valid type"
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("Wrong type for strategySpecific must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    // ── drainMode validation ──────────────────────────────────────────────
-
-    @Test
-    fun manualManual_drainModeDefault_isDrainFromNextFrame() {
-        val config = validManualManualConfig()
-        val specific = config.strategySpecific as ManualManualSpecific
-        assertEquals(
-            "Default drainMode must be DRAIN_FROM_NEXT_FRAME",
-            DrainMode.DRAIN_FROM_NEXT_FRAME,
-            specific.drainMode
-        )
-    }
-
-    @Test
-    fun manualManual_drainModeFromHead_isValid() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_HEAD
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNull("Valid config with DRAIN_FROM_HEAD must return null", result)
-    }
-
-    @Test
-    fun manualManual_drainModeFromNextFrame_isValid() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNull("Valid config with DRAIN_FROM_NEXT_FRAME must return null", result)
-    }
-
-    // ── Numeric constraints — MANUAL_MANUAL ───────────────────────────────
-
-    @Test
-    fun manualManual_energyThresholdZero_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("energyThreshold=0 must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualManual_energyThresholdNegative_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = -0.01f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("energyThreshold negative must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualManual_maxDurationMsZero_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 0,
-                abnormalSilenceMs = 5000,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("maxDurationMs=0 must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualManual_abnormalSilenceMsZero_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            strategySpecific = ManualManualSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                abnormalSilenceMs = 0,
-                drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("abnormalSilenceMs=0 must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    // ── Numeric constraints — MANUAL_AUTO ─────────────────────────────────
-
-    @Test
-    fun manualAuto_energyThresholdZero_returnsInvalidConfig() {
-        val config = validManualAutoConfig().copy(
-            strategySpecific = ManualAutoSpecific(
-                energyThreshold = 0f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 1200
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("energyThreshold=0 must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualAuto_maxDurationMsNegative_returnsInvalidConfig() {
-        val config = validManualAutoConfig().copy(
-            strategySpecific = ManualAutoSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = -1,
-                autoSilenceMs = 1200
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("maxDurationMs negative must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
-    @Test
-    fun manualAuto_autoSilenceMsZero_returnsInvalidConfig() {
-        val config = validManualAutoConfig().copy(
-            strategySpecific = ManualAutoSpecific(
-                energyThreshold = 0.03f,
-                maxDurationMs = 30000,
-                autoSilenceMs = 0
-            )
-        )
-        val result = SttRunConfigValidator.validate(config)
-        assertNotNull("autoSilenceMs=0 must return INVALID_CONFIG", result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
-    }
-
     // ── Engine config string constraints ──────────────────────────────────
 
     @Test
     fun engineConfig_modelPathBlank_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
+        val config = validManualStopConfig().copy(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "   ",
                 language = "en",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             )
         )
@@ -299,12 +100,10 @@ class SttRunConfigValidatorTest {
 
     @Test
     fun engineConfig_languageBlank_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
+        val config = validManualStopConfig().copy(
             ttsEngineConfig = TtsEngineConfig(
                 modelPath = "/dummy/model.bin",
                 language = "",
-                preRollMs = 100,
-                stableChunkSizeMs = 500,
                 debugLoggingEnabled = false
             )
         )
@@ -313,17 +112,29 @@ class SttRunConfigValidatorTest {
         assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
     }
 
-    // ── Engine config numeric constraints ─────────────────────────────────
+    // ── VAD config validation ─────────────────────────────────────────────
 
     @Test
-    fun engineConfig_preRollMsNegative_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
+    fun vadConfig_energyThresholdZero_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            vadConfig = VadConfig(
+                energyThreshold = 0f,
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            )
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("energyThreshold=0 must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    @Test
+    fun vadConfig_preRollMsNegative_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            vadConfig = VadConfig(
+                energyThreshold = 0.03f,
                 preRollMs = -1,
-                stableChunkSizeMs = 500,
-                debugLoggingEnabled = false
+                stableChunkSizeMs = 500
             )
         )
         val result = SttRunConfigValidator.validate(config)
@@ -332,18 +143,96 @@ class SttRunConfigValidatorTest {
     }
 
     @Test
-    fun engineConfig_stableChunkSizeMsNegative_returnsInvalidConfig() {
-        val config = validManualManualConfig().copy(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
+    fun vadConfig_stableChunkSizeMsNegative_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            vadConfig = VadConfig(
+                energyThreshold = 0.03f,
                 preRollMs = 100,
-                stableChunkSizeMs = -1,
-                debugLoggingEnabled = false
+                stableChunkSizeMs = -1
             )
         )
         val result = SttRunConfigValidator.validate(config)
         assertNotNull("Negative stableChunkSizeMs must return INVALID_CONFIG", result)
         assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    // ── Start strategy validation ─────────────────────────────────────────
+
+    @Test
+    fun startStrategy_unknownType_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            startStrategy = StartStrategyConfig(type = "INVALID")
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("Unknown startStrategy type must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    // ── Stop strategy validation ──────────────────────────────────────────
+
+    @Test
+    fun stopStrategy_unknownType_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            stopStrategy = StopStrategyConfig(type = "INVALID")
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("Unknown stopStrategy type must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    @Test
+    fun autoSilence_missingSilenceMs_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            stopStrategy = StopStrategyConfig(type = "AUTO_SILENCE", silenceMs = null, maxDurationMs = 30000)
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("AUTO_SILENCE with null silenceMs must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    @Test
+    fun autoSilence_silenceMsZero_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            stopStrategy = StopStrategyConfig(type = "AUTO_SILENCE", silenceMs = 0, maxDurationMs = 30000)
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("AUTO_SILENCE with silenceMs=0 must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    @Test
+    fun autoSilence_maxDurationMsNull_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            stopStrategy = StopStrategyConfig(type = "AUTO_SILENCE", silenceMs = 1200, maxDurationMs = null)
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("AUTO_SILENCE with null maxDurationMs must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    @Test
+    fun autoSilence_maxDurationMsZero_returnsInvalidConfig() {
+        val config = validManualStopConfig().copy(
+            stopStrategy = StopStrategyConfig(type = "AUTO_SILENCE", silenceMs = 1200, maxDurationMs = 0)
+        )
+        val result = SttRunConfigValidator.validate(config)
+        assertNotNull("AUTO_SILENCE with maxDurationMs=0 must return INVALID_CONFIG", result)
+        assertEquals(SttReturnCode.INVALID_CONFIG, result!!.code)
+    }
+
+    // ── DrainMode validation (enum is type-safe) ──────────────────────────
+
+    @Test
+    fun drainMode_fromHead_isValid() {
+        val config = validManualStopConfig().copy(drainMode = DrainMode.DRAIN_FROM_HEAD)
+        val result = SttRunConfigValidator.validate(config)
+        assertNull("Valid config with DRAIN_FROM_HEAD must return null", result)
+    }
+
+    @Test
+    fun drainMode_fromNextFrame_isValid() {
+        val config = validManualStopConfig().copy(drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME)
+        val result = SttRunConfigValidator.validate(config)
+        assertNull("Valid config with DRAIN_FROM_NEXT_FRAME must return null", result)
     }
 }

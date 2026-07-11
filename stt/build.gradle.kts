@@ -34,9 +34,10 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
                     "SttReturnCode",
                     "SessionResult",
                     "TtsEngineConfig",
-                    "SttLifeCycleStrategy",
-                    "ManualAutoSpecific",
-                    "ManualManualSpecific"
+                    "VadConfig",
+                    "DrainMode",
+                    "StartStrategyConfig",
+                    "StopStrategyConfig"
                 )
 
         val sttSources = sourceDir.get().asFile

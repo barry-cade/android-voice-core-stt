@@ -45,11 +45,11 @@ internal class UtteranceAccumulator(
     private val preRollMs: Int = 100,
     private val vad: Vad = Vad(),
     internal var stopTrigger: StopTriggerStrategy? = null,
-    // ── Mode-specific timing fields (flat, no wrapper types) ─────────────
-    private val manualManualMaxDurationMs: Int = 30000,
-    private val manualManualAbnormalSilenceMs: Int = 5000,
-    private val manualAutoMaxDurationMs: Int = 30000,
-    private val manualAutoAutoSilenceMs: Int = 1200,
+    // ── Stop-strategy-specific timing fields ────────────────────────────
+    private val manualMaxDurationMs: Int = 30000,
+    private val manualAbnormalSilenceMs: Int = 5000,
+    private val autoSilenceMs: Int = 1200,
+    private val autoMaxDurationMs: Int = 30000,
     private val debugLoggingEnabled: Boolean = false
 ) {
     constructor(
@@ -62,10 +62,10 @@ internal class UtteranceAccumulator(
         preRollMs = config.preRollMs,
         vad = vad,
         stopTrigger = stopTrigger,
-        manualManualMaxDurationMs = config.manualManualMaxDurationMs,
-        manualManualAbnormalSilenceMs = config.manualManualAbnormalSilenceMs,
-        manualAutoMaxDurationMs = config.manualAutoMaxDurationMs,
-        manualAutoAutoSilenceMs = config.manualAutoAutoSilenceMs,
+        manualMaxDurationMs = config.autoMaxDurationMs,
+        manualAbnormalSilenceMs = config.stableChunkSizeMs,
+        autoSilenceMs = config.autoSilenceMs,
+        autoMaxDurationMs = config.autoMaxDurationMs,
         debugLoggingEnabled = config.debugLoggingEnabled
     )
 
@@ -89,9 +89,9 @@ internal class UtteranceAccumulator(
      */
     private val effectiveMaxUtteranceLengthMs: Int by lazy {
         when (stopTrigger) {
-            is ManualStopTrigger -> manualManualMaxDurationMs
-            is AutoSilenceStopTrigger -> manualAutoMaxDurationMs
-            else -> manualManualMaxDurationMs
+            is ManualStopTrigger -> manualMaxDurationMs
+            is AutoSilenceStopTrigger -> autoMaxDurationMs
+            else -> manualMaxDurationMs
         }
     }
 
@@ -166,9 +166,9 @@ internal class UtteranceAccumulator(
 
             // ── 3. Compute threshold frames once per frame ───────────────
             val abnormalSilenceFrames =
-                manualManualAbnormalSilenceMs / frameDurationMs
+                manualAbnormalSilenceMs / frameDurationMs
             val autoSilenceFrames =
-                manualAutoAutoSilenceMs / frameDurationMs
+                autoSilenceMs / frameDurationMs
 
             // ── 4. Termination checks (correct order) ────────────────────
             // 4a. Manual/manual: abnormal silence
@@ -285,7 +285,7 @@ internal class UtteranceAccumulator(
      * Returns [FrameResult.AutoStop] with accumulated PCM.
      */
     private fun handleAutoSilenceFinalize(): FrameResult {
-        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${manualAutoAutoSilenceMs}ms, durationMs=$durationMs")
+        SttLogger.pcm("[AUTOSILENCE] auto-silence threshold reached: threshold=${autoSilenceMs}ms, durationMs=$durationMs")
         return FrameResult.AutoStop(finalizeUtterancePcm())
     }
 
@@ -310,7 +310,7 @@ internal class UtteranceAccumulator(
      * whatever was captured before silence timeout.
      */
     private fun handleAbnormalSilence(): FrameResult {
-        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualManualAbnormalSilenceMs}")
+        SttLogger.pcm("[FINALISE] manual silence fallback: abnormalSilenceMs=${manualAbnormalSilenceMs}")
 
         val pcm = finalizeUtterancePcm()
 
