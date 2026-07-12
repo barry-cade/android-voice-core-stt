@@ -73,7 +73,13 @@ class ProcessorControllerTest {
     @Test
     fun vadConfidence_initialValue_isZero() {
         val controller = createController()
-        assertEquals(0f, controller.vadConfidence, 0.001f)
+        assertEquals(0f, controller.vadConfidence!!, 0.001f)
+    }
+
+    @Test
+    fun supportsVadMetrics_returnsTrue() {
+        val controller = createController()
+        assertTrue("ProcessorController supports VAD metrics", controller.supportsVadMetrics())
     }
 
     // -- Idempotency / no-op tests -------------------------------------------

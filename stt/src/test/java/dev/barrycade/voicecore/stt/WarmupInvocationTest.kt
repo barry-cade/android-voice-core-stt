@@ -7,32 +7,47 @@ import org.junit.Test
 /**
  * Tests that [WhisperModel.warmup] is invoked correctly by the pipeline.
  *
- * Validates:
- * - [warmup] is called exactly once when [RuntimeSttConfig.warmupEnabled] is true
- * - [warmup] is NOT called when [RuntimeSttConfig.warmupEnabled] is false
- * - The duration parameter is passed through correctly
+ * Warmup now happens during [SpeechToText.initStt], not in the constructor.
+ * Tests validate that warmup is called exactly once on the first [initStt]
+ * call and is NOT called on subsequent calls.
  *
  * Uses [FakeWhisperModel] which tracks calls to [warmup].
  */
 class WarmupInvocationTest {
 
-    @Test
-    fun warmup_calledOnceWhenEnabled() {
-        val fakeModel = FakeWhisperModel()
-        val config = RuntimeSttConfig(
-            warmupEnabled = true,
-            warmupDurationMs = 500
-        )
-
-        // SpeechToText constructor triggers warmup in init.
-        speechToText = SpeechToText(
-            config = config,
+    private fun createConfig(warmupEnabled: Boolean, warmupDurationMs: Int): SttRunConfig {
+        return SttRunConfig(
+            ttsEngineConfig = TtsEngineConfig(
             modelPath = "/test/model.bin",
+                language = "en",
+                debugLoggingEnabled = false
+            ),
+            vadConfig = VadConfig(
+                energyThreshold = 0.03f,
+                preRollMs = 100,
+                stableChunkSizeMs = 500
+            ),
+            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
+            startStrategy = StartStrategyConfig(type = "MANUAL"),
+            stopStrategy = StopStrategyConfig(type = "MANUAL"),
+            warmupEnabled = warmupEnabled,
+            warmupDurationMs = warmupDurationMs
+        )
+    }
+
+    @Test
+    fun warmup_calledOnceDuringInitStt() {
+        val fakeModel = FakeWhisperModel()
+        val stt = SpeechToText(
+            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
+        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 500)
 
-        assertEquals("warmup must be called exactly once",
+        stt.setConfig(runConfig)
+        stt.initStt(runConfig)
+        assertEquals("warmup must be called exactly once during initStt",
             1, fakeModel.warmupCount)
         assertEquals("warmup duration must match config",
             500, fakeModel.lastWarmupDurationMs)
@@ -41,18 +56,15 @@ class WarmupInvocationTest {
     @Test
     fun warmup_notCalledWhenDisabled() {
         val fakeModel = FakeWhisperModel()
-        val config = RuntimeSttConfig(
-            warmupEnabled = false,
-            warmupDurationMs = 500
-        )
-
-        speechToText = SpeechToText(
-            config = config,
-            modelPath = "/test/model.bin",
+        val stt = SpeechToText(
+            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
+        val runConfig = createConfig(warmupEnabled = false, warmupDurationMs = 500)
 
+        stt.setConfig(runConfig)
+        stt.initStt(runConfig)
         assertEquals("warmup must NOT be called when disabled",
             0, fakeModel.warmupCount)
     }
@@ -60,38 +72,57 @@ class WarmupInvocationTest {
     @Test
     fun warmup_durationZeroCausesNoError() {
         val fakeModel = FakeWhisperModel()
-        val config = RuntimeSttConfig(
-            warmupEnabled = true,
-            warmupDurationMs = 0
-        )
-
-        speechToText = SpeechToText(
-            config = config,
-            modelPath = "/test/model.bin",
+        val stt = SpeechToText(
+            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
+        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 0)
 
-        assertEquals("warmup must be called exactly once even with duration=0",
+        stt.setConfig(runConfig)
+        stt.initStt(runConfig)
+
+        assertEquals("warmup must be called with duration=0",
             1, fakeModel.warmupCount)
         assertEquals("warmup duration must be 0",
             0, fakeModel.lastWarmupDurationMs)
     }
 
     @Test
-    fun warmup_enabledAndDurationPassedCorrectly() {
+    fun warmup_notCalledOnSecondInitStt() {
         val fakeModel = FakeWhisperModel()
-        val config = RuntimeSttConfig(
-            warmupEnabled = true,
-            warmupDurationMs = 2000
-        )
-
-        speechToText = SpeechToText(
-            config = config,
-            modelPath = "/test/model.bin",
+        val stt = SpeechToText(
+            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
+        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 500)
+
+        stt.setConfig(runConfig)
+        stt.initStt(runConfig)
+
+        assertEquals("warmup must be called once on first initStt",
+            1, fakeModel.warmupCount)
+
+        // Second initStt — warmup must NOT be called.
+        stt.initStt(runConfig)
+
+        assertEquals("warmup must NOT be called on second initStt",
+            1, fakeModel.warmupCount)
+    }
+
+    @Test
+    fun warmup_enabledAndDurationPassedCorrectly() {
+        val fakeModel = FakeWhisperModel()
+        val stt = SpeechToText(
+            context = null,
+            whisperModel = fakeModel,
+            captureManager = FakeCaptureManager()
+        )
+        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 2000)
+
+        stt.setConfig(runConfig)
+        stt.initStt(runConfig)
 
         assertEquals("warmup must be called exactly once",
             1, fakeModel.warmupCount)
@@ -105,3 +136,4 @@ class WarmupInvocationTest {
      * the Whisper pipeline. */
     private var speechToText: SpeechToText? = null
 }
+

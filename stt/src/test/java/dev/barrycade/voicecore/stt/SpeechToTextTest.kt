@@ -1,5 +1,6 @@
 package dev.barrycade.voicecore.stt
 
+import android.content.Context
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -24,8 +25,8 @@ class SpeechToTextTest {
         lastError = null
 
         speechToText = SpeechToText(
-            config = RuntimeSttConfig(),
-            modelPath = "/dummy/model/path.bin",
+            context = null,
+            whisperModel = FakeWhisperModel(),
             captureManager = FakeCaptureManager()
         )
 
@@ -115,3 +116,4 @@ class SpeechToTextTest {
         safeRun { speechToText.destroy(); speechToText.stop() }
     }
 }
+

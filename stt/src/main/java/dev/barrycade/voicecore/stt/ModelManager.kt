@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Only Whisper model operations.
  */
 internal class ModelManager(
-    private val modelPath: String,
+    private var modelPath: String,
     private val sttErrorListener: SttErrorListener?,
     private var readyListener: SttReadyListener? = null,
     private val whisperModel: WhisperModel = WhisperBridge
@@ -146,6 +146,19 @@ internal class ModelManager(
     }
 
     /**
+     * Update the model path. Called from [SpeechToText.initStt] when the
+     * singleton [SpeechToText] is first initialised with a [SttRunConfig]
+     * that specifies the actual model binary path.
+     *
+     * Safe to call before the model is loaded. No-op after the model has
+     * been loaded (path is frozen).
+     */
+    fun updateModelPath(path: String) {
+        if (isReady || initFailed) return
+        modelPath = path
+    }
+
+    /**
      * Load the Whisper model if it is not already loaded.
      *
      * Synchronous, blocking call. Returns immediately if the model is
@@ -179,10 +192,8 @@ internal class ModelManager(
      * Uses the Whisper model's warmup implementation.
      *
      * @param warmupDurationMs Duration of warm-up inference in ms.
-     *        If <= 0, this method is a no-op.
      */
     fun runWarmup(warmupDurationMs: Int) {
-        if (warmupDurationMs <= 0) return
         SttLogger.whisper("Warm-up: starting (${warmupDurationMs}ms)")
         whisperModel.warmup(warmupDurationMs)
         SttLogger.whisper("Warm-up: completed")

@@ -14,6 +14,7 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.stt.SpeechToTextProvider
 import dev.barrycade.voicecore.stt.SttReturnCode
 import dev.barrycade.voicecore.stt.SttRunConfig
 import dev.barrycade.voicecore.stt.StopStrategyConfig
@@ -69,6 +70,11 @@ class MainActivity : ComponentActivity() {
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
+
+        // Initialise the singleton STT instance once per app lifetime.
+        // The model is NOT loaded here — only the SpeechToText object is created.
+        // Call initStt() with a config to load the model and build scaffolding.
+        stt = SpeechToTextProvider.get(applicationContext)
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -197,31 +203,40 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            logInfo("STT_INIT", "Constructing STT with SttRunConfig")
-            val speechToText = SpeechToText.create(modelPath)
+            logInfo("STT_INIT", "Obtaining singleton STT instance")
+            val speechToText = SpeechToTextProvider.get(applicationContext)
 
+            // Set config on the singleton instance.
             val setConfigResult = speechToText.setConfig(runConfig)
             if (setConfigResult.code != SttReturnCode.SUCCESS) {
                 postToUi { txtOutput.text = "Config error: " + setConfigResult.code }
                 return
             }
 
-                                                                                                speechToText.setOnResultWithTimingListener { text, code, timing ->
+            // Initialise STT (load model + warm-up + build scaffolding).
+            // Idempotent: second call returns SUCCESS immediately.
+            val initResult = speechToText.initStt(runConfig)
+            if (initResult.code != SttReturnCode.SUCCESS) {
+                postToUi { txtOutput.text = "Init error: " + initResult.code }
+                return
+            }
+
+            speechToText.setOnResultWithTimingListener { text, code, timing ->
                 postToUi {
-                    // Rule 4: Do NOT stop capture on silence or any other result.
-                    // Only display the transcript. The session continues until
-                    // the user presses Stop (MANUAL stop strategy).
                     val timingInfo = if (timing != null) {
-                        "Timing: vad=${timing.vadActiveMs}ms, " +
-                        "utterance=${timing.utteranceDurationMs}ms, " +
-                        "inference=${timing.inferenceMs}ms, " +
-                        "total=${timing.totalPipelineMs}ms"
+                        val vadMs = timing.vadActiveMs
+                        val utteranceMs = timing.utteranceDurationMs
+                        val inferenceMs = timing.inferenceMs
+                        val totalMs = timing.totalPipelineMs
+                        "Timing: vad=${vadMs}ms, " +
+                        "utterance=${utteranceMs}ms, " +
+                        "inference=${inferenceMs}ms, " +
+                        "total=${totalMs}ms"
                     } else ""
                     txtOutput.text = "[$code] $text"
                     txtDiagnostics.text = timingInfo
                     txtDiagnostics.visibility = android.view.View.VISIBLE
 
-                    // Rule 5: Guard against infinite blank-audio chunking.
                     if (text == BLANK_AUDIO_MARKER || text == "") {
                         blankAudioCount += 1
                         if (blankAudioCount >= blankAudioThreshold) {
@@ -251,8 +266,6 @@ class MainActivity : ComponentActivity() {
             isRecording = true
             txtOutput.text = "Recording..."
 
-            // Rule 1: Stop button must be enabled immediately after successful start.
-            // StopStrategy = MANUAL => user MUST be able to end the session.
             btnStop.isEnabled = true
             btnStart.isEnabled = false
         } catch (e: IllegalArgumentException) {
@@ -264,8 +277,7 @@ class MainActivity : ComponentActivity() {
         Log.e("STT_CONFIG", "Invalid config", e)
         showErrorDialog("Invalid STT Configuration", e.message ?: "Unknown error")
         isRecording = false
-        stt?.destroy()
-        stt = null
+        // Do NOT destroy the singleton STT — keep it for the next attempt.
         updateUi()
     }
 

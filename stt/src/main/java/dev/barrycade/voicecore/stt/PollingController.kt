@@ -20,14 +20,30 @@ internal interface PollingController {
      */
     fun stop()
 
-    /** Accumulated VAD active time in milliseconds. 0 if VAD is not used. */
-    val vadActiveMs: Long
+    /**
+     * Returns true when this controller has an active VAD and can
+     * expose meaningful VAD metrics. Returns false in Manual mode
+     * (ManualStart + ManualStop) where VAD is not used.
+     */
+    fun supportsVadMetrics(): Boolean
 
-    /** Last utterance duration in milliseconds. 0 if accumulator is not used. */
-    val lastUtteranceDurationMs: Int
+    /**
+     * Accumulated VAD active time in milliseconds.
+     * null if VAD is not used (Manual mode).
+     */
+    val vadActiveMs: Long?
 
-    /** VAD confidence for diagnostic use. 0 if VAD is not used. */
-    val vadConfidence: Float
+    /**
+     * Last utterance duration in milliseconds.
+     * null if accumulator is not used (Manual mode).
+     */
+    val lastUtteranceDurationMs: Int?
+
+    /**
+     * VAD confidence for diagnostic use.
+     * null if VAD is not used (Manual mode).
+     */
+    val vadConfidence: Float?
 
     /** RMS sampler for diagnostic logging. */
     val rmsSampler: RmsSampler

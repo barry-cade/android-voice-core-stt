@@ -25,8 +25,8 @@ class SpeechToTextNewApiTest {
         lastError = null
 
         speechToText = SpeechToText(
-            config = RuntimeSttConfig(),
-            modelPath = "/dummy/model/path.bin",
+            context = null,
+            whisperModel = FakeWhisperModel(),
             captureManager = FakeCaptureManager()
         )
 
@@ -161,7 +161,9 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_afterSettingConfig_doesNotThrow() {
-        speechToText.setConfig(validManualStopConfig())
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             val result = speechToText.startSession()
             assertNotNull("startSession with config must return a SessionResult", result)
@@ -170,7 +172,9 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_withManualStop_routesToManualTriggers() {
-        speechToText.setConfig(validManualStopConfig())
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             val result = speechToText.startSession()
             assertNotNull("startSession with MANUAL stop must return a SessionResult", result)
@@ -199,6 +203,7 @@ class SpeechToTextNewApiTest {
             )
         )
         speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             val result = speechToText.startSession()
             assertNotNull("startSession with AUTO_SILENCE must return a SessionResult", result)
@@ -207,7 +212,9 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_twice_doesNotThrow() {
-        speechToText.setConfig(validManualStopConfig())
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             speechToText.startSession()
             speechToText.startSession()
@@ -216,7 +223,9 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_afterDestroy_doesNotThrow() {
-        speechToText.setConfig(validManualStopConfig())
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             speechToText.destroy()
             val result = speechToText.startSession()
@@ -228,7 +237,9 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun setConfigThenStartSession_returnsSuccess() {
-        speechToText.setConfig(validManualStopConfig())
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         safeRun {
             val result = speechToText.startSession()
             assertNotNull(result)
@@ -261,7 +272,10 @@ class SpeechToTextNewApiTest {
     @Test
     fun startSession_startsCapture() {
         // Rule 3: Call startSession() -> capture starts only then.
-        speechToText.setConfig(validManualStopConfig())
+        // Requires initStt() to have been called first.
+        val config = validManualStopConfig()
+        speechToText.setConfig(config)
+        speechToText.initStt(config)
         val captureManagerField = SpeechToText::class.java.getDeclaredField("captureManager")
         captureManagerField.isAccessible = true
         val fakeCapture = captureManagerField.get(speechToText) as FakeCaptureManager

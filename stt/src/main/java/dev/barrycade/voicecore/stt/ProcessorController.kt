@@ -26,12 +26,12 @@ internal class ProcessorController(
 
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
-    override var vadActiveMs: Long = 0L
+    override var vadActiveMs: Long? = 0L
         private set
 
     /** Last utterance duration in milliseconds, captured at finalization. */
     @Volatile
-    override var lastUtteranceDurationMs: Int = 0
+    override var lastUtteranceDurationMs: Int? = 0
         private set
 
     /** RMS sampler for diagnostic logging. */
@@ -45,8 +45,10 @@ internal class ProcessorController(
 
     /** Pass-through VAD confidence for diagnostic use. */
     @Volatile
-    override var vadConfidence: Float = 0f
+    override var vadConfidence: Float? = 0f
         private set
+
+    override fun supportsVadMetrics(): Boolean = true
 
     /**
      * Start the processor worker thread. It polls frames from CaptureController,
@@ -104,7 +106,7 @@ internal class ProcessorController(
                 if (isSpeechFrame) {
                     SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
                     val frameDurationMs = (frame.size * 1000L) / 16000L
-                    vadActiveMs += frameDurationMs
+                    vadActiveMs = (vadActiveMs ?: 0L) + frameDurationMs
                 }
 
                 val result = utteranceAccumulator.processChunk(frame, isSpeechFrame)
