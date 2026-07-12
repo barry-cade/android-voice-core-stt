@@ -113,11 +113,13 @@ internal class CaptureManager(
      * Start PCM capture synchronously. Capture must begin before any
      * frames can be buffered into the session.
      *
-     * Temporary placeholder — contains the original begin() AudioCapture
-     * startup logic. Phase 2 will refine the split.
+     * Clears the session buffer, sets the draining flag, and starts
+     * AudioCapture synchronously. Capture begins immediately so frames
+     * are available before the drain thread starts.
      */
     override fun beginPcmCapture() {
         sessionBuffer.clear()
+        draining = true
 
         // Start AudioCapture synchronously — capture begins immediately.
         // This must complete before the drain thread starts.
@@ -133,10 +135,8 @@ internal class CaptureManager(
      * Start STT processing (drain thread / processor hand-off).
      *
      * Uses [currentDrainMode] to dispatch to the correct drain-thread strategy.
-     * Temporary placeholder — Phase 2 will refine the split.
      */
     override fun beginSttProcessing() {
-        draining = true
         when (currentDrainMode) {
             DrainMode.DRAIN_FROM_NEXT_FRAME -> startDrainThreadFromNextFrame()
             DrainMode.DRAIN_FROM_HEAD -> startDrainThreadFromHead()

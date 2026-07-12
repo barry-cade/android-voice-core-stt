@@ -121,7 +121,6 @@ internal class FakeCaptureManager(
                 frameQueue.clear()
             }
         }
-        SttLogger.pcm("[CAPTURE] FakeCaptureManager.beginSttProcessing() — drainMode=${currentDrainMode.name}")
     }
 
     /**
