@@ -146,6 +146,49 @@ internal class ModelManager(
     }
 
     /**
+     * Load the Whisper model if it is not already loaded.
+     *
+     * Synchronous, blocking call. Returns immediately if the model is
+     * already loaded ([isReady] is true). Used by [SpeechToText.initStt]
+     * to ensure model readiness before STT scaffolding is constructed.
+     *
+     * @return true if the model was loaded successfully or was already ready,
+     *         false on failure.
+     */
+    fun loadModelIfNeeded(): Boolean {
+        if (isReady) return true
+        if (initFailed) return false
+
+        return try {
+            if (!loadModel()) return false
+            isReady = true
+            SttLogger.lifecycle("ModelManager: loadModelIfNeeded() — model loaded")
+            true
+        } catch (t: Throwable) {
+            SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
+            initFailed = true
+            false
+        }
+    }
+
+    /**
+     * Run warm-up inference synchronously on the current thread.
+     *
+     * Must be called after [loadModelIfNeeded]. Warm-up blocks until the
+     * inference completes. Does NOT start PCM capture or STT processing.
+     * Uses the Whisper model's warmup implementation.
+     *
+     * @param warmupDurationMs Duration of warm-up inference in ms.
+     *        If <= 0, this method is a no-op.
+     */
+    fun runWarmup(warmupDurationMs: Int) {
+        if (warmupDurationMs <= 0) return
+        SttLogger.whisper("Warm-up: starting (${warmupDurationMs}ms)")
+        whisperModel.warmup(warmupDurationMs)
+        SttLogger.whisper("Warm-up: completed")
+    }
+
+    /**
      * Transcribe PCM samples by calling the native Whisper model.
      * Thread-safe: the C++ whisper mutex in whisper_bridge.cpp serialises
      * concurrent calls.

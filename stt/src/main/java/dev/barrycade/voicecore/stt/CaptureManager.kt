@@ -160,6 +160,22 @@ internal class CaptureManager(
     }
 
     /**
+     * Mark PCM capture as active for STT processing without starting
+     * the drain thread or any STT processing components.
+     *
+     * Sets [sttActive] to true so that frames buffered via [pollFrame]
+     * or [finalize] are accepted by the system.
+     *
+     * This is used in ManualStart + ManualStop mode where no drain thread
+     * is started, but PCM frames must still be buffered for transcription
+     * when stop is requested.
+     */
+    override fun activatePcmCapture() {
+        sttActive = true
+        SttLogger.pcm("[CAPTURE] activatePcmCapture() — PCM capture marked active, drain thread NOT started")
+    }
+
+    /**
      * Start drain thread from next frame onward.
      * Does NOT drain any frames already queued before [begin] was called.
      */

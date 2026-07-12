@@ -137,6 +137,18 @@ internal class FakeCaptureManager(
     }
 
     /**
+     * Mark PCM capture as active for STT processing without starting
+     * the drain thread or any STT processing components.
+     *
+     * Sets [sttActive] to true so that frames buffered via [pollFrame]
+     * or [finalize] are accepted by the system.
+     */
+    override fun activatePcmCapture() {
+        sttActive = true
+        SttLogger.pcm("[CAPTURE] FakeCaptureManager.activatePcmCapture() — PCM capture marked active")
+    }
+
+    /**
      * Finalize the session: drain remaining queue frames and return raw PCM.
      * After this call, the session buffer is cleared and capture is stopped.
      */

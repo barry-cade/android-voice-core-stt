@@ -20,22 +20,22 @@ internal class ProcessorController(
     private val sampleRate: Int = 16000,
     private val debugLogging: Boolean = false,
     private val stopRequestedRef: () -> Boolean
-) {
+) : PollingController {
     private val isRunning = AtomicBoolean(false)
     private var workerThread: Thread? = null
 
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
-    var vadActiveMs: Long = 0L
+    override var vadActiveMs: Long = 0L
         private set
 
     /** Last utterance duration in milliseconds, captured at finalization. */
     @Volatile
-    var lastUtteranceDurationMs: Int = 0
+    override var lastUtteranceDurationMs: Int = 0
         private set
 
     /** RMS sampler for diagnostic logging. */
-    internal val rmsSampler: RmsSampler = RmsSampler(
+    override val rmsSampler: RmsSampler = RmsSampler(
         sampleRate = sampleRate,
         debugLogging = debugLogging,
         onSample = { avg, peak, floor ->
@@ -45,14 +45,14 @@ internal class ProcessorController(
 
     /** Pass-through VAD confidence for diagnostic use. */
     @Volatile
-    var vadConfidence: Float = 0f
+    override var vadConfidence: Float = 0f
         private set
 
     /**
      * Start the processor worker thread. It polls frames from CaptureController,
      * runs VAD, accumulates utterances, and delivers finalized PCM via listener.
      */
-    fun start() {
+    override fun start() {
         if (isRunning.getAndSet(true)) return
 
         val runnable = Runnable {
@@ -142,7 +142,7 @@ internal class ProcessorController(
      *
      * Idempotent: multiple calls are safe after the thread has stopped.
      */
-    fun stop() {
+    override fun stop() {
         if (!isRunning.getAndSet(false)) return
         workerThread?.join(500)
         workerThread = null
@@ -156,7 +156,7 @@ internal class ProcessorController(
      *
      * Called by SpeechToText on the STOP path after the processor loop exits.
      */
-    fun drainRemainingFrames(): FloatArray? {
+    override fun drainRemainingFrames(): FloatArray? {
         var drainFinalized: FloatArray? = null
         var drainedCount = 0
 
@@ -179,7 +179,7 @@ internal class ProcessorController(
      * Called from the deterministic Stop path, after stopRequested has been set.
      * Returns null if no PCM was accumulated.
      */
-    fun stopAndFinalize(): FloatArray? {
+    override fun stopAndFinalize(): FloatArray? {
         val pcm = utteranceAccumulator.finaliseUtterance()
         if (pcm != null) {
             lastUtteranceDurationMs = utteranceAccumulator.lastUtteranceDurationMs
@@ -191,7 +191,7 @@ internal class ProcessorController(
      * Reset per-utterance VAD active time to 0.
      * Called when UtteranceAccumulator detects a PRE_ROLL → SPEECH transition.
      */
-    fun resetVadActiveMs() {
+    override fun resetVadActiveMs() {
         vadActiveMs = 0L
     }
 }

@@ -43,6 +43,19 @@ internal interface SessionManager : AudioSource {
     fun beginSttProcessing()
 
     /**
+     * Mark PCM capture as active for STT processing without starting
+     * the drain thread or VAD/accumulator.
+     *
+     * In ManualStart + ManualStop mode, the drain thread is not started.
+     * This method marks the PCM stream as accepted (sets [sttActive] to true)
+     * so that frames buffered by the processor via [pollFrame] are not
+     * silently dropped by the drain-thread guard.
+     *
+     * In Auto mode, [beginSttProcessing] handles this automatically.
+     */
+    fun activatePcmCapture()
+
+    /**
      * Finalize the session: return all accumulated PCM as raw concatenated
      * FloatArray. After this call, the session buffer is cleared.
      *

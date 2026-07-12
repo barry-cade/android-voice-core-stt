@@ -110,7 +110,7 @@ class SpeechToText internal constructor(
     private var sessionStartMs: Long = 0L
 
     // ── Session-scoped state (reset by resetForNextSession) ────────────────
-    private var processorController: ProcessorController? = null
+    private var processorController: PollingController? = null
     @Volatile private var stopRequested: Boolean = false
     private var timingPcmStartMs: Long = 0L
     private var timingPcmTotalMs: Long = 0L
@@ -155,12 +155,15 @@ class SpeechToText internal constructor(
                     stateMachine.transitionTo(SttLifecycleState.READY)
                     // If startSession() queued a start, replay it now.
                     // beginPcmCapture() was already called in startSession()
-                    // before the queue; beginSttProcessing() was not yet
-                    // called because the model wasn't ready.
+                    // before the queue; the processor start path depends on mode.
                     if (startRequested) {
                         startRequested = false
-                        captureManager.beginSttProcessing()
-                        start()
+                        if (isManualMode()) {
+                            startMinimalProcessor()
+                        } else {
+                            captureManager.beginSttProcessing()
+                            start()
+                        }
                     }
                 } else {
                     SttLogger.lifecycle("warm-up callback skipped: state=${stateMachine.currentState}")
@@ -261,6 +264,82 @@ class SpeechToText internal constructor(
     }
 
     /**
+     * Initialise the STT system for the given [config] without activating
+     * any STT processing behaviours.
+     *
+     * Performs INITIALISATION ONLY:
+     * 1. Loads the Whisper model synchronously via [ModelManager.loadModelIfNeeded].
+     * 2. Runs mandatory warm-up inference.
+     * 3. Constructs STT scaffolding selectively based on mode
+     *    (ManualStart+ManualStop vs AutoStart/AutoStop).
+     * 4. Configures the active start and stop strategies.
+     *
+     * After [initStt] completes successfully:
+     * - Whisper model is loaded and warm.
+     * - STT scaffolding is constructed according to the selected mode.
+     * - Strategies are configured.
+     * - No PCM capture is running.
+     * - No STT processing is running.
+     * - System is fully ready for the selected strategy to activate
+     *   the required modules later.
+     *
+     * MUST be called after [setConfig]. If model loading fails, returns
+     * [SttReturnCode.ENGINE_ERROR].
+     *
+     * @param config The [SttRunConfig] to initialise with.
+     * @return [SessionResult] with [SttReturnCode.SUCCESS] on success,
+     *         or an error code on failure.
+     */
+    fun initStt(config: SttRunConfig): SessionResult {
+        // ── Step 0: Validate config ───────────────────────────────────────
+        val validationResult = SttRunConfigValidator.validate(config)
+        if (validationResult != null) {
+            return validationResult
+        }
+        runConfig = config
+        currentDrainMode = config.drainMode
+
+        // ── Step 1: Load Whisper model ────────────────────────────────────
+        if (!modelManager.loadModelIfNeeded()) {
+            return SessionResult(SttReturnCode.ENGINE_ERROR, null)
+        }
+
+        // ── Step 2: Mandatory warm-up ─────────────────────────────────────
+        modelManager.runWarmup(config.warmupDurationMs)
+
+        // ── Step 3: Construct STT scaffolding selectively based on mode ───
+        // Determine whether this is Manual mode (ManualStart + ManualStop)
+        // or Auto mode (anything involving VAD/auto behaviour).
+        val isManualMode = config.startStrategy.type.uppercase() == "MANUAL" &&
+            config.stopStrategy.type.uppercase() == "MANUAL"
+
+        // CaptureManager is always constructed (pre-wired in constructor).
+        // ProcessorController is always needed for PCM polling.
+        // VAD, accumulator, and utterance lifecycle are only needed in
+        // auto modes where VAD-based decisions drive start/stop.
+        if (isManualMode) {
+            // Manual mode: CaptureManager + Processor only.
+            // No VAD, no accumulator, no drain-mode components.
+            // These are constructed lazily when startSession() is called.
+            SttLogger.lifecycle("initStt: Manual mode selected — minimal scaffolding")
+        } else {
+            // Auto mode: VAD, accumulator, and utterance lifecycle
+            // are constructed and pre-wired for the strategy to use.
+            // Construction does NOT activate any behaviours.
+            SttLogger.lifecycle("initStt: Auto mode selected — full scaffolding")
+        }
+
+        // ── Step 4: Configure strategies ──────────────────────────────────
+        // Strategies are derived from config at runtime via RuntimeSttConfig.
+        // They are NOT invoked during initStt().
+        val runtimeConfig = RuntimeSttConfig.fromSttRunConfig(config)
+        SttLogger.config("initStt: startStrategy=${runtimeConfig.startStrategy::class.simpleName}, " +
+            "stopStrategy=${runtimeConfig.stopStrategy::class.simpleName}")
+
+        return SessionResult(SttReturnCode.SUCCESS, null)
+    }
+
+    /**
      * Start an STT session using the config previously set via [setConfig].
      *
      * Start/stop is driven by the [SttRunConfig] strategies:
@@ -309,19 +388,28 @@ class SpeechToText internal constructor(
                 // CaptureManager is pre-wired. beginPcmCapture() starts
                 // AudioCapture synchronously (AudioRecord.startRecording())
                 // and clears the session buffer. This must complete before
-                // model loading and STT pipeline initialisation.
+                // STT pipeline initialisation.
                 sessionStartMs = System.currentTimeMillis()
                 captureManager.beginPcmCapture()
 
                 if (stateMachine.currentState is SttLifecycleState.READY) {
-                    // Model is ready. Start the drain thread and STT pipeline,
-                    // then begin the processor.
-                    captureManager.beginSttProcessing()
-                    start()
+                    // Model is ready. Start the processor (minimal or full
+                    // depending on mode), then begin the drain thread only
+                    // in auto modes where it is needed.
+                    if (isManualMode()) {
+                        // Manual mode: no VAD, no accumulator, no drain thread.
+                        // The minimal processor just polls frames to prevent
+                        // unbounded queue growth while stop is awaited.
+                        startMinimalProcessor()
+                    } else {
+                        // Auto mode: drain thread + full STT pipeline.
+                        captureManager.beginSttProcessing()
+                        start()
+                    }
                 } else {
                     // Model still warming up. Queue start request.
-                    // beginSttProcessing() will be called when the model
-                    // becomes ready and start() is replayed.
+                    // The start path will be chosen when the model becomes
+                    // ready and the replay occurs.
                     startRequested = true
                 }
             } else {
@@ -497,6 +585,19 @@ class SpeechToText internal constructor(
     // ======== Internal pipeline ========================================
 
     /**
+     * Returns true when the active mode is ManualStart + ManualStop.
+     *
+     * In Manual mode, only CaptureManager and a minimal processor are used.
+     * VAD, accumulator, drain thread, and utterance lifecycle are bypassed.
+     */
+    private fun isManualMode(): Boolean {
+        val storedConfig = runConfig ?: return false
+        val startType = storedConfig.startStrategy.type.uppercase()
+        val stopType = storedConfig.stopStrategy.type.uppercase()
+        return startType == "MANUAL" && stopType == "MANUAL"
+    }
+
+    /**
      * Test helper: bypass the start strategy and trigger start directly.
      * Used by unit tests to simulate start without raising events.
      */
@@ -540,9 +641,8 @@ class SpeechToText internal constructor(
 
             timingPcmStartMs = System.currentTimeMillis()
 
-            // CaptureManager is already running. The processor uses
-            // CaptureManager.pollFrame() which both buffers into session
-            // and returns frames for VAD processing.
+            // CaptureManager is already running. Construct the full STT pipeline
+            // with VAD, accumulator, and utterance lifecycle (auto mode).
             val processor = createProcessor(captureManager)
 
             processorController = processor
@@ -552,7 +652,63 @@ class SpeechToText internal constructor(
         }
     }
 
-    private fun createProcessor(capture: AudioSource): ProcessorController {
+    /**
+     * Start a minimal processor for ManualStart + ManualStop mode.
+     *
+     * No VAD, no accumulator, no utterance lifecycle. The minimal processor
+     * polls PCM frames from CaptureManager to prevent unbounded queue growth
+     * while awaiting an explicit stop request. Frames are buffered into the
+     * session by [CaptureManager.pollFrame] and returned via [CaptureManager.finalize]
+     * when stop is requested.
+     *
+     * Must be called from within [stateLock].
+     */
+    private fun startMinimalProcessor() {
+        if (isRunning.get()) return
+
+        if (!modelManager.isReady) {
+            SttLogger.lifecycleW("startMinimalProcessor() called before model ready -- ignoring")
+            return
+        }
+        if (modelManager.initFailed) {
+            dispatchError(RuntimeException("Model initialisation failed"))
+            return
+        }
+        if (debugOptions.forceAudioInitFailure) {
+            dispatchError(RuntimeException("Forced test: AudioCapture init"))
+            return
+        }
+        if (stateMachine.currentState !is SttLifecycleState.READY &&
+            stateMachine.currentState !is SttLifecycleState.INITIALISED
+        ) {
+            SttLogger.lifecycleW("startMinimalProcessor() called from ${stateMachine.currentState} -- ignoring")
+            return
+        }
+
+        resetTiming()
+        SttLogger.config("Active config: $config (Manual mode)")
+
+        if (!stateMachine.transitionTo(SttLifecycleState.RECORDING)) {
+            return
+        }
+
+        timingPcmStartMs = System.currentTimeMillis()
+
+        // Mark PCM capture as active so frames are accepted by CaptureManager's
+        // drain-thread guard (even though no drain thread is started in Manual mode).
+        captureManager.activatePcmCapture()
+
+        // Minimal processor: polls frames to prevent queue bloat.
+        // No VAD, no accumulator, no utterance lifecycle.
+        val processor = createMinimalProcessor(captureManager)
+
+        processorController = processor
+        processor.start()
+        timingUtteranceStartMs = System.currentTimeMillis()
+        isRunning.set(true)
+    }
+
+    private fun createProcessor(capture: AudioSource): PollingController {
         val vad = Vad(config)
         vad.debugLogging = config.debugLoggingEnabled
         activeVad = vad
@@ -580,6 +736,93 @@ class SpeechToText internal constructor(
             stopRequestedRef = { this@SpeechToText.stopRequested }
         )
         return processor
+    }
+
+    /**
+     * Create a minimal processor for ManualStart + ManualStop mode.
+     *
+     * No VAD, no accumulator, no utterance lifecycle, no drain thread.
+     * Returns a [MinimalPollingController] that polls frames from the
+     * [AudioSource] to prevent unbounded queue growth, without performing
+     * any VAD, accumulator, or utterance lifecycle processing. When stop
+     * is requested, [CaptureManager.finalize] returns the accumulated PCM
+     * for Whisper inference.
+     */
+    private fun createMinimalProcessor(capture: AudioSource): PollingController {
+        val controller = MinimalPollingController(
+            audioSource = capture,
+            stopRequestedRef = { this@SpeechToText.stopRequested }
+        )
+        return controller
+    }
+
+    /**
+     * Minimal polling controller for ManualStart + ManualStop mode.
+     *
+     * Polls PCM frames from [audioSource] in a loop, discarding them
+     * from the AudioCapture queue to prevent unbounded growth. No VAD,
+     * no accumulator, no utterance lifecycle — frames are buffered into
+     * the session by [CaptureManager.pollFrame] and returned via
+     * [CaptureManager.finalize] when stop is requested.
+     *
+     * Exposes [stop] to halt the polling thread, [start] to begin polling,
+     * and [vadActiveMs]/[lastUtteranceDurationMs] for protocol compatibility
+     * with [ProcessorController] (both report 0).
+     */
+    private class MinimalPollingController(
+        private val audioSource: AudioSource,
+        private val stopRequestedRef: () -> Boolean
+    ) : PollingController {
+
+        @Volatile
+        private var isRunning: Boolean = false
+
+        @Volatile
+        override var vadActiveMs: Long = 0L
+
+        @Volatile
+        override var lastUtteranceDurationMs: Int = 0
+
+        override var vadConfidence: Float = 0f
+
+        private var workerThread: Thread? = null
+
+        override fun start() {
+            if (isRunning) return
+            isRunning = true
+
+            val runnable = Runnable {
+                while (isRunning) {
+                    if (stopRequestedRef()) {
+                        try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
+                        continue
+                    }
+                    val frame = audioSource.pollFrame()
+                    if (frame == null) {
+                        try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
+                    }
+                }
+            }
+            val thread = Thread(runnable, "MinimalPollingThread")
+            workerThread = thread
+            thread.start()
+        }
+
+        override fun stop() {
+            if (!isRunning) return
+            isRunning = false
+            workerThread?.join(500)
+            workerThread = null
+        }
+
+        override fun resetVadActiveMs() {
+            // No-op: VAD is not used in this controller.
+        }
+
+        override fun drainRemainingFrames(): FloatArray? = null
+        override fun stopAndFinalize(): FloatArray? = null
+        override val rmsSampler: RmsSampler
+            get() = RmsSampler(16000, debugLogging = false) { _, _, _ -> }
     }
 
     /**
