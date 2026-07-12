@@ -44,7 +44,7 @@ class SpeechToText internal constructor(
          *
          * Model loading and warm-up begin immediately in the constructor.
          * Audio capture does NOT start until [startSession] is called
-         * (CaptureManager begins lazily in [CaptureManager.begin]).
+         * (CaptureManager begins lazily in [CaptureManager.beginPcmCapture]).
          *
          * @param modelPath Absolute path to the Whisper model binary.
          * @return A new [SpeechToText] instance.
@@ -154,8 +154,12 @@ class SpeechToText internal constructor(
                 if (stateMachine.currentState is SttLifecycleState.INITIALISED) {
                     stateMachine.transitionTo(SttLifecycleState.READY)
                     // If startSession() queued a start, replay it now.
+                    // beginPcmCapture() was already called in startSession()
+                    // before the queue; beginSttProcessing() was not yet
+                    // called because the model wasn't ready.
                     if (startRequested) {
                         startRequested = false
+                        captureManager.beginSttProcessing()
                         start()
                     }
                 } else {
@@ -266,12 +270,14 @@ class SpeechToText internal constructor(
      * Manually raised events (via [startSession] and [stopAndTranscribe])
      * are consumed by [ManualStart] and [ManualStop] strategies respectively.
      *
-     * CaptureManager is pre-wired (microphone starts lazily on [CaptureManager.begin]).
-     * This method:
-     * 1. Starts AudioCapture lazily via [CaptureManager.begin].
-     * 2. Calls [CaptureManager.begin] to start buffering frames into the session buffer.
-     * 3. If the model is ready, starts the processor immediately.
-     * 4. If the model is still warming up, queues the start and replays when ready.
+     * Lifecycle ordering (Phase 3):
+     * 1. Strategy approval via [Config.startStrategy].
+     * 2. PCM capture begins ([CaptureManager.beginPcmCapture]) — first gate.
+     * 3. Model readiness check (model loaded async in constructor).
+     * 4. STT pipeline starts ([CaptureManager.beginSttProcessing] + processor).
+     *
+     * If the model is still warming up, the start is queued and replayed
+     * when model readiness completes.
      *
      * ## Return codes
      *
@@ -299,17 +305,23 @@ class SpeechToText internal constructor(
                     return SessionResult(SttReturnCode.SUCCESS, null)
                 }
 
-                // Capture is not yet running. begin() starts AudioCapture lazily
-                // and begins buffering frames with the drainMode from the active config.
+                // ── PCM starts — first gate after strategy approval ─────
+                // CaptureManager is pre-wired. beginPcmCapture() starts
+                // AudioCapture synchronously (AudioRecord.startRecording())
+                // and clears the session buffer. This must complete before
+                // model loading and STT pipeline initialisation.
                 sessionStartMs = System.currentTimeMillis()
-                captureManager.begin(currentDrainMode)
+                captureManager.beginPcmCapture()
 
                 if (stateMachine.currentState is SttLifecycleState.READY) {
-                    // Model is ready, start the processor immediately.
+                    // Model is ready. Start the drain thread and STT pipeline,
+                    // then begin the processor.
+                    captureManager.beginSttProcessing()
                     start()
                 } else {
                     // Model still warming up. Queue start request.
-                    // begin() was already called above — frames are buffering.
+                    // beginSttProcessing() will be called when the model
+                    // becomes ready and start() is replayed.
                     startRequested = true
                 }
             } else {

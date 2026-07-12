@@ -81,6 +81,20 @@ internal class CaptureManager(
     private var captureStarted: Boolean = false
 
     /**
+     * True when STT processing is allowed to consume PCM frames.
+     * Set to false in [beginPcmCapture] to ignore early PCM frames
+     * that arrive before the STT pipeline is ready (model loading,
+     * drain thread setup). Set to true in [beginSttProcessing] once
+     * the drain thread or processor is active and frames should be
+     * buffered into the session.
+     *
+     * This prevents duplicate utterances caused by PCM accumulating
+     * during the gap between capture start and STT readiness.
+     */
+    @Volatile
+    private var sttActive: Boolean = false
+
+    /**
      * Stores the [DrainMode] from the most recent [begin] call.
      * Used by [beginSttProcessing] to dispatch to the correct
      * drain-thread strategy.
@@ -119,6 +133,7 @@ internal class CaptureManager(
      */
     override fun beginPcmCapture() {
         sessionBuffer.clear()
+        sttActive = false
         draining = true
 
         // Start AudioCapture synchronously — capture begins immediately.
@@ -137,6 +152,7 @@ internal class CaptureManager(
      * Uses [currentDrainMode] to dispatch to the correct drain-thread strategy.
      */
     override fun beginSttProcessing() {
+        sttActive = true
         when (currentDrainMode) {
             DrainMode.DRAIN_FROM_NEXT_FRAME -> startDrainThreadFromNextFrame()
             DrainMode.DRAIN_FROM_HEAD -> startDrainThreadFromHead()
@@ -151,6 +167,18 @@ internal class CaptureManager(
         val drainRunnable = Runnable {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             while (draining) {
+                // Only buffer frames when STT is active. Frames arriving
+                // between beginPcmCapture() and beginSttProcessing() are
+                // silently dropped to prevent duplicate utterance processing.
+                if (!sttActive) {
+                    try {
+                        Thread.sleep(5)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    continue
+                }
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
                     for (sample in frame) {
@@ -181,7 +209,8 @@ internal class CaptureManager(
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
 
             // First, drain any frames already in the queue.
-            while (true) {
+            // Only process frames if STT is active.
+            while (sttActive) {
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
                     for (sample in frame) {
@@ -194,6 +223,15 @@ internal class CaptureManager(
 
             // Then continue draining new frames.
             while (draining) {
+                if (!sttActive) {
+                    try {
+                        Thread.sleep(5)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    continue
+                }
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
                     for (sample in frame) {

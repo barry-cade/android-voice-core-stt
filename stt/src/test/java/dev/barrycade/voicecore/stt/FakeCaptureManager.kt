@@ -37,6 +37,16 @@ internal class FakeCaptureManager(
         internal set
 
     /**
+     * True when STT processing is allowed to consume PCM frames.
+     * Set to false in [beginPcmCapture] and true in [beginSttProcessing].
+     * Guards the drain-thread simulation from buffering frames before
+     * the STT pipeline is officially active.
+     */
+    @Volatile
+    var sttActive: Boolean = false
+        internal set
+
+    /**
      * Stores the [DrainMode] from the most recent [begin] call.
      * Used by [beginSttProcessing] for drain-mode dispatching.
      */
@@ -91,6 +101,7 @@ internal class FakeCaptureManager(
      */
     override fun beginPcmCapture() {
         sessionBuffer.clear()
+        sttActive = false
         sessionActive = true
         // Capture starts lazily — matching real CaptureManager.beginPcmCapture() behaviour.
         if (!isStarted) {
@@ -106,10 +117,12 @@ internal class FakeCaptureManager(
      * Temporary placeholder — Phase 2 will refine the split.
      */
     override fun beginSttProcessing() {
+        sttActive = true
         when (currentDrainMode) {
             DrainMode.DRAIN_FROM_HEAD -> {
                 // Drain all pre-existing frames into the session buffer.
-                while (true) {
+                // Only process frames if STT is active.
+                while (sttActive) {
                     val frame = frameQueue.poll() ?: break
                     for (sample in frame) {
                         sessionBuffer.add(sample)
