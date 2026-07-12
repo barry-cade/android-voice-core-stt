@@ -13,12 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts.RequestPermissi
 import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
-import dev.barrycade.voicecore.stt.DrainMode
 import dev.barrycade.voicecore.stt.SpeechToText
-import dev.barrycade.voicecore.stt.SessionResult
 import dev.barrycade.voicecore.stt.SttReturnCode
 import dev.barrycade.voicecore.stt.SttRunConfig
 import dev.barrycade.voicecore.stt.StopStrategyConfig
+import dev.barrycade.voicecore.stt.StartStrategyConfig
 import java.io.File
 import java.io.FileOutputStream
 
@@ -33,9 +32,17 @@ class MainActivity : ComponentActivity() {
 
     private var selectedStopType: String = "MANUAL"
 
-        private var stt: SpeechToText? = null
-        private var isRecording = false
-        private val debugLogging = true
+    // Track strategy from active config for UI visibility.
+    private var activeStartStrategyType: String = "MANUAL"
+    private var activeStopStrategyType: String = "MANUAL"
+
+    // Guard: consecutive blank-audio hints.
+    private var blankAudioCount: Int = 0
+    private val blankAudioThreshold: Int = 3
+
+    private var stt: SpeechToText? = null
+    private var isRecording = false
+    private val debugLogging = true
 
     private fun logInfo(tag: String, message: String) {
         if (debugLogging) Log.i(tag, message)
@@ -46,6 +53,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
+
+    companion object {
+        private const val BLANK_AUDIO_MARKER = "[BLANK_AUDIO]"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -137,6 +148,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun displayConfig(runConfig: SttRunConfig) {
+        activeStartStrategyType = runConfig.startStrategy.type
+        activeStopStrategyType = runConfig.stopStrategy.type
         txtConfigDisplay.visibility = View.VISIBLE
         txtConfigDisplay.text = buildString {
             appendLine("=== Active Config ===")
@@ -195,7 +208,9 @@ class MainActivity : ComponentActivity() {
 
                                                                                                 speechToText.setOnResultWithTimingListener { text, code, timing ->
                 postToUi {
-                    isRecording = false
+                    // Rule 4: Do NOT stop capture on silence or any other result.
+                    // Only display the transcript. The session continues until
+                    // the user presses Stop (MANUAL stop strategy).
                     val timingInfo = if (timing != null) {
                         "Timing: vad=${timing.vadActiveMs}ms, " +
                         "utterance=${timing.utteranceDurationMs}ms, " +
@@ -205,7 +220,16 @@ class MainActivity : ComponentActivity() {
                     txtOutput.text = "[$code] $text"
                     txtDiagnostics.text = timingInfo
                     txtDiagnostics.visibility = android.view.View.VISIBLE
-                    updateUi()
+
+                    // Rule 5: Guard against infinite blank-audio chunking.
+                    if (text == BLANK_AUDIO_MARKER || text == "") {
+                        blankAudioCount += 1
+                        if (blankAudioCount >= blankAudioThreshold) {
+                            txtOutput.text = "No speech detected. Tap Stop to end the session."
+                        }
+                    } else {
+                        blankAudioCount = 0
+                    }
                 }
             }
 
@@ -223,9 +247,14 @@ class MainActivity : ComponentActivity() {
 
             stt = speechToText
             displayConfig(runConfig)
+            blankAudioCount = 0
             isRecording = true
             txtOutput.text = "Recording..."
-            updateUi()
+
+            // Rule 1: Stop button must be enabled immediately after successful start.
+            // StopStrategy = MANUAL => user MUST be able to end the session.
+            btnStop.isEnabled = true
+            btnStart.isEnabled = false
         } catch (e: IllegalArgumentException) {
             handleConfigError(e)
         }
@@ -250,13 +279,20 @@ class MainActivity : ComponentActivity() {
             postToUi { txtOutput.text = "Not yet started" }
             return
         }
-        isRecording = false
+        // Rule 2: Stop button must call stopAndTranscribe() every time.
+        // No conditions, no gating, no "only if speech detected."
         txtOutput.text = "Processing..."
-        updateUi()
         val thread = Thread({
             try {
                 Log.d("MainActivity", "STOP pressed -> using stopAndTranscribe()")
                 currentStt.stopAndTranscribe()
+                // Rule 3: Disable stop button only after stopAndTranscribe() returns.
+                postToUi {
+                    isRecording = false
+                    // Rule 3: Stop button disabled only when session actually ended.
+                    btnStop.isEnabled = false
+                    btnStart.isEnabled = true
+                }
             } catch (t: Throwable) {
                 postToUi { txtOutput.text = "Error: " + t.message }
             }
@@ -265,8 +301,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        btnStart.isEnabled = !isRecording
-        btnStop.isEnabled = isRecording
+        // Rule 6: UI must reflect strategy configuration.
+        // Start button visibility.
+        val showStart = !isRecording && activeStartStrategyType == "MANUAL"
+        btnStart.visibility = if (showStart) View.VISIBLE else View.GONE
+
+        // Stop button visibility.
+        val showStop = activeStopStrategyType == "MANUAL"
+        btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
+
         btnClear.isEnabled = true
     }
 
