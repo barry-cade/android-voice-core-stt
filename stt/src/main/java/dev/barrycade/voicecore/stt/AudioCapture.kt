@@ -77,12 +77,14 @@ class AudioCapture(
                 throw IllegalStateException("AudioRecord failed to initialize. Check permissions or MIC availability.")
             }
 
+            SttLogger.pcm("[CAPTURE] AudioCapture.start() — invoking AudioRecord.startRecording() synchronously")
             try {
                 ar.startRecording()
             } catch (e: Exception) {
                 ar.release()
                 throw IllegalStateException("Failed to start audio recording", e)
             }
+            SttLogger.pcm("[CAPTURE] AudioRecord.startRecording() returned OK")
 
             audioRecord = ar
             isRunning = true
@@ -96,7 +98,7 @@ class AudioCapture(
             workerThread = thread
             thread.start()
 
-            Log.d("AudioCapture", "Capture started [Rate: $sampleRate, Buffer: $finalBufferSizeInBytes bytes]")
+            SttLogger.pcm("[CAPTURE] Capture started [Rate: $sampleRate, Buffer: $finalBufferSizeInBytes bytes]")
         }
     }
 

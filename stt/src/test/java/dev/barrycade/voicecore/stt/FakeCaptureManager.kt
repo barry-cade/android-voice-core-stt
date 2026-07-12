@@ -36,6 +36,12 @@ internal class FakeCaptureManager(
     var isStarted: Boolean = false
         internal set
 
+    /**
+     * Stores the [DrainMode] from the most recent [begin] call.
+     * Used by [beginSttProcessing] for drain-mode dispatching.
+     */
+    private var currentDrainMode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
+
     override fun startCapture(): Boolean {
         if (failOnStart) return false
         isStarted = true
@@ -66,18 +72,41 @@ internal class FakeCaptureManager(
     /**
      * Begin a session: clear buffer and start accumulating.
      *
+     * Delegates to [beginPcmCapture] and [beginSttProcessing] in sequence.
+     *
      * @param mode Drain mode that determines whether pre-existing frames
      *        in the queue are included in the session buffer.
-     *        - [DrainMode.DRAIN_FROM_HEAD]: all frames currently in the queue
-     *          are drained into the session buffer before new frames are accepted.
-     *        - [DrainMode.DRAIN_FROM_NEXT_FRAME]: pre-existing frames in the queue
-     *          are discarded. Only frames arriving after this call are accumulated.
      */
     override fun begin(mode: DrainMode) {
+        currentDrainMode = mode
+        beginPcmCapture()
+        beginSttProcessing()
+    }
+
+    /**
+     * Start PCM capture synchronously.
+     *
+     * Temporary placeholder — matches real CaptureManager.beginPcmCapture().
+     * Phase 2 will refine the split.
+     */
+    override fun beginPcmCapture() {
         sessionBuffer.clear()
         sessionActive = true
+        // Capture starts lazily — matching real CaptureManager.beginPcmCapture() behaviour.
+        if (!isStarted) {
+            isStarted = true
+        }
+        SttLogger.pcm("[CAPTURE] FakeCaptureManager.beginPcmCapture() — capture started")
+    }
 
-        when (mode) {
+    /**
+     * Start STT processing (drain-thread simulation).
+     *
+     * Uses [currentDrainMode] to dispatch to the correct drain strategy.
+     * Temporary placeholder — Phase 2 will refine the split.
+     */
+    override fun beginSttProcessing() {
+        when (currentDrainMode) {
             DrainMode.DRAIN_FROM_HEAD -> {
                 // Drain all pre-existing frames into the session buffer.
                 while (true) {
@@ -92,8 +121,7 @@ internal class FakeCaptureManager(
                 frameQueue.clear()
             }
         }
-
-        SttLogger.pcm("[CAPTURE] FakeCaptureManager.begin() — drainMode=${mode.name}")
+        SttLogger.pcm("[CAPTURE] FakeCaptureManager.beginSttProcessing() — drainMode=${currentDrainMode.name}")
     }
 
     /**
@@ -106,8 +134,8 @@ internal class FakeCaptureManager(
             val frame = frameQueue.poll() ?: break
             for (sample in frame) {
                 sessionBuffer.add(sample)
-            }
         }
+}
         val result = sessionBuffer.toFloatArray()
         sessionBuffer.clear()
         isStarted = false

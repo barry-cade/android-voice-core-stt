@@ -1,7 +1,9 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -239,5 +241,43 @@ class SpeechToTextNewApiTest {
         speechToText.setConfig(invalidConfig())
         val result = speechToText.startSession()
         assertEquals(SttReturnCode.CONFIG_NOT_SET, result.code)
+    }
+
+    // ── Capture lifecycle (Phase 2.3.1) ──────────────────────────────────
+
+    @Test
+    fun constructor_doesNotStartCapture() {
+        // Rule 3: Construct STT -> capture must NOT be started.
+        // Capture only starts inside begin(), which is called from startSession().
+        val captureManagerField = SpeechToText::class.java.getDeclaredField("captureManager")
+        captureManagerField.isAccessible = true
+        val fakeCapture = captureManagerField.get(speechToText) as FakeCaptureManager
+        assertFalse(
+            "Capture must NOT be started after constructor",
+            fakeCapture.isStarted
+        )
+    }
+
+    @Test
+    fun startSession_startsCapture() {
+        // Rule 3: Call startSession() -> capture starts only then.
+        speechToText.setConfig(validManualStopConfig())
+        val captureManagerField = SpeechToText::class.java.getDeclaredField("captureManager")
+        captureManagerField.isAccessible = true
+        val fakeCapture = captureManagerField.get(speechToText) as FakeCaptureManager
+
+        // Before startSession, capture is not running.
+        assertFalse("Capture must NOT be started before startSession",
+            fakeCapture.isStarted)
+
+        safeRun {
+            speechToText.startSession()
+            // After startSession, begin() is called which should start capture.
+            // Since we use FakeCaptureManager, begin() sets sessionActive = true.
+            assertTrue(
+                "Capture must be started after startSession",
+                fakeCapture.isStarted
+            )
+        }
     }
 }

@@ -26,6 +26,23 @@ internal interface SessionManager : AudioSource {
     fun begin(mode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME)
 
     /**
+     * Start PCM capture synchronously. Capture must begin before any
+     * frames can be buffered into the session.
+     *
+     * Temporary placeholder — delegates to [begin] for now.
+     * Phase 2 will move AudioCapture.start() logic into this method.
+     */
+    fun beginPcmCapture()
+
+    /**
+     * Start STT processing (drain thread / processor hand-off).
+     *
+     * Temporary placeholder — delegates to [begin] for now.
+     * Phase 2 will move drain thread logic into this method.
+     */
+    fun beginSttProcessing()
+
+    /**
      * Finalize the session: return all accumulated PCM as raw concatenated
      * FloatArray. After this call, the session buffer is cleared.
      *
@@ -56,3 +73,4 @@ internal interface SessionManager : AudioSource {
      */
     fun restartCapture()
 }
+    

@@ -6,9 +6,14 @@ import java.util.concurrent.ConcurrentLinkedQueue
 /**
  * CaptureManager owns the microphone PCM queue.
  *
- * Pre-wired at construction: [AudioCapture] is created and started immediately,
- * enqueuing FloatArray frames into a [ConcurrentLinkedQueue]. The capture
- * thread runs independently of STT engine state.
+ * AudioCapture is created at construction but NOT started. Capture begins
+ * lazily when [begin] is called. This ensures no PCM frames are buffered
+ * before the caller explicitly starts a session.
+ *
+ * Pre-wired at construction: [AudioCapture] is created and ready.
+ * When [begin] is called, AudioCapture starts and enqueues FloatArray frames
+ * into a [ConcurrentLinkedQueue]. The capture thread runs independently of
+ * STT engine state.
  *
  * ## Session model
  *
@@ -31,7 +36,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  *
  * ## Invariant compliance
  *
- * - Capture begins immediately in constructor (invariant #1).
+ * - Capture begins lazily in [begin] (not in the constructor).
  * - Queue accepts frames before STT readiness (invariant #2).
  * - Session buffer preserves all frames since [begin] (invariant #4).
  * - Capture stops only in [shutdown] (invariant #6).
@@ -71,53 +76,71 @@ internal class CaptureManager(
 
     /**
      * True after AudioCapture has been started.
-     * Set in the constructor.
+     * Capture is NOT started in the constructor. It starts lazily in [begin].
      */
     private var captureStarted: Boolean = false
 
+    /**
+     * Stores the [DrainMode] from the most recent [begin] call.
+     * Used by [beginSttProcessing] to dispatch to the correct
+     * drain-thread strategy.
+     */
+    private var currentDrainMode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
+
     init {
-        audioCapture.start()
-        captureStarted = true
-        SttLogger.pcm("[CAPTURE] CaptureManager initialised, AudioCapture started immediately")
+        SttLogger.pcm("[CAPTURE] CaptureManager initialised — capture NOT started")
     }
 
     // ── Session lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Begin a session: clear the session buffer and start accumulating frames.
+     * Begin a session: start PCM capture and begin accumulating frames.
      *
-     * If no processor is active yet (warm-up phase), a lightweight drain thread
-     * is started to copy frames from the AudioCapture queue into the session
-     * buffer. Once [pollFrame] is called by the processor, the drain thread
-     * stops and the processor's [pollFrame] calls handle both buffering and
-     * frame delivery.
-     *
-     * The [mode] parameter determines how the initial buffer is handled:
-     * - [DrainMode.DRAIN_FROM_NEXT_FRAME]: session buffer is cleared, drain
-     *   starts only from new frames arriving after this call.
-     * - [DrainMode.DRAIN_FROM_HEAD]: existing queue frames are drained into
-     *   the session buffer before the drain thread begins.
+     * Delegates to [beginPcmCapture] and [beginSttProcessing] in sequence.
+     * The [mode] parameter determines how the initial buffer is handled
+     * during STT processing.
      *
      * Safe to call multiple times — subsequent calls reset the buffer.
      * Must be called from a single thread (caller serialises).
      */
     override fun begin(mode: DrainMode) {
-        logDrainMode(mode)
-        sessionBuffer.clear()
-        draining = true
+        currentDrainMode = mode
+        beginPcmCapture()
+        beginSttProcessing()
+    }
 
-        when (mode) {
-            DrainMode.DRAIN_FROM_NEXT_FRAME -> startDrainThreadFromNextFrame()
-            DrainMode.DRAIN_FROM_HEAD -> startDrainThreadFromHead()
+    /**
+     * Start PCM capture synchronously. Capture must begin before any
+     * frames can be buffered into the session.
+     *
+     * Temporary placeholder — contains the original begin() AudioCapture
+     * startup logic. Phase 2 will refine the split.
+     */
+    override fun beginPcmCapture() {
+        sessionBuffer.clear()
+
+        // Start AudioCapture synchronously — capture begins immediately.
+        // This must complete before the drain thread starts.
+        if (!captureStarted) {
+            SttLogger.pcm("[CAPTURE] beginPcmCapture() — starting AudioRecord synchronously")
+            audioCapture.start()
+            captureStarted = true
+            SttLogger.pcm("[CAPTURE] beginPcmCapture() — AudioCapture started")
         }
     }
 
     /**
-     * Log the drain mode when a session begins.
-     * This MUST appear in logs whenever a session begins.
+     * Start STT processing (drain thread / processor hand-off).
+     *
+     * Uses [currentDrainMode] to dispatch to the correct drain-thread strategy.
+     * Temporary placeholder — Phase 2 will refine the split.
      */
-    private fun logDrainMode(mode: DrainMode) {
-        SttLogger.pcm("[CAPTURE] begin() — drainMode=${mode.name}")
+    override fun beginSttProcessing() {
+        draining = true
+        when (currentDrainMode) {
+            DrainMode.DRAIN_FROM_NEXT_FRAME -> startDrainThreadFromNextFrame()
+            DrainMode.DRAIN_FROM_HEAD -> startDrainThreadFromHead()
+        }
     }
 
     /**

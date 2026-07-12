@@ -43,7 +43,8 @@ class SpeechToText internal constructor(
          * calling [startSession].
          *
          * Model loading and warm-up begin immediately in the constructor.
-         * Audio capture also begins immediately (CaptureManager is pre-wired).
+         * Audio capture does NOT start until [startSession] is called
+         * (CaptureManager begins lazily in [CaptureManager.begin]).
          *
          * @param modelPath Absolute path to the Whisper model binary.
          * @return A new [SpeechToText] instance.
@@ -136,7 +137,7 @@ class SpeechToText internal constructor(
             whisperModel.warmup(config.warmupDurationMs)
         }
 
-        // Transition to INITIALISED (CaptureManager pre-wired, mic running).
+        // Transition to INITIALISED (CaptureManager pre-wired, mic NOT running).
         stateMachine.forceSet(SttLifecycleState.INITIALISED)
 
         modelManager = ModelManager(
@@ -265,10 +266,12 @@ class SpeechToText internal constructor(
      * Manually raised events (via [startSession] and [stopAndTranscribe])
      * are consumed by [ManualStart] and [ManualStop] strategies respectively.
      *
-     * CaptureManager is pre-wired (microphone already running). This method:
-     * 1. Calls [CaptureManager.begin] to start buffering frames into the session buffer.
-     * 2. If the model is ready, starts the processor immediately.
-     * 3. If the model is still warming up, queues the start and replays when ready.
+     * CaptureManager is pre-wired (microphone starts lazily on [CaptureManager.begin]).
+     * This method:
+     * 1. Starts AudioCapture lazily via [CaptureManager.begin].
+     * 2. Calls [CaptureManager.begin] to start buffering frames into the session buffer.
+     * 3. If the model is ready, starts the processor immediately.
+     * 4. If the model is still warming up, queues the start and replays when ready.
      *
      * ## Return codes
      *
@@ -296,8 +299,8 @@ class SpeechToText internal constructor(
                     return SessionResult(SttReturnCode.SUCCESS, null)
                 }
 
-                // Capture is already running. Begin buffering frames with
-                // the drainMode from the active config.
+                // Capture is not yet running. begin() starts AudioCapture lazily
+                // and begins buffering frames with the drainMode from the active config.
                 sessionStartMs = System.currentTimeMillis()
                 captureManager.begin(currentDrainMode)
 
