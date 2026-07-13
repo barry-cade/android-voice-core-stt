@@ -29,11 +29,12 @@ internal class Vad(
     internal var debugLogging: Boolean = false
 
     internal var lastFrameEnergy: Float = 0f
+    @Volatile
     private var isCurrentlySpeech: Boolean = false
 
     /** Consecutive speech frames since last silence transition. */
+    @Volatile
     private var consecutiveSpeechFrames: Int = 0
-
     /**
      * Total ms of consecutive speech detection.
      * Resets to 0 when a silence frame is detected.

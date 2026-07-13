@@ -49,11 +49,6 @@ internal class AudioCapture(
 
     fun getQueue(): ConcurrentLinkedQueue<FloatArray> = frameQueue
 
-    /**
-     * Clear all pending frames from the queue.
-     * Called by SpeechToText before starting the processor to discard
-     * frames accumulated during warm-up (background noise, not intentional speech).
-     */
     fun clearQueue() {
         frameQueue.clear()
     }
@@ -133,8 +128,6 @@ internal class AudioCapture(
                     floatBuffer!![index] = shortBuffer!![index].toFloat() / Short.MAX_VALUE
                 }
                 val floatFrame = floatBuffer!!.copyOf(readCount)
-                // Use a local snapshot of isRunning to avoid a stale read after
-                // stop() has returned and cleared the queue.
                 val running = isRunning
                 if (running) {
                     frameQueue.offer(floatFrame)
@@ -159,6 +152,9 @@ internal class AudioCapture(
     }
 
     fun stop() {
+        // ── Phase 1: signal stop, stop AudioRecord, extract thread ref ──
+        // stateLock is NOT held across join().
+        val threadToJoin: Thread?
         synchronized(stateLock) {
             if (!isRunning) return
             isRunning = false
@@ -172,16 +168,25 @@ internal class AudioCapture(
                 Log.e("AudioCapture", "Error stopping AudioRecord", e)
             }
 
+            threadToJoin = workerThread
+            workerThread = null
+        }
+
+        // ── Phase 2: join worker thread OUTSIDE stateLock ───────────────
+        // Self-join guard: a thread cannot join itself.
+        if (threadToJoin != null && threadToJoin !== Thread.currentThread()) {
             try {
-                workerThread?.join(500)
+                threadToJoin.join(500)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 Log.w("AudioCapture", "Interrupted during join")
             }
+        }
 
+        // ── Phase 3: release resources under stateLock ──────────────────
+        synchronized(stateLock) {
             audioRecord?.release()
             audioRecord = null
-            workerThread = null
             frameQueue.clear()
             Log.d("AudioCapture", "Capture stopped")
         }

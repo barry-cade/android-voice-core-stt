@@ -482,10 +482,14 @@ class SpeechToText internal constructor(
             sessionEpoch.incrementAndGet()
             sessionController.resetUtteranceTiming()
             transitionPipelineToIdleLocked("destroy")
-            modelManager.unload()
             sessionConfig = null
             lifecycleController.onDestroy()
         }
+        // ── Unload model OUTSIDE stateLock ─────────────────────────────
+        // unload() calls whisperModel.unloadModel() which is a blocking
+        // JNI call. Holding stateLock across it would block all public
+        // lifecycle methods.
+        modelManager.unload()
         modelManager.shutdown()
         callbackDispatcher.clearListeners()
     }
