@@ -12,6 +12,7 @@ package dev.barrycade.voicecore.stt
  * - [vadConfig] defines VAD parameters shared by both strategies
  * - [warmupEnabled] controls whether Whisper warm-up is performed
  * - [warmupDurationMs] duration of the warm-up inference (ms)
+ * - [bufferSizeSamples] size of the AudioRecord read buffer in samples
  *
  * @property ttsEngineConfig Engine-level configuration (model path, language).
  * @property vadConfig VAD parameters (energy threshold, pre-roll, chunk size).
@@ -20,6 +21,8 @@ package dev.barrycade.voicecore.stt
  * @property stopStrategy Stop strategy config (type + params).
  * @property warmupEnabled Whether to run Whisper warm-up on model load.
  * @property warmupDurationMs Duration of warm-up inference in ms.
+ * @property bufferSizeSamples Size of the AudioRecord read buffer in samples.
+ *        Must be >= 1024 and <= 16000. Default 4000 (0.25s at 16kHz).
  */
 data class SttRunConfig(
     val ttsEngineConfig: TtsEngineConfig,
@@ -28,7 +31,8 @@ data class SttRunConfig(
     val startStrategy: StartStrategyConfig,
     val stopStrategy: StopStrategyConfig,
     val warmupEnabled: Boolean = false,
-    val warmupDurationMs: Int = 0
+    val warmupDurationMs: Int = 0,
+    val bufferSizeSamples: Int = 4000
 )
 
 /**

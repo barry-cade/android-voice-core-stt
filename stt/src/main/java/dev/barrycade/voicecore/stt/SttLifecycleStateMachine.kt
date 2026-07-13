@@ -13,6 +13,7 @@ package dev.barrycade.voicecore.stt
  *   READY         → RECORDING | STOPPED
  *   RECORDING     → FINALISING
  *   FINALISING    → STOPPED
+ *   STOPPED       → READY
  *
  * All other transitions are illegal and return false.
  * Duplicate transitions (same state → same state) are allowed as no-ops.
@@ -49,7 +50,7 @@ internal class SttLifecycleStateMachine {
                         newState is SttLifecycleState.STOPPED
                 is SttLifecycleState.RECORDING -> newState is SttLifecycleState.FINALISING
                 is SttLifecycleState.FINALISING -> newState is SttLifecycleState.STOPPED
-                else -> false
+                is SttLifecycleState.STOPPED -> newState is SttLifecycleState.READY
             }
 
             if (valid) {
@@ -81,3 +82,4 @@ internal class SttLifecycleStateMachine {
         }
     }
 }
+

@@ -44,16 +44,21 @@ import java.util.concurrent.ConcurrentLinkedQueue
  *
  * @param sampleRate Audio sample rate in Hz (default 16000).
  * @param bufferSizeBytes Requested buffer size in bytes (default 32000).
+ * @param bufferSizeSamples Size of the AudioRecord read buffer in samples.
+ *        Controls read chunk size for AudioCapture. Must be >= 1024 and <= 16000.
+ *        Default 4000 (0.25s at 16kHz). Passed through to AudioCapture.
  */
 internal class CaptureManager(
     private val sampleRate: Int = 16000,
-    private val bufferSizeBytes: Int = 32000
+    private val bufferSizeBytes: Int = 32000,
+    private val bufferSizeSamples: Int = 4000
 ) : SessionManager {
 
     /** Underlying AudioCapture, created and started in the constructor. */
     private val audioCapture: AudioCapture = AudioCapture(
         sampleRate = sampleRate,
-        requestedBufferSizeInBytes = bufferSizeBytes
+        requestedBufferSizeInBytes = bufferSizeBytes,
+        bufferSizeSamples = bufferSizeSamples
     )
 
     /**
@@ -139,7 +144,7 @@ internal class CaptureManager(
         // Start AudioCapture synchronously — capture begins immediately.
         // This must complete before the drain thread starts.
         if (!captureStarted) {
-            SttLogger.pcm("[CAPTURE] beginPcmCapture() — starting AudioRecord synchronously")
+            SttLogger.pcm("[CAPTURE] beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
             audioCapture.start()
             captureStarted = true
             SttLogger.pcm("[CAPTURE] beginPcmCapture() — AudioCapture started")

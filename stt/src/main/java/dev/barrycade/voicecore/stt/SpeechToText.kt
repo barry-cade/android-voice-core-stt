@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SpeechToText internal constructor(
     context: Context?,
     private val whisperModel: WhisperModel = WhisperBridge,
-    internal val captureManager: SessionManager = CaptureManager()
+    internal var captureManager: SessionManager = CaptureManager()
 ) {
 
     // ── Controller references ────────────────────────────────────────────
@@ -180,8 +180,8 @@ class SpeechToText internal constructor(
      * any STT processing behaviours.
      */
     fun initStt(config: SttRunConfig): SessionResult {
-        // ── Idempotency guard: already initialised ─────────────────────────
-        if (isInitialised) {
+        // ── Idempotency guard: already initialised or in READY state ─────────
+        if (isInitialised || lifecycleController.currentState is SttLifecycleState.READY) {
             SttLogger.lifecycle("initStt: already initialised — returning SUCCESS immediately")
             return SessionResult(SttReturnCode.SUCCESS, null)
         }
@@ -208,6 +208,16 @@ class SpeechToText internal constructor(
 
         // ── Step 3: Build runtime config ──────────────────────────────────
         this.config = RuntimeSttConfig.fromSttRunConfig(config)
+
+        // ── Step 3a: Reconstruct CaptureManager with runtime buffer size ──
+        // If the default CaptureManager was created in the constructor (no
+        // test double injected), replace it with one configured for the
+        // runtime bufferSizeSamples.
+        if (captureManager is CaptureManager) {
+            captureManager = CaptureManager(
+                bufferSizeSamples = config.bufferSizeSamples
+            )
+        }
 
         // ── Step 4: Construct STT scaffolding via mode controller ─────────
         modeController.selectController(
@@ -240,7 +250,7 @@ class SpeechToText internal constructor(
             return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
         }
 
-        if (!isInitialised) {
+        if (!isInitialised && lifecycleController.currentState !is SttLifecycleState.READY) {
             SttLogger.lifecycleW("startSession() called before initStt() — returning CONFIG_NOT_SET")
             return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
         }
@@ -313,8 +323,9 @@ class SpeechToText internal constructor(
             captureManager.stopCapture()
 
             if (finalPcm.isEmpty()) {
-                SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED")
+                SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED then READY")
                 lifecycleController.onStop()
+                lifecycleController.onReset()
                 return
             }
 
@@ -337,9 +348,11 @@ class SpeechToText internal constructor(
             )
         }
 
-        // Transition to STOPPED after inference is submitted.
+        // Transition to STOPPED after inference is submitted,
+        // then immediately reset to READY for the next utterance.
         synchronized(stateLock) {
             lifecycleController.onStop()
+            lifecycleController.onReset()
         }
     }
 

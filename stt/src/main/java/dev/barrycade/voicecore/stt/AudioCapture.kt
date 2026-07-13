@@ -12,10 +12,17 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * AudioCapture provides a dedicated microphone thread for reading PCM16 mono audio.
  * It publishes each captured frame as a FloatArray into a shared queue.
  * Single output path: FloatArray frames only — no ShortArray callback.
+ *
+ * @param sampleRate Audio sample rate in Hz (default 16000).
+ * @param requestedBufferSizeInBytes Requested internal AudioRecord buffer size in bytes.
+ * @param bufferSizeSamples Size of the read buffer in samples. Controls how many
+ *        PCM samples are read per AudioRecord.read() call. Must be >= 1024 and <= 16000.
+ *        Default 4000 (0.25s at 16kHz).
  */
 class AudioCapture(
     private val sampleRate: Int = 16000,
-    private val requestedBufferSizeInBytes: Int
+    private val requestedBufferSizeInBytes: Int,
+    private val bufferSizeSamples: Int = 4000
 ) {
     private val stateLock = Any()
 
@@ -89,16 +96,15 @@ class AudioCapture(
             audioRecord = ar
             isRunning = true
 
-            val readBufferSamples = finalBufferSizeInBytes / 2
             val runnable = Runnable {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-                captureLoop(readBufferSamples)
+                captureLoop(bufferSizeSamples)
             }
             val thread = Thread(runnable, "AudioCaptureThread")
             workerThread = thread
             thread.start()
 
-            SttLogger.pcm("[CAPTURE] Capture started [Rate: $sampleRate, Buffer: $finalBufferSizeInBytes bytes]")
+            SttLogger.pcm("[CAPTURE] Capture started [Rate: $sampleRate, ReadBuffer: $bufferSizeSamples samples, AudioRecordBuffer: $finalBufferSizeInBytes bytes]")
         }
     }
 

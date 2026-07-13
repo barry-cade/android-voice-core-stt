@@ -114,6 +114,11 @@ internal object SttRunConfigValidator {
             else -> return SessionResult(SttReturnCode.INVALID_CONFIG, null)
         }
 
+        // ── Validate bufferSizeSamples ────────────────────────────────────
+        if (config.bufferSizeSamples < 1024 || config.bufferSizeSamples > 16000) {
+            return SessionResult(SttReturnCode.INVALID_CONFIG, null)
+        }
+
         // All validations passed.
         return null
     }

@@ -90,6 +90,8 @@ internal class SttLifecycleController {
      * no PCM was accumulated.
      *
      * Legal from: FINALISING only (or no-op if already STOPPED).
+     * After STOPPED, call [onReset] to transition back to READY for
+     * the next utterance.
      */
     fun onStop() {
         if (stateMachine.currentState is SttLifecycleState.STOPPED) return
@@ -100,18 +102,24 @@ internal class SttLifecycleController {
     /**
      * Reset to READY state for a new session.
      *
-     * Uses forceSet to bypass from RECORDING, FINALISING, or STOPPED.
+     * Uses transitionTo for STOPPED → READY (legal transition).
+     * Uses forceSet to bypass from RECORDING or FINALISING (illegal via
+     * normal transitions).
      * Safe to call multiple times; idempotent when already in READY or
      * INITIALISED.
      */
     fun onReset() {
         val current = stateMachine.currentState
-        if (current is SttLifecycleState.RECORDING ||
-            current is SttLifecycleState.FINALISING ||
-            current is SttLifecycleState.STOPPED
-        ) {
-            stateMachine.forceSet(SttLifecycleState.READY)
-            SttLogger.lifecycle("SttLifecycleController: onReset() — state=READY")
+        when {
+            current is SttLifecycleState.STOPPED -> {
+                stateMachine.transitionTo(SttLifecycleState.READY)
+                SttLogger.lifecycle("SttLifecycleController: onReset() — state=READY (from STOPPED)")
+            }
+            current is SttLifecycleState.RECORDING ||
+                    current is SttLifecycleState.FINALISING -> {
+                stateMachine.forceSet(SttLifecycleState.READY)
+                SttLogger.lifecycle("SttLifecycleController: onReset() — state=READY (bypass from ${current::class.simpleName})")
+            }
         }
     }
 
