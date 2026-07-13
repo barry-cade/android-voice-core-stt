@@ -104,6 +104,9 @@ class SpeechToText internal constructor(
     /** Model manager — created once, persists across utterances. */
     internal val modelManager: ModelManager
 
+    /** Dedicated inference adapter controller. */
+    internal val inferenceController: SttInferenceController
+
     /** [SttRunConfig] set via [setConfig]. */
     private var runConfig: SttRunConfig? = null
 
@@ -123,6 +126,7 @@ class SpeechToText internal constructor(
             readyListener = null,
             whisperModel = whisperModel
         )
+        inferenceController = SttInferenceController(modelManager, callbackDispatcher)
         lifecycleController.onInit()
         SttLogger.lifecycle("SpeechToText constructed — model NOT loaded. Call initStt() to initialise.")
     }
@@ -573,52 +577,48 @@ class SpeechToText internal constructor(
         sessionEpochAtSubmission: Long,
         completeStopPath: Boolean
     ): Boolean {
-        val shortPcm = pcm.toShortArray()
-        val pipelineStartMs = sessionController.utteranceElapsedMs()
-        val effectiveSilenceMs = config.autoSilenceMs.toLong()
+        val request = SttInferenceController.InferenceRequest(
+            pcm = pcm,
+            code = code,
+            vadActiveMs = vadActiveMs,
+            utteranceMs = utteranceMs,
+            captureMs = captureMs,
+            preRollMs = config.preRollMs.toLong(),
+            autoSilenceMs = config.autoSilenceMs.toLong(),
+            pipelineStartMs = sessionController.utteranceElapsedMs(),
+            sessionEpochAtSubmission = sessionEpochAtSubmission
+        )
 
-        val onResultCallback: (String) -> Unit = fun(text: String) {
-            val isStale = synchronized(stateLock) {
-                sessionEpochAtSubmission != currentSessionEpoch
-            }
-
-            val shouldDispatch = if (isStale) {
-                false
-            } else {
+        return inferenceController.submit(
+            request = request,
+            decideDispatch = {
                 synchronized(stateLock) {
-                    transitionPipelineStageLocked(SttPipelineStage.DISPATCHING, "inference result ready")
+                    if (sessionEpochAtSubmission != currentSessionEpoch) {
+                        SttInferenceController.DispatchDecision(
+                            shouldDispatch = false,
+                            dropReason = "stale submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
+                        )
+                    } else {
+                        val transitioned = transitionPipelineStageLocked(
+                            SttPipelineStage.DISPATCHING,
+                            "inference result ready"
+                        )
+                        if (transitioned) {
+                            SttInferenceController.DispatchDecision(shouldDispatch = true)
+                        } else {
+                            SttInferenceController.DispatchDecision(
+                                shouldDispatch = false,
+                                dropReason = "illegal stage transition to DISPATCHING from ${pipelineState.currentStage}"
+                            )
+                        }
+                    }
                 }
-            }
-
-            if (!shouldDispatch) {
-                if (isStale) {
-                    SttLogger.lifecycleW(
-                        "stale inference result dropped: submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
-                    )
-                } else {
-                    SttLogger.lifecycleW(
-                        "inference result dropped due to illegal stage transition: stage=${pipelineState.currentStage}"
-                    )
+            },
+            onPostDispatch = {
+                if (completeStopPath) {
+                    return@submit
                 }
-                return
-            }
 
-            val whisperMs = System.currentTimeMillis() - pipelineStartMs
-            val totalMs = System.currentTimeMillis() - pipelineStartMs
-
-            val snapshot = SttTimingSnapshot(
-                vadActiveMs = vadActiveMs,
-                utteranceDurationMs = utteranceMs,
-                silencePaddingMs = effectiveSilenceMs,
-                preRollMs = config.preRollMs.toLong(),
-                inferenceMs = whisperMs,
-                totalPipelineMs = totalMs
-            )
-
-            callbackDispatcher.dispatchTiming(captureMs, vadActiveMs, whisperMs, totalMs)
-            callbackDispatcher.dispatchResult(text, code, snapshot)
-
-            if (!completeStopPath) {
                 synchronized(stateLock) {
                     if (sessionEpochAtSubmission != currentSessionEpoch) {
                         transitionPipelineToIdleLocked("dispatch stale completion")
@@ -628,22 +628,17 @@ class SpeechToText internal constructor(
                         transitionPipelineToIdleLocked("dispatch complete not running")
                     }
                 }
-            }
-        }
-
-        return modelManager.submitInference(
-            pcm = shortPcm,
-            onResult = onResultCallback,
+            },
             onComplete = {
                 synchronized(stateLock) {
                     isInferencing.set(false)
 
                     if (!completeStopPath) {
-                        return@submitInference
+                        return@submit
                     }
 
                     if (sessionEpochAtSubmission != currentSessionEpoch) {
-                        return@submitInference
+                        return@submit
                     }
 
                     transitionPipelineToIdleLocked("stop inference complete")
@@ -680,15 +675,4 @@ class SpeechToText internal constructor(
         }
     }
 
-    // ======== Helpers =====================================================
-
-    private fun FloatArray.toShortArray(): ShortArray {
-        val shorts = ShortArray(size)
-        for (i in indices) {
-            shorts[i] = (kotlin.math.max(-1f, kotlin.math.min(1f, this[i])) * Short.MAX_VALUE)
-                .toInt()
-                .toShort()
-        }
-        return shorts
-    }
 }
