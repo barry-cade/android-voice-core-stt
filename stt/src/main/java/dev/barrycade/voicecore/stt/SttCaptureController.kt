@@ -20,15 +20,12 @@ package dev.barrycade.voicecore.stt
  *
  * @param sessionManager The underlying [SessionManager] implementation.
  *        Production: [CaptureManager]. Tests: [FakeCaptureManager].
+ *        Immutable after construction — use [replaceSessionManager] only
+ *        when explicitly required (runtime buffer size reconstruction).
  */
 internal class SttCaptureController(
-    sessionManager: SessionManager
+    val sessionManager: SessionManager
 ) {
-
-    /** The underlying session manager used for PCM buffering. */
-    @Volatile
-    var sessionManager: SessionManager = sessionManager
-        internal set
 
     /**
      * Start a capture session: begin PCM capture, then start STT processing
