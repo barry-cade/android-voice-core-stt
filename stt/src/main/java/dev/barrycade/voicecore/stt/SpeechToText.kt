@@ -42,10 +42,13 @@ import java.util.concurrent.atomic.AtomicLong
 class SpeechToText internal constructor(
     context: Context?,
     private val whisperModel: WhisperModel = WhisperBridge,
-    internal var captureManager: SessionManager = CaptureManager()
+    captureManager: SessionManager = CaptureManager()
 ) {
 
     // ── Controller references ────────────────────────────────────────────
+
+    /** Capture lifecycle controller, wraps the [SessionManager]. */
+    internal val captureController = SttCaptureController(captureManager)
 
     internal val lifecycleController = SttLifecycleController()
     internal val sessionController = SttSessionController()
@@ -106,6 +109,9 @@ class SpeechToText internal constructor(
 
     /** Dedicated inference adapter controller. */
     internal val inferenceController: SttInferenceController
+
+    /** Processing controller for Auto mode. null in Manual mode. */
+    internal var processingController: SttProcessingController? = null
 
     /** [SttRunConfig] set via [setConfig]. */
     private var runConfig: SttRunConfig? = null
@@ -230,24 +236,33 @@ class SpeechToText internal constructor(
             // If the default CaptureManager was created in the constructor (no
             // test double injected), replace it with one configured for the
             // runtime bufferSizeSamples.
-            if (captureManager is CaptureManager) {
-                captureManager = CaptureManager(
+            val currentSessionManager = captureController.sessionManager
+            if (currentSessionManager is CaptureManager) {
+                captureController.sessionManager = CaptureManager(
                     bufferSizeSamples = config.bufferSizeSamples
                 )
             }
 
+            val sessionManager = captureController.sessionManager
+
             // ── Step 4: Construct STT scaffolding via mode controller ─────────
             modeController.selectController(
                 config = this.config,
-                captureManager = captureManager,
-                stopRequestedRef = { this.stopRequested },
-                sttErrorListener = callbackDispatcher.getSttErrorListener(),
-                forceTimeout = debugOptions.forceTimeout
+                captureManager = sessionManager,
+                stopRequestedRef = { this.stopRequested }
             )
 
-            // Wire the utterance-ready callback.
-            modeController.onUtteranceReadyCallback = { pcm, code ->
-                handleUtteranceReady(pcm, code)
+            if (!modeController.isManualMode()) {
+                processingController = SttProcessingController(
+                    config = this.config,
+                    captureManager = sessionManager,
+                    stopRequestedRef = { this.stopRequested },
+                    sttErrorListener = callbackDispatcher.getSttErrorListener(),
+                    forceTimeout = debugOptions.forceTimeout,
+                    listener = ProcessingListener { pcm, code ->
+                        handleUtteranceReady(pcm, code)
+                    }
+                )
             }
 
             // ── Step 5: Mark initialised ──────────────────────────────────────
@@ -290,7 +305,7 @@ class SpeechToText internal constructor(
 
             events.manualStartPressed.raise()
 
-            if (!config.startStrategy.shouldStart(events, modeController.activeVad)) {
+            if (!config.startStrategy.shouldStart(events, processingController?.vad)) {
                 return SessionResult(SttReturnCode.SUCCESS, null)
             }
 
@@ -299,13 +314,12 @@ class SpeechToText internal constructor(
                 return SessionResult(SttReturnCode.ENGINE_ERROR, null)
             }
             sessionController.beginSession()
-            captureManager.beginPcmCapture()
+            captureController.startCapture(modeController.isManualMode())
 
             if (modeController.isManualMode()) {
-                captureManager.activatePcmCapture()
+                captureController.activatePcmCapture()
                 modeController.minimalProcessorController?.start()
             } else {
-                captureManager.beginSttProcessing()
                 startProcessor()
             }
 
@@ -324,7 +338,7 @@ class SpeechToText internal constructor(
 
             events.manualStopPressed.raise()
 
-            if (!config.stopStrategy.shouldStop(events, modeController.activeVad, elapsedMs)) {
+            if (!config.stopStrategy.shouldStop(events, processingController?.vad, elapsedMs)) {
                 return
             }
 
@@ -343,15 +357,13 @@ class SpeechToText internal constructor(
                 return
             }
 
-            // ── Finalise PCM via CaptureManager (raw PCM, no VAD) ────────
+            // ── Finalise PCM via CaptureController (raw PCM, no VAD) ────
             isRunning.set(false)
             stopRequested = true
 
             modeController.stopController()
 
-            val finalPcm = captureManager.finalize()
-
-            captureManager.stopCapture()
+            val finalPcm = captureController.finaliseAndStop()
 
             if (finalPcm.isEmpty()) {
                 SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED then READY")
@@ -407,10 +419,10 @@ class SpeechToText internal constructor(
             SttLogger.lifecycle("resetForNextSession: state=${lifecycleController.currentState}")
 
             modeController.stopController()
+            processingController?.stop()
 
             sessionController.resetSession()
-            captureManager.restartCapture()
-            captureManager.reset()
+            captureController.resetForNextSession()
             isRunning.set(false)
             stopRequested = false
             sessionController.resetUtteranceTiming()
@@ -426,7 +438,8 @@ class SpeechToText internal constructor(
     fun destroy() {
         synchronized(stateLock) {
             modeController.stopController()
-            captureManager.shutdown()
+            processingController?.stop()
+            captureController.shutdown()
             isRunning.set(false)
             stopRequested = false
             isInferencing.set(false)
@@ -497,7 +510,11 @@ class SpeechToText internal constructor(
 
         sessionController.beginPcmTiming()
 
-        val controller = modeController.selectedController()
+        val controller = if (modeController.isManualMode()) {
+            modeController.selectedController()
+        } else {
+            processingController?.processorController
+        }
 
         if (controller == null) {
             SttLogger.error("code=INTEGRATION_ERROR, message=\"startProcessor(): controller is null — call initStt() first\"")
@@ -530,8 +547,8 @@ class SpeechToText internal constructor(
         }
 
         try {
-            val vadMs = modeController.vadActiveMs()
-            val utterMs = modeController.lastUtteranceDurationMs().toLong()
+            val vadMs = processingController?.vadActiveMs ?: 0L
+            val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
             val captureMs = sessionController.captureMs()
             val submitted = submitInferenceAndDispatch(
                 pcm = pcm,

@@ -6,9 +6,13 @@ package dev.barrycade.voicecore.stt
  * Responsibilities:
  * - Determine whether the active config is Manual mode (ManualStart + ManualStop).
  * - Construct and store the appropriate [PollingController] based on mode.
- * - Provide access to the selected controller and related components (VAD, accumulator).
+ * - Provide access to the selected controller.
  *
- * No lifecycle, no threading, no callbacks — only mode branching and component construction.
+ * No lifecycle, no threading, no callbacks, no processing components —
+ * only mode branching and component construction.
+ *
+ * Processing components (VAD, accumulator, utterance handler) are owned
+ * by [SttProcessingController] in Auto mode.
  */
 internal class SttModeController {
 
@@ -18,18 +22,6 @@ internal class SttModeController {
 
     /** Processor controller for Auto mode. null when not in Auto mode. */
     var processorController: ProcessorController? = null
-        private set
-
-    /** Active VAD instance. null until initialised. Only used in Auto mode. */
-    var activeVad: Vad? = null
-        private set
-
-    /** Utterance accumulator. null until initialised. Only used in Auto mode. */
-    var utteranceAccumulator: UtteranceAccumulator? = null
-        private set
-
-    /** Utterance handler. null until initialised. Only used in Auto mode. */
-    var utteranceHandler: UtteranceListener? = null
         private set
 
     /** True when Manual mode (ManualStart + ManualStop) is active. */
@@ -51,20 +43,17 @@ internal class SttModeController {
      * Determine the mode from [config] and construct the appropriate controller.
      *
      * In Manual mode: constructs [MinimalPollingController] only (no VAD, no accumulator).
-     * In Auto mode: constructs VAD, [UtteranceAccumulator], [UtteranceHandler], and [ProcessorController].
+     * In Auto mode: no controller is constructed here — [ProcessorController] is
+     * owned by [SttProcessingController] and constructed separately.
      *
      * @param config The runtime config to use for component construction.
      * @param captureManager The session manager for PCM sourcing.
      * @param stopRequestedRef Supplier that returns true when stop has been requested.
-     * @param sttErrorListener Error listener to forward to accumulator.
-     * @param forceTimeout When true, UtteranceAccumulator force-timeout is enabled.
      */
     fun selectController(
         config: RuntimeSttConfig,
         captureManager: SessionManager,
-        stopRequestedRef: () -> Boolean,
-        sttErrorListener: SttErrorListener?,
-        forceTimeout: Boolean = false
+        stopRequestedRef: () -> Boolean
     ) {
         manualMode = isManualModeByConfig(config)
 
@@ -75,36 +64,7 @@ internal class SttModeController {
             )
             SttLogger.lifecycle("SttModeController: Manual mode — MinimalPollingController constructed")
         } else {
-            val vad = Vad(config)
-            vad.debugLogging = config.debugLoggingEnabled
-            activeVad = vad
-
-            val accumulator = UtteranceAccumulator(config)
-            accumulator.sttErrorListener = sttErrorListener
-            if (forceTimeout) {
-                accumulator.forceTimeout = true
-            }
-            utteranceAccumulator = accumulator
-
-            val handler = UtteranceHandlerImpl()
-            utteranceHandler = handler
-
-            accumulator.onSpeechStart = {
-                processorController?.resetVadActiveMs()
-            }
-
-            val processor = ProcessorController(
-                audioSource = captureManager,
-                vad = vad,
-                utteranceAccumulator = accumulator,
-                listener = handler,
-                sampleRate = 16000,
-                debugLogging = config.debugLoggingEnabled,
-                stopRequestedRef = stopRequestedRef
-            )
-            processorController = processor
-
-            SttLogger.lifecycle("SttModeController: Auto mode — full scaffolding constructed")
+            SttLogger.lifecycle("SttModeController: Auto mode — processor owned by SttProcessingController")
         }
     }
 
@@ -134,55 +94,11 @@ internal class SttModeController {
     }
 
     /**
-     * Drain remaining frames from the active controller.
-     * Only applicable for ProcessorController (Auto mode).
-     *
-     * @return Finalized PCM if available, null otherwise.
-     */
-    fun drainRemainingFrames(): FloatArray? {
-        return processorController?.drainRemainingFrames()
-    }
-
-    /**
-     * Stop and finalize the active controller.
-     * Only applicable for ProcessorController (Auto mode).
-     *
-     * @return Finalized PCM if available, null otherwise.
-     */
-    fun stopAndFinalize(): FloatArray? {
-        return processorController?.stopAndFinalize()
-    }
-
-    /**
-     * Reset VAD active ms on the active processor controller (Auto mode).
-     */
-    fun resetVadActiveMs() {
-        processorController?.resetVadActiveMs()
-    }
-
-    /**
-     * Get vadActiveMs from the active controller.
-     */
-    fun vadActiveMs(): Long {
-        return processorController?.vadActiveMs ?: 0L
-    }
-
-    /**
-     * Get lastUtteranceDurationMs from the active controller.
-     */
-    fun lastUtteranceDurationMs(): Int {
-        return processorController?.lastUtteranceDurationMs ?: 0
-    }
-
-    /**
      * Clear all controller references for reset/destroy.
      */
     fun clearControllers() {
         minimalProcessorController = null
         processorController = null
-        activeVad = null
-        utteranceAccumulator = null
-        utteranceHandler = null
     }
 
     private fun isManualModeByConfig(config: RuntimeSttConfig): Boolean {
@@ -202,17 +118,6 @@ internal class SttModeController {
         return startType == "MANUAL" && stopType == "MANUAL"
     }
 
-    /**
-     * Internal utterance handler implementation.
-     * Delegates to a callback that SpeechToText wires up.
-     */
-    internal var onUtteranceReadyCallback: ((pcm: FloatArray, code: SttReturnCode) -> Unit)? = null
-
-    private inner class UtteranceHandlerImpl : UtteranceListener {
-        override fun onUtteranceReady(pcm: FloatArray, code: SttReturnCode) {
-            onUtteranceReadyCallback?.invoke(pcm, code)
-        }
-    }
 }
 
 /**

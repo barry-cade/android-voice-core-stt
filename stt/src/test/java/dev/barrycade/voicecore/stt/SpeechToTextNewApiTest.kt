@@ -260,9 +260,10 @@ class SpeechToTextNewApiTest {
     fun constructor_doesNotStartCapture() {
         // Rule 3: Construct STT -> capture must NOT be started.
         // Capture only starts inside begin(), which is called from startSession().
-        val captureManagerField = SpeechToText::class.java.getDeclaredField("captureManager")
-        captureManagerField.isAccessible = true
-        val fakeCapture = captureManagerField.get(speechToText) as FakeCaptureManager
+        val captureControllerField = SpeechToText::class.java.getDeclaredField("captureController")
+        captureControllerField.isAccessible = true
+        val captureController = captureControllerField.get(speechToText) as SttCaptureController
+        val fakeCapture = captureController.sessionManager as FakeCaptureManager
         assertFalse(
             "Capture must NOT be started after constructor",
             fakeCapture.isStarted
@@ -276,9 +277,10 @@ class SpeechToTextNewApiTest {
         val config = validManualStopConfig()
         speechToText.setConfig(config)
         speechToText.initStt(config)
-        val captureManagerField = SpeechToText::class.java.getDeclaredField("captureManager")
-        captureManagerField.isAccessible = true
-        val fakeCapture = captureManagerField.get(speechToText) as FakeCaptureManager
+        val captureControllerField = SpeechToText::class.java.getDeclaredField("captureController")
+        captureControllerField.isAccessible = true
+        val captureController = captureControllerField.get(speechToText) as SttCaptureController
+        val fakeCapture = captureController.sessionManager as FakeCaptureManager
 
         // Before startSession, capture is not running.
         assertFalse("Capture must NOT be started before startSession",
