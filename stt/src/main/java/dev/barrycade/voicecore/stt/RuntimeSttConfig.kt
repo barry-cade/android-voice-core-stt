@@ -1,13 +1,12 @@
-@file:Suppress("DEPRECATION")
 package dev.barrycade.voicecore.stt
 
 /**
  * Internal runtime configuration for the STT pipeline.
  *
  * All fields are flattened into this single data class. Populated from
- * [SttRunConfig] via [fromSttRunConfig].
+ * [SttConfig] via [from].
  *
- * Internal only — external callers use [SttRunConfig].
+ * Internal only — external callers use [SttConfig].
  *
  * @property energyThreshold VAD energy threshold for speech detection.
  * @property preRollMs Pre-roll window before speech detection (ms).
@@ -43,79 +42,63 @@ internal data class RuntimeSttConfig(
 ) {
     companion object {
         /**
-         * Build a [RuntimeSttConfig] from a [SttRunConfig].
+         * Build a [RuntimeSttConfig] from a [SttConfig].
          *
-         * Converts [SttRunConfig.startStrategy] and [SttRunConfig.stopStrategy]
-         * into concrete [StartStrategy] and [StopStrategy] instances.
+         * Converts the sealed [StartTrigger] and [StopTrigger] into concrete
+         * [StartStrategy] and [StopStrategy] instances.
          */
-        fun fromSttRunConfig(runCfg: SttRunConfig): RuntimeSttConfig {
-            val vad = runCfg.vadConfig
-            val startCfg = runCfg.startStrategy
-            val stopCfg = runCfg.stopStrategy
+        fun from(sttCfg: SttConfig): RuntimeSttConfig {
+            val startStrategy: StartStrategy = when (val trigger = sttCfg.startTrigger) {
+                is StartTrigger.Manual -> ManualStart()
+                is StartTrigger.VadStart -> VadStart(
+                    VadStartConfig(
+                        vadStartThreshold = trigger.vadStartThreshold,
+                        minSpeechMs = trigger.minSpeechMs
+                    )
+                )
+                is StartTrigger.WakeWordStart -> WakeWordStart(
+                    WakeWordConfig(
+                        wakeWord = trigger.wakeWord,
+                        confidenceThreshold = trigger.confidenceThreshold
+                    )
+                )
+            }
 
-            val startStrategy: StartStrategy = buildStartStrategy(startCfg)
-            val stopStrategy: StopStrategy = buildStopStrategy(stopCfg)
-            val autoSilenceMs = stopCfg.silenceMs ?: 1200
-            val autoMaxDurationMs = stopCfg.maxDurationMs ?: 30000
+            val stopStrategy: StopStrategy = when (val trigger = sttCfg.stopTrigger) {
+                is StopTrigger.Manual -> ManualStop()
+                is StopTrigger.AutoSilence -> AutoSilenceStop(
+                    AutoSilenceConfig(
+                        silenceMs = trigger.silenceMs,
+                        maxDurationMs = trigger.maxDurationMs
+                    )
+                )
+                is StopTrigger.Duration -> DurationStop(
+                    maxDurationMs = trigger.maxDurationMs
+                )
+            }
+
+            val autoSilenceMs = when (val trigger = sttCfg.stopTrigger) {
+                is StopTrigger.AutoSilence -> trigger.silenceMs
+                else -> 1200
+            }
+            val autoMaxDurationMs = when (val trigger = sttCfg.stopTrigger) {
+                is StopTrigger.AutoSilence -> trigger.maxDurationMs
+                is StopTrigger.Duration -> trigger.maxDurationMs
+                is StopTrigger.Manual -> 30000
+            }
 
             return RuntimeSttConfig(
-                energyThreshold = vad.energyThreshold,
-                preRollMs = vad.preRollMs,
-                stableChunkSizeMs = vad.stableChunkSizeMs,
-                debugLoggingEnabled = runCfg.ttsEngineConfig.debugLoggingEnabled,
+                energyThreshold = sttCfg.energyThreshold,
+                preRollMs = sttCfg.preRollMs,
+                stableChunkSizeMs = sttCfg.stableChunkSizeMs,
+                debugLoggingEnabled = sttCfg.debugLoggingEnabled,
                 startStrategy = startStrategy,
                 stopStrategy = stopStrategy,
                 autoSilenceMs = autoSilenceMs,
                 autoMaxDurationMs = autoMaxDurationMs,
-                warmupEnabled = runCfg.warmupEnabled,
-                warmupDurationMs = runCfg.warmupDurationMs
+                warmupEnabled = sttCfg.warmupEnabled,
+                warmupDurationMs = sttCfg.warmupDurationMs
             )
-        }
-
-        private fun buildStartStrategy(cfg: StartStrategyConfig): StartStrategy {
-            return when (cfg.type.uppercase()) {
-                "MANUAL" -> ManualStart()
-                "VAD_START" -> VadStart(
-                    VadStartConfig(
-                        vadStartThreshold = cfg.vadStartThreshold
-                            ?: throw IllegalArgumentException("vadStartThreshold required for VAD_START"),
-                        minSpeechMs = cfg.minSpeechMs
-                            ?: throw IllegalArgumentException("minSpeechMs required for VAD_START")
-                    )
-                )
-                "WAKEWORD" -> {
-                    val wakeWord = cfg.wakeWord
-                        ?: throw IllegalArgumentException("wakeWord required for WAKEWORD")
-                    val threshold = cfg.confidenceThreshold
-                        ?: throw IllegalArgumentException("confidenceThreshold required for WAKEWORD")
-                    WakeWordStart(
-                        WakeWordConfig(
-                            wakeWord = wakeWord,
-                            confidenceThreshold = threshold
-                        )
-                    )
-                }
-                else -> throw IllegalArgumentException("Unknown start strategy type: ${cfg.type}")
-            }
-        }
-
-        private fun buildStopStrategy(cfg: StopStrategyConfig): StopStrategy {
-            return when (cfg.type.uppercase()) {
-                "MANUAL" -> ManualStop()
-                "AUTO_SILENCE" -> AutoSilenceStop(
-                    AutoSilenceConfig(
-                        silenceMs = cfg.silenceMs
-                            ?: throw IllegalArgumentException("silenceMs required for AUTO_SILENCE"),
-                        maxDurationMs = cfg.maxDurationMs
-                            ?: throw IllegalArgumentException("maxDurationMs required for AUTO_SILENCE")
-                    )
-                )
-                "DURATION" -> DurationStop(
-                    maxDurationMs = cfg.maxDurationMs
-                        ?: throw IllegalArgumentException("maxDurationMs required for DURATION")
-                )
-                else -> throw IllegalArgumentException("Unknown stop strategy type: ${cfg.type}")
-            }
         }
     }
 }

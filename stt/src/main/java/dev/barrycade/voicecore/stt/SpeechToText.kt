@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package dev.barrycade.voicecore.stt
 
 import android.content.Context
@@ -17,14 +16,41 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Session lifecycle
  *
- * 1. Call [setConfig] with a validated [SttRunConfig].
+ * 1. Call [setConfig] with a validated [SttConfig].
  * 2. Call [initStt] once to load the model, run warm-up, and build scaffolding.
  * 3. Call [startSession] to begin recording and transcription.
  * 4. Use [stopAndTranscribe] to stop manually.
  * 5. Call [resetForNextSession] to reuse this instance for a new utterance.
  * 6. Call [destroy] to release all resources (app shutdown).
  *
- * ## Threading
+ * ## Threading and lock model
+ *
+ * ### Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | Caller thread | Public lifecycle methods ([setConfig], [initStt], [startSession], etc.) | Serialized via [stateLock] |
+ * | Audio capture (T1) | [AudioRecord] reads, PCM frame enqueue | Guarded by [AudioCapture.stateLock] for start/stop |
+ * | Capture drain (T2) | Warm-up PCM buffering into session buffer | Guarded by [CaptureManager.sessionBufferLock] |
+ * | Processor (T3) | VAD, utterance accumulation, PCM polling | Started/stopped via [ProcessorController] |
+ * | Whisper executor (T4) | Model load/unload/transcribe | Single-thread executor in [ModelManager] |
+ *
+ * ### Lock boundaries
+ *
+ * - [stateLock] guards ALL public lifecycle methods end-to-end.
+ * - [stateLock] is NOT held across blocking operations (thread joins,
+ *   native inference, executor shutdown).
+ * - Blocking operations (thread joins, native unload) are performed
+ *   OUTSIDE [stateLock] — they happen before or after the lock scope.
+ *
+ * ### Stale callback rejection
+ *
+ * - [sessionEpoch] is an [AtomicLong] incremented on each [startSession]
+ *   and [resetForNextSession].
+ * - [currentSessionEpoch] is snapshotted at inference submission.
+ * - Callbacks whose epoch does not match [currentSessionEpoch] are dropped.
+ *
+ * ### Result and error callbacks
  *
  * Result and error callbacks are **not** delivered on the main thread.
  * Callers must post to their own [android.os.Handler] or
@@ -37,8 +63,12 @@ import java.util.concurrent.atomic.AtomicLong
  * | [onError] | The thread that encountered the error |
  * | [sttErrorListener] | Same as [onError] |
  *
- * Lifecycle methods ([setConfig], [initStt], [startSession], [stopAndTranscribe],
- * [destroy], [resetForNextSession]) are serialized internally via [stateLock].
+ * All lifecycle methods ([setConfig], [initStt], [startSession],
+ * [stopAndTranscribe], [destroy], [resetForNextSession]) are serialized
+ * internally via [stateLock].
+ *
+ * Callers MUST NOT call lifecycle methods from within callbacks — doing so
+ * will produce undefined behavior (potential deadlock or re-entrancy).
  */
 class SpeechToText internal constructor(
     context: Context?,
@@ -139,7 +169,6 @@ class SpeechToText internal constructor(
         modelManager = ModelManager(
             modelPath = "",
             sttErrorListener = null,
-            readyListener = null,
             whisperModel = whisperModel
         )
         inferenceController = SttInferenceController(modelManager, callbackDispatcher)
@@ -191,14 +220,13 @@ class SpeechToText internal constructor(
     }
 
     /**
-     * Set the [SttRunConfig] for a subsequent [startSession] call.
+     * Set the [SttConfig] for a subsequent [startSession] call.
+     *
+     * This is the preferred entry point. Replaces the legacy [setConfig] that
+     * accepts [SttRunConfig].
      */
-    fun setConfig(config: SttRunConfig): SessionResult {
+    fun setConfig(config: SttConfig): SessionResult {
         synchronized(stateLock) {
-            val validationResult = SttRunConfigValidator.validate(config)
-            if (validationResult != null) {
-                return validationResult
-            }
             return SessionResult(SttReturnCode.SUCCESS, null)
         }
     }
@@ -206,26 +234,22 @@ class SpeechToText internal constructor(
     /**
      * Initialise the STT system for the given [config] without activating
      * any STT processing behaviours.
+     *
+     * This is the preferred entry point. Replaces the legacy [initStt] that
+     * accepts [SttRunConfig].
      */
-    fun initStt(config: SttRunConfig): SessionResult {
+    fun initStt(config: SttConfig): SessionResult {
         synchronized(stateLock) {
-            // ── Idempotency guard: already initialised or in READY state ─────────
+            // ── Idempotency guard ─────────────────────────────────────────────
             if (sessionConfig != null || lifecycleController.currentState is SttLifecycleState.READY) {
                 SttLogger.lifecycle("initStt: already initialised — returning SUCCESS immediately")
                 return SessionResult(SttReturnCode.SUCCESS, null)
             }
 
-            // ── Step 0: Validate config ───────────────────────────────────────
-            val validationResult = SttRunConfigValidator.validate(config)
-            if (validationResult != null) {
-                return validationResult
-            }
-
             // ── Step 1: Build immutable session config ────────────────────────
-            val sessionCfg = SttSessionConfig.fromSttRunConfig(config)
+            val sessionCfg = SttSessionConfig.from(config)
             sessionConfig = sessionCfg
 
-            val drainMode = sessionCfg.drainMode
             val runtimeCfg = sessionCfg.runtimeConfig
 
             // ── Step 2: Update model path and load model ──────────────────────
@@ -242,9 +266,6 @@ class SpeechToText internal constructor(
             }
 
             // ── Step 4: Reconstruct CaptureManager with runtime buffer size ───
-            // If the default CaptureManager was created in the constructor (no
-            // test double injected), replace it with one configured for the
-            // runtime bufferSizeSamples.
             val sessionManager: SessionManager
             if (captureController.sessionManager is CaptureManager) {
                 val newManager = CaptureManager(
@@ -470,15 +491,6 @@ class SpeechToText internal constructor(
     }
 
     // ======== Internal pipeline ========================================
-
-    /** @deprecated Use [lifecycleController] instead. */
-    @Deprecated("Use lifecycleController.currentState")
-    internal val stateMachine: SttLifecycleStateMachine
-        get() {
-            val bridge = SttLifecycleStateMachine()
-            bridge.forceSet(lifecycleController.currentState)
-            return bridge
-        }
 
     /**
      * Test helper: bypass the start strategy and trigger start directly.

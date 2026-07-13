@@ -12,7 +12,7 @@ package dev.barrycade.voicecore.stt
  *
  * - [SUCCESS] — utterance was transcribed successfully.
  * - [CONFIG_NOT_SET] — [SpeechToText.setConfig] was not called before [startSession].
- * - [INVALID_CONFIG] — config validation failed (see [SttRunConfigValidator]).
+ * - [INVALID_CONFIG] — config validation failed.
  * - [MAX_DURATION_REACHED] — max utterance duration exceeded.
  * - [AUTO_SILENCE_TRIGGERED] — auto-silence threshold reached (manual/auto mode).
  * - [ABNORMAL_SILENCE] — abnormal silence detected (manual/manual mode).
@@ -54,7 +54,7 @@ enum class SttReturnCode {
     /** [SpeechToText.setConfig] was not called before [SpeechToText.startSession]. */
     CONFIG_NOT_SET,
 
-    /** Config validation failed. See [SttRunConfigValidator] for validation rules. */
+    /** Config validation failed. */
     INVALID_CONFIG,
 
     /** Maximum utterance duration was exceeded. */

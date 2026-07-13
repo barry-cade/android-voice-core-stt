@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class ModelManager(
     private var modelPath: String,
     private val sttErrorListener: SttErrorListener?,
-    private var readyListener: SttReadyListener? = null,
     private val whisperModel: WhisperModel = WhisperBridge
 ) {
     private val stateLock = Any()
@@ -98,10 +97,6 @@ internal class ModelManager(
 
             isReady = true
             SttLogger.lifecycle("ModelManager: model loaded, isReady=true")
-            val listenerSnapshot = synchronized(stateLock) {
-                readyListener
-            }
-            listenerSnapshot?.onSttReady()
             onReady()
         } catch (t: Throwable) {
             SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
@@ -156,7 +151,7 @@ internal class ModelManager(
 
     /**
      * Update the model path. Called from [SpeechToText.initStt] when the
-     * singleton [SpeechToText] is first initialised with a [SttRunConfig]
+     * singleton [SpeechToText] is first initialised with a [SttConfig]
      * that specifies the actual model binary path.
      *
      * Safe to call before the model is loaded. No-op after the model has
@@ -290,20 +285,4 @@ internal class ModelManager(
         }
     }
 
-    /**
-     * Set or replace the READY listener.
-     * If [isReady] is already true, the listener is invoked immediately.
-     */
-    fun setReadyListener(listener: SttReadyListener?) {
-        var fireNow = false
-        synchronized(stateLock) {
-            readyListener = listener
-            if (isReady) {
-                fireNow = true
-            }
-        }
-        if (fireNow) {
-            listener?.onSttReady()
-        }
-    }
 }

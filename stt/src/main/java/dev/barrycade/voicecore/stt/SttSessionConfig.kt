@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package dev.barrycade.voicecore.stt
 
 /**
@@ -25,19 +24,19 @@ internal data class SttSessionConfig(
 ) {
     companion object {
         /**
-         * Build an immutable [SttSessionConfig] from a validated [SttRunConfig].
+         * Build an immutable [SttSessionConfig] from a [SttConfig].
          *
-         * Converts strategy config types into concrete strategy instances
+         * Converts sealed strategy types into concrete strategy instances
          * and flattens all fields.
          */
-        fun fromSttRunConfig(runConfig: SttRunConfig): SttSessionConfig {
+        fun from(sttCfg: SttConfig): SttSessionConfig {
             return SttSessionConfig(
-                runtimeConfig = RuntimeSttConfig.fromSttRunConfig(runConfig),
-                drainMode = runConfig.drainMode,
-                bufferSizeSamples = runConfig.bufferSizeSamples,
-                modelPath = runConfig.ttsEngineConfig.modelPath,
-                warmupEnabled = runConfig.warmupEnabled,
-                warmupDurationMs = runConfig.warmupDurationMs
+                runtimeConfig = RuntimeSttConfig.from(sttCfg),
+                drainMode = sttCfg.drainMode,
+                bufferSizeSamples = sttCfg.bufferSizeSamples,
+                modelPath = sttCfg.modelPath,
+                warmupEnabled = sttCfg.warmupEnabled,
+                warmupDurationMs = sttCfg.warmupDurationMs
             )
         }
     }

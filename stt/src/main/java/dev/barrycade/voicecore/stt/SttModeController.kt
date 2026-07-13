@@ -3,10 +3,22 @@ package dev.barrycade.voicecore.stt
 /**
  * Owns mode selection and controller instantiation.
  *
- * Responsibilities:
- * - Determine whether the active config is Manual mode (ManualStart + ManualStop).
- * - Construct and store the appropriate [PollingController] based on mode.
- * - Provide access to the selected controller.
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | SpeechToText caller thread | [selectController], [stopController], [startController], [clearControllers], [isManualMode] | Serialized via [SpeechToText.stateLock] |
+ * | Worker threads (processor, minimal polling) | Read-only access via [selectedController], [isManualMode] | [@Volatile] on controller references and [manualMode] flag |
+ *
+ * All public methods are called from the [SpeechToText] caller thread
+ * under [SpeechToText.stateLock]. Field reads from worker threads
+ * (processor, minimal polling) are protected by [@Volatile] on the
+ * mode-level flag and controller references.
+ *
+ * [selectController] is guarded by internal [lock] for the write path.
+ * [clearControllers] similarly uses [lock].
+ * Read paths ([selectedController], [isManualMode]) use [@Volatile]
+ * fields and do not acquire [lock].
  *
  * No lifecycle, no threading, no callbacks, no processing components —
  * only mode branching and component construction.
@@ -16,15 +28,20 @@ package dev.barrycade.voicecore.stt
  */
 internal class SttModeController {
 
+    private val lock = Any()
+
     /** Mini controller for Manual mode. null when not in Manual mode. */
+    @Volatile
     var minimalProcessorController: MinimalPollingController? = null
         private set
 
     /** Processor controller for Auto mode. null when not in Auto mode. */
+    @Volatile
     var processorController: ProcessorController? = null
         private set
 
     /** True when Manual mode (ManualStart + ManualStop) is active. */
+    @Volatile
     private var manualMode: Boolean = false
 
     /**
@@ -55,35 +72,29 @@ internal class SttModeController {
         captureManager: SessionManager,
         stopRequestedRef: () -> Boolean
     ) {
-        manualMode = isManualModeByConfig(config)
+        synchronized(lock) {
+            manualMode = isManualModeByConfig(config)
 
-        if (manualMode) {
-            minimalProcessorController = MinimalPollingController(
-                audioSource = captureManager,
-                stopRequestedRef = stopRequestedRef
-            )
-            SttLogger.lifecycle("SttModeController: Manual mode — MinimalPollingController constructed")
-        } else {
-            SttLogger.lifecycle("SttModeController: Auto mode — processor owned by SttProcessingController")
+            if (manualMode) {
+                minimalProcessorController = MinimalPollingController(
+                    audioSource = captureManager,
+                    stopRequestedRef = stopRequestedRef
+                )
+                SttLogger.lifecycle("SttModeController: Manual mode — MinimalPollingController constructed")
+            } else {
+                SttLogger.lifecycle("SttModeController: Auto mode — processor owned by SttProcessingController")
+            }
         }
-    }
-
-    /**
-     * Select drain mode based on the active run config.
-     *
-     * @param runConfig The active run config.
-     * @return The [DrainMode] from the run config.
-     */
-    fun selectDrainMode(runConfig: SttRunConfig?): DrainMode {
-        return runConfig?.drainMode ?: DrainMode.DRAIN_FROM_NEXT_FRAME
     }
 
     /**
      * Stop the active controller.
      */
     fun stopController() {
-        minimalProcessorController?.stop()
-        processorController?.stop()
+        val mini = minimalProcessorController
+        val proc = processorController
+        mini?.stop()
+        proc?.stop()
     }
 
     /**
@@ -97,8 +108,10 @@ internal class SttModeController {
      * Clear all controller references for reset/destroy.
      */
     fun clearControllers() {
-        minimalProcessorController = null
-        processorController = null
+        synchronized(lock) {
+            minimalProcessorController = null
+            processorController = null
+        }
     }
 
     private fun isManualModeByConfig(config: RuntimeSttConfig): Boolean {
@@ -106,22 +119,23 @@ internal class SttModeController {
         val stopType = config.stopStrategy::class.simpleName?.uppercase() ?: ""
         return startType == "MANUALSTART" && stopType == "MANUALSTOP"
     }
-
-    /**
-     * Returns true when [runConfig] has ManualStart + ManualStop strategy types.
-     * Used by SpeechToText to query mode before initStt has constructed controllers.
-     */
-    fun isManualMode(stoppedConfig: SttRunConfig?): Boolean {
-        if (stoppedConfig == null) return false
-        val startType = stoppedConfig.startStrategy.type.uppercase()
-        val stopType = stoppedConfig.stopStrategy.type.uppercase()
-        return startType == "MANUAL" && stopType == "MANUAL"
-    }
-
 }
 
 /**
  * Minimal polling controller for ManualStart + ManualStop mode.
+ *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | Worker thread | Polling loop | Created in [start], joined in [stop] |
+ * | Caller thread (SpeechToText) | [start], [stop] | Serialized via [SpeechToText.stateLock] |
+ *
+ * ## Self-join safety
+ *
+ * [stop] guards against self-join by checking `thread !== Thread.currentThread()`
+ * before calling join(). If the caller IS the worker thread itself, the
+ * reference is cleared without joining.
  *
  * Polls PCM frames from [AudioSource] in a loop, discarding them
  * from the AudioCapture queue to prevent unbounded growth. No VAD,
@@ -151,6 +165,8 @@ internal class MinimalPollingController(
     /** null — VAD is not used in Manual mode. */
     override val vadConfidence: Float? = null
 
+    private val workerLock = Any()
+    @Volatile
     private var workerThread: Thread? = null
 
     override fun supportsVadMetrics(): Boolean = false
@@ -172,18 +188,23 @@ internal class MinimalPollingController(
             }
         }
         val thread = Thread(runnable, "MinimalPollingThread")
-        workerThread = thread
+        synchronized(workerLock) {
+            workerThread = thread
+        }
         thread.start()
     }
 
     override fun stop() {
         if (!isRunning) return
         isRunning = false
-        val thread = workerThread
-        if (thread != null && thread !== Thread.currentThread()) {
-            thread.join(500)
+        val threadToJoin: Thread?
+        synchronized(workerLock) {
+            threadToJoin = workerThread
+            workerThread = null
         }
-        workerThread = null
+        if (threadToJoin != null && threadToJoin !== Thread.currentThread()) {
+            threadToJoin.join(500)
+        }
     }
 
     override fun resetVadActiveMs() {

@@ -3,6 +3,15 @@ package dev.barrycade.voicecore.stt
 /**
  * Owns the PCM capture lifecycle: start, finalise, reset, shutdown.
  *
+ * ## Thread ownership
+ *
+ * All public methods are called from the [SpeechToText] caller thread,
+ * serialized via [SpeechToText.stateLock]. The [sessionManager] field
+ * is read from worker threads (processor/drain) — it is assigned once
+ * in the constructor (or once via [SttCaptureController] replacement
+ * in [SpeechToText.initStt]) and never modified afterward, so
+ * [@Volatile] is not required.
+ *
  * Responsibilities:
  * - Encapsulate [SessionManager] behind a stable, narrow API surface.
  * - Provide clean capture-lifecycle methods for [SpeechToText]:
@@ -20,8 +29,8 @@ package dev.barrycade.voicecore.stt
  *
  * @param sessionManager The underlying [SessionManager] implementation.
  *        Production: [CaptureManager]. Tests: [FakeCaptureManager].
- *        Immutable after construction — use [replaceSessionManager] only
- *        when explicitly required (runtime buffer size reconstruction).
+ *        Immutable after construction — may be replaced in [SpeechToText.initStt]
+ *        when runtime buffer size requires reconstruction.
  */
 internal class SttCaptureController(
     val sessionManager: SessionManager

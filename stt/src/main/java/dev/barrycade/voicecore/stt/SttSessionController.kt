@@ -3,6 +3,20 @@ package dev.barrycade.voicecore.stt
 /**
  * Owns session-level timing and PCM buffer lifecycle.
  *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | Caller thread (SpeechToText) | All public methods | Serialized via [SpeechToText.stateLock] |
+ * | Worker threads | Read-only access via [captureMs], [hasPcmTimingStarted], [currentPcmElapsedMs] | Guarded by internal [lock] for writes; reads may be from worker context for diagnostic logging |
+ *
+ * All public methods are called from the [SpeechToText] caller thread,
+ * serialized via [SpeechToText.stateLock]. Internal state is guarded by
+ * [lock] (synchronized block) for all writes. Read-only methods
+ * ([captureMs], [hasPcmTimingStarted], [currentPcmElapsedMs]) also
+ * acquire the lock for snapshot consistency. Worker threads reading
+ * timing fields via these methods are safe because they never write.
+ *
  * Responsibilities:
  * - Track session start/end timestamps.
  * - Track inference start/end timestamps.

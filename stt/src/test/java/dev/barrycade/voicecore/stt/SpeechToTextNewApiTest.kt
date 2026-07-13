@@ -36,39 +36,17 @@ class SpeechToTextNewApiTest {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private fun validManualStopConfig(): SttRunConfig {
-        return SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
+    private fun validManualStopConfig(): SttConfig {
+        return SttConfig(
+            modelPath = "/dummy/model.bin",
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.03f,
+            preRollMs = 100,
+            stableChunkSizeMs = 500,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
-        )
-    }
-
-    private fun invalidConfig(): SttRunConfig {
-        return SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.Manual
         )
     }
 
@@ -95,55 +73,6 @@ class SpeechToTextNewApiTest {
             SttReturnCode.SUCCESS,
             result.code
         )
-    }
-
-    @Test
-    fun setConfig_withInvalidConfig_returnsInvalidConfig() {
-        val result = speechToText.setConfig(invalidConfig())
-        assertNotNull("setConfig must return a SessionResult", result)
-        assertEquals(
-            "Invalid config must return INVALID_CONFIG",
-            SttReturnCode.INVALID_CONFIG,
-            result.code
-        )
-    }
-
-    @Test
-    fun setConfig_twiceWithValidConfig_overwritesPrevious() {
-        // First call
-        val first = speechToText.setConfig(validManualStopConfig())
-        assertEquals(SttReturnCode.SUCCESS, first.code)
-
-        // Second call with a different valid config
-        val secondConfig = validManualStopConfig().copy(
-            ttsEngineConfig = validManualStopConfig().ttsEngineConfig.copy(
-                language = "fr"
-            )
-        )
-        val second = speechToText.setConfig(secondConfig)
-        assertEquals(SttReturnCode.SUCCESS, second.code)
-    }
-
-    @Test
-    fun setConfig_withInvalidValues_returnsInvalidConfig() {
-        val nullLikeConfig = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "",
-                language = "",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = -1,
-                stableChunkSizeMs = -1
-            ),
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
-        )
-        val result = speechToText.setConfig(nullLikeConfig)
-        assertNotNull(result)
-        assertEquals(SttReturnCode.INVALID_CONFIG, result.code)
     }
 
     // ── startSession tests ───────────────────────────────────────────────
@@ -183,24 +112,16 @@ class SpeechToTextNewApiTest {
 
     @Test
     fun startSession_withAutoSilence_routesToAutoTriggers() {
-        val config = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
+        val config = SttConfig(
+            modelPath = "/dummy/model.bin",
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.03f,
+            preRollMs = 100,
+            stableChunkSizeMs = 500,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(
-                type = "AUTO_SILENCE",
-                silenceMs = 1200,
-                maxDurationMs = 30000
-            )
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.AutoSilence(silenceMs = 1200, maxDurationMs = 30000)
         )
         speechToText.setConfig(config)
         speechToText.initStt(config)
@@ -231,27 +152,6 @@ class SpeechToTextNewApiTest {
             val result = speechToText.startSession()
             assertNotNull("startSession after destroy must return a SessionResult", result)
         }
-    }
-
-    // ── Combined setConfig + startSession flow ───────────────────────────
-
-    @Test
-    fun setConfigThenStartSession_returnsSuccess() {
-        val config = validManualStopConfig()
-        speechToText.setConfig(config)
-        speechToText.initStt(config)
-        safeRun {
-            val result = speechToText.startSession()
-            assertNotNull(result)
-        }
-    }
-
-    @Test
-    fun invalidConfigThenStartSession_returnsConfigNotSet() {
-        // Invalid config is rejected by setConfig — runConfig remains null
-        speechToText.setConfig(invalidConfig())
-        val result = speechToText.startSession()
-        assertEquals(SttReturnCode.CONFIG_NOT_SET, result.code)
     }
 
     // ── Capture lifecycle (Phase 2.3.1) ──────────────────────────────────

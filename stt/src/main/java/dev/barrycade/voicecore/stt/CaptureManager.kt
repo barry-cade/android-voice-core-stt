@@ -5,6 +5,28 @@ import android.os.Process
 /**
  * CaptureManager owns the microphone PCM queue.
  *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | AudioCaptureThread (T1) | [AudioRecord] reads, PCM frame enqueue | Produces into [AudioCapture.frameQueue] |
+ * | DrainThread (T2) | Warm-up PCM buffering into session buffer | Stopped by [pollFrame] first call or [finalize]/[reset] |
+ * | Processor thread (T3) | [pollFrame] polling and session buffering | Takes over from drain thread on first poll |
+ * | SpeechToText caller thread | Lifecycle methods: [begin], [finalize], [reset], [shutdown], [restartCapture] | Serialized via [stateLock] |
+ *
+ * ## Lock boundaries
+ *
+ * - [stateLock] guards: [captureStarted], [draining], [sttActive], [drainThread],
+ *   [currentDrainMode]. Short-duration; never held across blocking operations.
+ * - [sessionBufferLock] guards: [sessionBuffer] (mutable list of accumulated PCM samples).
+ *   Never held together with [stateLock] to avoid nested-lock risk.
+ *
+ * ## Self-join safety
+ *
+ * Drain thread joins in [finalize], [reset], [shutdown], and [pollFrame] all guard
+ * against self-join via `thread != null` check (the join target is always a different
+ * thread since the drain thread never calls these methods on CaptureManager).
+ *
  * AudioCapture is created at construction but NOT started. Capture begins
  * lazily when [begin] is called. This ensures no PCM frames are buffered
  * before the caller explicitly starts a session.

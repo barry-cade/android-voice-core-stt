@@ -9,14 +9,17 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import dev.barrycade.voicecore.stt.AudioCapture
 
+/**
+ * Audio test service.
+ *
+ * AudioCapture has been internalized. For direct audio capture, use
+ * [SpeechToTextProvider.get] to obtain the STT singleton and call
+ * startSession/stopAndTranscribe on it.
+ *
+ * This service is preserved as a stub for future diagnostics integration.
+ */
 class AudioTestService : Service() {
-    private val audioCapture = AudioCapture(
-        sampleRate = 16000,
-        requestedBufferSizeInBytes = 32000
-    )
-    private var workerThread: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -56,52 +59,18 @@ class AudioTestService : Service() {
             startForeground(1, notification)
         }
 
-                audioCapture.start()
+        Log.d("AudioTestService", "AudioTestService running — direct AudioCapture access removed. Use SpeechToTextProvider.get() instead.")
 
-        // Poll FloatArray frames from the queue
-        val runnable = Runnable {
-            runAudioPollLoop()
-        }
-        val thread = Thread(runnable, "AudioTestPollThread")
-        workerThread = thread
-        thread.start()
         return START_STICKY
     }
 
     override fun onDestroy() {
-        workerThread?.interrupt()
-        workerThread = null
-        audioCapture.stop()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * Polls FloatArray frames from the audio capture queue.
-     * Runs on the worker thread. Exits when the thread is interrupted.
-     */
-    private fun runAudioPollLoop() {
-        while (!Thread.currentThread().isInterrupted) {
-            val frame = audioCapture.frameQueue.poll()
-            if (frame != null) {
-                Log.d(
-                    "AudioTest",
-                    "frame=${frame.size} samples, t=${System.currentTimeMillis()}"
-                )
-            } else {
-                try {
-                    Thread.sleep(10L)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                }
-            }
-        }
-    }
-
     companion object {
         private const val CHANNEL_ID = "audio_test_service"
     }
 }
-

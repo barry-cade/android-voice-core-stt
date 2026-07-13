@@ -15,10 +15,8 @@ import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.stt.SpeechToTextProvider
+import dev.barrycade.voicecore.stt.SttConfig
 import dev.barrycade.voicecore.stt.SttReturnCode
-import dev.barrycade.voicecore.stt.SttRunConfig
-import dev.barrycade.voicecore.stt.StopStrategyConfig
-import dev.barrycade.voicecore.stt.StartStrategyConfig
 import java.io.File
 import java.io.FileOutputStream
 
@@ -34,8 +32,7 @@ class MainActivity : ComponentActivity() {
     private var selectedStopType: String = "MANUAL"
 
     // Track strategy from active config for UI visibility.
-    private var activeStartStrategyType: String = "MANUAL"
-    private var activeStopStrategyType: String = "MANUAL"
+    private var activeStopType: String = "MANUAL"
 
     // Guard: consecutive blank-audio hints.
     private var blankAudioCount: Int = 0
@@ -122,8 +119,8 @@ class MainActivity : ComponentActivity() {
 
         val modelPath = getModelPath()
 
-        val runConfig: SttRunConfig = try {
-            AppSttConfigLoader.loadSttRunConfig(
+        val cfg: SttConfig = try {
+            AppSttConfigLoader.loadConfig(
                 context = this,
                 configFileName = configFileName,
                 modelPath = modelPath,
@@ -140,7 +137,7 @@ class MainActivity : ComponentActivity() {
 
         val currentStt = stt
         if (currentStt != null) {
-            val setConfigResult = currentStt.setConfig(runConfig)
+            val setConfigResult = currentStt.setConfig(cfg)
             if (setConfigResult.code != SttReturnCode.SUCCESS) {
                 postToUi {
                     txtConfigDisplay.visibility = View.VISIBLE
@@ -150,30 +147,32 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        displayConfig(runConfig)
+        displayConfig(cfg)
     }
 
-    private fun displayConfig(runConfig: SttRunConfig) {
-        activeStartStrategyType = runConfig.startStrategy.type
-        activeStopStrategyType = runConfig.stopStrategy.type
+    private fun displayConfig(cfg: SttConfig) {
+        activeStopType = when (val stop = cfg.stopTrigger) {
+            is dev.barrycade.voicecore.stt.StopTrigger.Manual -> "MANUAL"
+            is dev.barrycade.voicecore.stt.StopTrigger.AutoSilence -> "AUTO_SILENCE"
+            is dev.barrycade.voicecore.stt.StopTrigger.Duration -> "DURATION"
+        }
         txtConfigDisplay.visibility = View.VISIBLE
         txtConfigDisplay.text = buildString {
             appendLine("=== Active Config ===")
-            appendLine("model:     " + runConfig.ttsEngineConfig.modelPath)
-            appendLine("language:  " + runConfig.ttsEngineConfig.language)
-            appendLine("drainMode: " + runConfig.drainMode)
-            appendLine("start:     " + runConfig.startStrategy.type)
-            appendLine("stop:      " + runConfig.stopStrategy.type)
+            appendLine("model:     " + cfg.modelPath)
+            appendLine("language:  " + cfg.language)
+            appendLine("drainMode: " + cfg.drainMode)
+            appendLine("start:     " + cfg.startTrigger)
+            appendLine("stop:      " + cfg.stopTrigger)
             appendLine("--- VAD ---")
-            appendLine("energyThreshold: " + runConfig.vadConfig.energyThreshold)
-            appendLine("preRollMs:       " + runConfig.vadConfig.preRollMs)
-            appendLine("stableChunkSizeMs: " + runConfig.vadConfig.stableChunkSizeMs)
-            when (runConfig.stopStrategy.type) {
-                "AUTO_SILENCE" -> {
-                    appendLine("--- Auto-silence ---")
-                    appendLine("silenceMs:     " + runConfig.stopStrategy.silenceMs)
-                    appendLine("maxDurationMs: " + runConfig.stopStrategy.maxDurationMs)
-                }
+            appendLine("energyThreshold: " + cfg.energyThreshold)
+            appendLine("preRollMs:       " + cfg.preRollMs)
+            appendLine("stableChunkSizeMs: " + cfg.stableChunkSizeMs)
+            val stop = cfg.stopTrigger
+            if (stop is dev.barrycade.voicecore.stt.StopTrigger.AutoSilence) {
+                appendLine("--- Auto-silence ---")
+                appendLine("silenceMs:     " + stop.silenceMs)
+                appendLine("maxDurationMs: " + stop.maxDurationMs)
             }
         }
     }
@@ -190,8 +189,8 @@ class MainActivity : ComponentActivity() {
 
         val modelPath = getModelPath()
 
-        val runConfig = try {
-            AppSttConfigLoader.loadSttRunConfig(
+        val cfg = try {
+            AppSttConfigLoader.loadConfig(
                 context = this,
                 configFileName = configFileName,
                 modelPath = modelPath,
@@ -207,15 +206,14 @@ class MainActivity : ComponentActivity() {
             val speechToText = SpeechToTextProvider.get(applicationContext)
 
             // Set config on the singleton instance.
-            val setConfigResult = speechToText.setConfig(runConfig)
+            val setConfigResult = speechToText.setConfig(cfg)
             if (setConfigResult.code != SttReturnCode.SUCCESS) {
                 postToUi { txtOutput.text = "Config error: " + setConfigResult.code }
                 return
             }
 
             // Initialise STT (load model + warm-up + build scaffolding).
-            // Idempotent: second call returns SUCCESS immediately.
-            val initResult = speechToText.initStt(runConfig)
+            val initResult = speechToText.initStt(cfg)
             if (initResult.code != SttReturnCode.SUCCESS) {
                 postToUi { txtOutput.text = "Init error: " + initResult.code }
                 return
@@ -261,7 +259,7 @@ class MainActivity : ComponentActivity() {
             }
 
             stt = speechToText
-            displayConfig(runConfig)
+            displayConfig(cfg)
             blankAudioCount = 0
             isRecording = true
             txtOutput.text = "Recording..."
@@ -315,11 +313,11 @@ class MainActivity : ComponentActivity() {
     private fun updateUi() {
         // Rule 6: UI must reflect strategy configuration.
         // Start button visibility.
-        val showStart = !isRecording && activeStartStrategyType == "MANUAL"
+        val showStart = !isRecording
         btnStart.visibility = if (showStart) View.VISIBLE else View.GONE
 
         // Stop button visibility.
-        val showStop = activeStopStrategyType == "MANUAL"
+        val showStop = activeStopType == "MANUAL"
         btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
 
         btnClear.isEnabled = true

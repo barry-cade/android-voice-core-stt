@@ -13,14 +13,24 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * It publishes each captured frame as a FloatArray into a shared queue.
  * Single output path: FloatArray frames only — no ShortArray callback.
  *
+ * ## Thread ownership
+ *
+ * - [start] and [stop] are called from the caller thread, serialized via [stateLock].
+ * - [captureLoop] runs on the AudioCaptureThread (T1).
+ * - [frameQueue] is a [ConcurrentLinkedQueue] — safe for single-producer (T1),
+ *   multi-consumer (drain thread, processor thread).
+ * - [shortBuffer] and [floatBuffer] are assigned once in [start] (caller thread)
+ *   before the worker thread starts — safe via happens-before of thread start.
+ * - [isRunning] is [@Volatile] — worker thread reads it on each loop iteration;
+ *   caller thread writes it under [stateLock].
+ *
  * @param sampleRate Audio sample rate in Hz (default 16000).
  * @param requestedBufferSizeInBytes Requested internal AudioRecord buffer size in bytes.
  * @param bufferSizeSamples Size of the read buffer in samples. Controls how many
  *        PCM samples are read per AudioRecord.read() call. Must be >= 1024 and <= 16000.
  *        Default 4000 (0.25s at 16kHz).
  */
- @Deprecated("Will be internalized in a future release. Use SpeechToTextProvider.get() instead.")
-class AudioCapture(
+internal class AudioCapture(
     private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int,
     private val bufferSizeSamples: Int = 4000

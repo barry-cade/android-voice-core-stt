@@ -4,6 +4,17 @@ package dev.barrycade.voicecore.stt
  * Owns the Auto-mode STT processing pipeline: VAD, utterance accumulation,
  * and the [ProcessorController] polling loop.
  *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | SpeechToText caller thread | [start], [stop], [drainRemainingFrames], [stopAndFinalize] | Serialized via [SpeechToText.stateLock] |
+ * | ProcessorController worker thread (T3) | VAD, utterance accumulation, PCM polling | Created by [ProcessorController.start] |
+ * | UtteranceListener callback | [ProcessingListener.onUtteranceReady] | Delivered on T3 — callers must post to their own thread |
+ *
+ * All public methods delegate to [ProcessorController] which owns its own
+ * worker thread. No additional threading is introduced by this controller.
+ *
  * Responsibilities:
  * - Construct and own VAD, [UtteranceAccumulator], and [ProcessorController].
  * - Convert internal [UtteranceListener] events into the stable

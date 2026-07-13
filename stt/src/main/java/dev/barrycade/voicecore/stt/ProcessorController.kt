@@ -7,6 +7,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * It polls PCM frames from [CaptureController], runs them through VAD and
  * [UtteranceAccumulator], and delivers finalized utterances via [UtteranceListener].
  *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | Worker thread (T3) | Processing loop: [runProcessingLoop] | Created in [start], joined in [stop] |
+ * | Caller thread (SpeechToText) | [start], [stop], [drainRemainingFrames], [stopAndFinalize] | Serialized via [SpeechToText.stateLock] |
+ *
+ * ## Self-join safety
+ *
+ * [stop] guards against self-join by checking `thread !== Thread.currentThread()`
+ * before calling join(). If the caller is the worker thread itself (e.g. called
+ * from a callback chain within the processing loop), the reference is cleared
+ * without joining.
+ *
  * Forbidden: model load, warm-up, AudioCapture start/stop, Whisper inference.
  *
  * @param stopRequestedRef Supplier that returns true when Stop has been requested.
@@ -22,7 +36,13 @@ internal class ProcessorController(
     private val stopRequestedRef: () -> Boolean
 ) : PollingController {
     private val isRunning = AtomicBoolean(false)
+
+    /** Worker thread reference. Guarded by [workerLock] for write, [@Volatile] for read. */
+    @Volatile
     private var workerThread: Thread? = null
+
+    /** Lock for [workerThread] read-and-clear sequences. */
+    private val workerLock = Any()
 
     /** Accumulated VAD active time in milliseconds. */
     @Volatile
@@ -53,6 +73,8 @@ internal class ProcessorController(
     /**
      * Start the processor worker thread. It polls frames from CaptureController,
      * runs VAD, accumulates utterances, and delivers finalized PCM via listener.
+     *
+     * Must be called from the SpeechToText caller thread.
      */
     override fun start() {
         if (isRunning.getAndSet(true)) return
@@ -62,7 +84,9 @@ internal class ProcessorController(
         }
 
         val thread = Thread(runnable, "ProcessorControllerThread")
-        workerThread = thread
+        synchronized(workerLock) {
+            workerThread = thread
+        }
         thread.start()
     }
 
@@ -138,19 +162,26 @@ internal class ProcessorController(
     /**
      * Stop the processor worker thread.
      *
-     * If called from the processor's own worker thread, the self-join
-     * ([Thread.join]) is a no-op because a thread cannot join itself.
-     * No behavioural issue arises.
+     * Must be called from the SpeechToText caller thread.
+     *
+     * ## Self-join safety
+     *
+     * If the calling thread IS the worker thread (the processing loop
+     * itself), the reference is cleared without joining. This prevents a
+     * thread from joining itself, which would hang forever.
      *
      * Idempotent: multiple calls are safe after the thread has stopped.
      */
     override fun stop() {
         if (!isRunning.getAndSet(false)) return
-        val thread = workerThread
-        if (thread != null && thread !== Thread.currentThread()) {
-            thread.join(500)
+        val threadToJoin: Thread?
+        synchronized(workerLock) {
+            threadToJoin = workerThread
+            workerThread = null
         }
-        workerThread = null
+        if (threadToJoin != null && threadToJoin !== Thread.currentThread()) {
+            threadToJoin.join(500)
+        }
         rmsSampler.reset()
     }
 

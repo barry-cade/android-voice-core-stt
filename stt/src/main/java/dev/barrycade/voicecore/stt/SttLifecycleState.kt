@@ -21,8 +21,7 @@ package dev.barrycade.voicecore.stt
  * No other transitions are permitted. Any illegal transition produces
  * a [SttError] with code [SttErrorCode.PIPELINE_ILLEGAL_STATE].
  */
- @Deprecated("Will be internalized in a future release. Use SpeechToText lifecycle methods directly.")
-sealed class SttLifecycleState {
+internal sealed class SttLifecycleState {
 
     /** Initial blank state; no resources allocated. */
     data object UNINITIALISED : SttLifecycleState()

@@ -75,25 +75,21 @@ class RuntimeSttConfigTest {
         assertThrows(IllegalArgumentException::class.java) { config.validate() }
     }
 
-    // -- fromSttRunConfig smoke test -----------------------------------------
+    // -- from smoke test -----------------------------------------
     @Test
-    fun fromSttRunConfig_manualStop_populatesCorrectly() {
-        val runConfig = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
+    fun from_sttConfig_populatesCorrectly() {
+        val sttCfg = SttConfig(
+            modelPath = "/dummy/model.bin",
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.03f,
+            preRollMs = 100,
+            stableChunkSizeMs = 500,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.Manual
         )
-        val runtime = RuntimeSttConfig.fromSttRunConfig(runConfig)
+        val runtime = RuntimeSttConfig.from(sttCfg)
         assertEquals(0.03f, runtime.energyThreshold, 0.001f)
         assertEquals(100, runtime.preRollMs)
         assertEquals(500, runtime.stableChunkSizeMs)
@@ -102,27 +98,19 @@ class RuntimeSttConfigTest {
     }
 
     @Test
-    fun fromSttRunConfig_autoSilence_populatesCorrectly() {
-        val runConfig = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.05f,
-                preRollMs = 200,
-                stableChunkSizeMs = 600
-            ),
+    fun from_sttConfig_autoSilence_populatesCorrectly() {
+        val sttCfg = SttConfig(
+            modelPath = "/dummy/model.bin",
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.05f,
+            preRollMs = 200,
+            stableChunkSizeMs = 600,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(
-                type = "AUTO_SILENCE",
-                silenceMs = 1500,
-                maxDurationMs = 40000
-            )
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.AutoSilence(silenceMs = 1500, maxDurationMs = 40000)
         )
-        val runtime = RuntimeSttConfig.fromSttRunConfig(runConfig)
+        val runtime = RuntimeSttConfig.from(sttCfg)
         assertEquals(0.05f, runtime.energyThreshold, 0.001f)
         assertEquals(200, runtime.preRollMs)
         assertEquals(600, runtime.stableChunkSizeMs)

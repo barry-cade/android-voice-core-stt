@@ -2,8 +2,7 @@ package dev.barrycade.voicecore.stt
 
 import android.util.Log
 
- @Deprecated("Will be internalized in a future release. Use SpeechToTextProvider.get() instead.")
-object WhisperBridge : WhisperModel {
+internal object WhisperBridge : WhisperModel {
     private const val FALLBACK_TRANSCRIPT = "When I went to the shop to buy some milk, I also bought a newspaper."
 
         init {

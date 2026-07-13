@@ -3,6 +3,20 @@ package dev.barrycade.voicecore.stt
 /**
  * Owns inference submission and result/timing dispatch adaptation.
  *
+ * ## Thread ownership
+ *
+ * | Thread | Owns | Notes |
+ * |--------|------|-------|
+ * | SpeechToText caller thread | [submit] call | Serialized via [SpeechToText.stateLock] |
+ * | Whisper executor thread (T4) | [onResultCallback] invocation | Inside [ModelManager.submitInference] runnable |
+ * | Caller's callback thread | [decideDispatch], [onPostDispatch], [onComplete] | Whichever thread runs the Whisper executor task |
+ *
+ * [submit] accepts lambda callbacks ([decideDispatch], [onPostDispatch], [onComplete])
+ * that are invoked on the Whisper executor thread. These callbacks must NOT acquire
+ * [SpeechToText.stateLock] if they are called from within a [submit] call that already
+ * holds the lock — deadlock risk. See [SpeechToText.submitInferenceAndDispatch] for
+ * the specific lock protocol.
+ *
  * Responsibilities:
  * - Convert FloatArray PCM to ShortArray for model submission.
  * - Submit inference through [ModelManager].

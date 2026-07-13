@@ -15,21 +15,17 @@ import org.junit.Test
  */
 class WarmupInvocationTest {
 
-    private fun createConfig(warmupEnabled: Boolean, warmupDurationMs: Int): SttRunConfig {
-        return SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
+    private fun createConfig(warmupEnabled: Boolean, warmupDurationMs: Int): SttConfig {
+        return SttConfig(
             modelPath = "/test/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.03f,
+            preRollMs = 100,
+            stableChunkSizeMs = 500,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL"),
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.Manual,
             warmupEnabled = warmupEnabled,
             warmupDurationMs = warmupDurationMs
         )

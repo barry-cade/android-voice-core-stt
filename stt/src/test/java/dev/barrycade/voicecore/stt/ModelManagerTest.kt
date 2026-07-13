@@ -7,9 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Tests for [ModelManager] using [FakeWhisperModel].
@@ -22,24 +19,17 @@ class ModelManagerTest {
     private lateinit var fakeModel: FakeWhisperModel
     private lateinit var modelManager: ModelManager
     private var capturedErrors: MutableList<SttError> = mutableListOf()
-    private var readyFired: Boolean = false
 
     @Before
     fun setUp() {
         fakeModel = FakeWhisperModel()
         capturedErrors.clear()
-        readyFired = false
 
         modelManager = ModelManager(
             modelPath = "/test/model.bin",
             sttErrorListener = object : SttErrorListener {
                 override fun onSttError(error: SttError) {
                     capturedErrors.add(error)
-                }
-            },
-            readyListener = object : SttReadyListener {
-                override fun onSttReady() {
-                    readyFired = true
                 }
             },
             whisperModel = fakeModel
@@ -63,10 +53,8 @@ class ModelManagerTest {
 
         assertTrue("model must be ready after init", modelManager.isReady)
         assertEquals("loadModel must be called exactly once", 1, fakeModel.loadCount)
-        // Warm-up is handled by SpeechToText, not ModelManager.
         assertEquals("transcribe must not be called during init", 0, fakeModel.transcribeCount)
         assertEquals("model path must match", "/test/model.bin", fakeModel.lastModelPath)
-        assertTrue("ready listener must fire", readyFired)
         assertFalse("initFailed must be false", modelManager.initFailed)
     }
 
@@ -86,7 +74,6 @@ class ModelManagerTest {
         assertEquals("loadModel must be attempted but failed before counter increment",
             0, fakeModel.loadCount)
         assertEquals("transcribe must not be called after load failure", 0, fakeModel.transcribeCount)
-        assertFalse("ready listener must not fire", readyFired)
     }
 
     // ── Negative: transcribe failure (no longer relevant — warm-up removed) ──
@@ -102,7 +89,6 @@ class ModelManagerTest {
         assertFalse("initFailed must remain false", modelManager.initFailed)
         assertTrue("model must be ready", modelManager.isReady)
         assertEquals("loadModel must be called", 1, fakeModel.loadCount)
-        assertTrue("ready listener must fire", readyFired)
     }
 
     // ── Negative: forceWhisperLoadFailure hook ──────────────────────────
@@ -210,50 +196,6 @@ class ModelManagerTest {
             1, fakeModel.transcribeCount)
     }
 
-    // ── Negative: setReadyListener after ready ──────────────────────────
-
-    @Test
-    fun setReadyListener_afterReady_firesImmediately() {
-        modelManager.initAsync()
-        waitForReady()
-
-        var secondReadyFired = false
-        modelManager.setReadyListener(object : SttReadyListener {
-            override fun onSttReady() {
-                secondReadyFired = true
-            }
-        })
-
-        assertTrue("ready listener must fire immediately if already ready",
-            secondReadyFired)
-    }
-
-    // ── Negative: multiple setReadyListener calls ───────────────────────
-
-    @Test
-    fun setReadyListener_replacesPrevious() {
-        var firstFired = false
-        var lastFired = false
-
-        modelManager.setReadyListener(object : SttReadyListener {
-            override fun onSttReady() {
-                firstFired = true
-            }
-        })
-
-        modelManager.setReadyListener(object : SttReadyListener {
-            override fun onSttReady() {
-                lastFired = true
-            }
-        })
-
-        modelManager.initAsync()
-        waitForReady()
-
-        assertFalse("first (replaced) ready listener must not fire", firstFired)
-        assertTrue("last ready listener must fire", lastFired)
-    }
-
     // ── Negative: shutdown twice is idempotent ──────────────────────────
 
     @Test
@@ -262,45 +204,4 @@ class ModelManagerTest {
         modelManager.shutdown()
     }
 
-    @Test
-    fun concurrentSetReadyListenerAndInitAsync_doesNotThrow() {
-        val failure = AtomicReference<Throwable?>(null)
-        val done = CountDownLatch(2)
-
-        val listenerThread = Thread({
-            try {
-                repeat(200) {
-                    modelManager.setReadyListener(object : SttReadyListener {
-                        override fun onSttReady() {
-                            // no-op
-                        }
-                    })
-                }
-            } catch (t: Throwable) {
-                failure.compareAndSet(null, t)
-            } finally {
-                done.countDown()
-            }
-        }, "ModelManagerListenerThread")
-
-        val initThread = Thread({
-            try {
-                repeat(20) {
-                    modelManager.initAsync()
-                    Thread.sleep(5)
-                }
-            } catch (t: Throwable) {
-                failure.compareAndSet(null, t)
-            } finally {
-                done.countDown()
-            }
-        }, "ModelManagerInitThread")
-
-        listenerThread.start()
-        initThread.start()
-
-        val finished = done.await(3, TimeUnit.SECONDS)
-        assertTrue("concurrency test threads must finish", finished)
-        assertNull("concurrent listener/init operations must not throw", failure.get())
-    }
 }

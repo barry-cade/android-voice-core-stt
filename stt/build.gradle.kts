@@ -19,24 +19,18 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
     fun verify() {
                                 val expectedPublicApiTypes = setOf(
                     "SpeechToText",
-                    "SttRunConfig",
-                    "AudioCapture",
-                    "WhisperBridge",
-                    "SttErrorCode",
-                    "SttError",
-                    "SttErrorListener",
-                    "SttErrorCategory",
-                    "SttTimingSnapshot",
-                    "SttLifecycleState",
-                    "SttReadyListener",
-
-                    "SttReturnCode",
+                    "SpeechToTextProvider",
+                    "SttConfig",
                     "SessionResult",
-                    "TtsEngineConfig",
-                    "VadConfig",
+                    "SttReturnCode",
+                    "SttError",
+                    "SttErrorCode",
+                    "SttErrorCategory",
+                    "SttErrorListener",
+                    "SttTimingSnapshot",
                     "DrainMode",
-                    "StartStrategyConfig",
-                    "StopStrategyConfig"
+                    "StartTrigger",
+                    "StopTrigger"
                 )
 
         val sttSources = sourceDir.get().asFile
@@ -72,6 +66,9 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
         }
 
         val whisperBridgeSource = sttSources.resolve("WhisperBridge.kt").readText()
+        if (!whisperBridgeSource.contains("internal object WhisperBridge")) {
+            throw GradleException("WhisperBridge must be internal.")
+        }
         if (!whisperBridgeSource.contains("external fun loadModel(modelPath: String)")) {
             throw GradleException("WhisperBridge must expose loadModel(modelPath: String).")
         }

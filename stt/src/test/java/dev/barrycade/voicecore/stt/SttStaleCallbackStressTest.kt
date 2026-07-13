@@ -142,21 +142,17 @@ class SttStaleCallbackStressTest {
         assertEquals("non-stale callback should be delivered", 1, resultCount.get())
     }
 
-    private fun validManualStopConfig(): SttRunConfig {
-        return SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/dummy/model.bin",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
+        private fun validManualStopConfig(): SttConfig {
+        return SttConfig(
+            modelPath = "/dummy/model.bin",
+            language = "en",
+            debugLoggingEnabled = false,
+            energyThreshold = 0.03f,
+            preRollMs = 100,
+            stableChunkSizeMs = 500,
             drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
+            startTrigger = StartTrigger.Manual,
+            stopTrigger = StopTrigger.Manual
         )
     }
 

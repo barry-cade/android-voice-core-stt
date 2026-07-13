@@ -282,47 +282,4 @@ class StrategyCombinationTest {
             stop.shouldStop(events, vad, 5000))
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Negative: unknown strategy types are rejected by RuntimeSttConfig
-    // ══════════════════════════════════════════════════════════════════════
-
-    @Test(expected = IllegalArgumentException::class)
-    fun fromSttRunConfig_unknownStartStrategy_throws() {
-        val config = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/test",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "UNKNOWN"),
-            stopStrategy = StopStrategyConfig(type = "MANUAL")
-        )
-        RuntimeSttConfig.fromSttRunConfig(config)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun fromSttRunConfig_unknownStopStrategy_throws() {
-        val config = SttRunConfig(
-            ttsEngineConfig = TtsEngineConfig(
-                modelPath = "/test",
-                language = "en",
-                debugLoggingEnabled = false
-            ),
-            vadConfig = VadConfig(
-                energyThreshold = 0.03f,
-                preRollMs = 100,
-                stableChunkSizeMs = 500
-            ),
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startStrategy = StartStrategyConfig(type = "MANUAL"),
-            stopStrategy = StopStrategyConfig(type = "UNKNOWN")
-        )
-        RuntimeSttConfig.fromSttRunConfig(config)
-    }
 }

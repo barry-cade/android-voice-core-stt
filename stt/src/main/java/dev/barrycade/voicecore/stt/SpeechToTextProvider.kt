@@ -27,7 +27,7 @@ object SpeechToTextProvider {
      * Returns the singleton [SpeechToText] instance, creating it on first access.
      *
      * The model is NOT loaded during construction. Call [SpeechToText.initStt]
-     * with a valid [SttRunConfig] to initialise the model and STT scaffolding.
+     * with a valid [SttConfig] to initialise the model and STT scaffolding.
      *
      * @param context Application context (obtain via [Context.getApplicationContext]).
      * @return The shared [SpeechToText] instance.
