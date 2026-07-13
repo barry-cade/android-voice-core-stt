@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  *        PCM samples are read per AudioRecord.read() call. Must be >= 1024 and <= 16000.
  *        Default 4000 (0.25s at 16kHz).
  */
+ @Deprecated("Will be internalized in a future release. Use SpeechToTextProvider.get() instead.")
 class AudioCapture(
     private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int,

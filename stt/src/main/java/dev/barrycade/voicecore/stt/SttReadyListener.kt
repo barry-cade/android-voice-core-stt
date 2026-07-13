@@ -10,6 +10,7 @@ package dev.barrycade.voicecore.stt
  * @see SpeechToText
  * @see ModelManager.isReady
  */
+ @Deprecated("Will be internalized in a future release. Use SpeechToText status checks instead.")
 fun interface SttReadyListener {
     fun onSttReady()
 }

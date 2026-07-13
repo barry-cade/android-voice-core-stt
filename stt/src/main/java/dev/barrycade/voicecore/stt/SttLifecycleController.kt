@@ -3,15 +3,37 @@ package dev.barrycade.voicecore.stt
 /**
  * Owns the lifecycle state machine and enforces legal transitions.
  *
- * Responsibilities:
- * - Initialise the state machine via [onInit].
- * - Transition to READY via [onReady] when warm-up is complete.
- * - Transition to RECORDING via [onStart].
- * - Transition to STOPPED via [onStop].
- * - Reset to READY via [onReset].
- * - Tear down via [onDestroy].
- * - Handle warm-up replay logic (idempotent init).
- * - Expose [currentState] for querying by other controllers.
+ * ## Transition intent mapping
+ *
+ * Each public method represents a single transition intent.
+ * The method name describes what happened (e.g. [onReady], [onStart]),
+ * not what state we're moving to.
+ *
+ * ## Legal transitions
+ *
+ *   UNINITIALISED → INITIALISED  (onInit)
+ *   INITIALISED   → READY        (onReady)
+ *   READY         → RECORDING    (onStart)
+ *   RECORDING     → FINALISING   (onFinalising)
+ *   FINALISING    → STOPPED      (onStop)
+ *   STOPPED       → READY        (onReset / normal path)
+ *
+ * ## Bypass transitions (documented exceptions)
+ *
+ * These bypasses skip intermediate states. Each is documented with
+ * the specific reason the bypass is necessary. Bypass transitions
+ * use [SttLifecycleStateMachine.forceSet].
+ *
+ *   1. READY/INITIALISED → FINALISING  (onFinalising)
+ *      Reason: stopAndTranscribe() may be called before onStart()
+ *      has transitioned to RECORDING (early stop path).
+ *
+ *   2. RECORDING/FINALISING → READY    (onReset)
+ *      Reason: resetForNextSession() or destroy() may be called
+ *      while still recording/finalising (abnormal teardown).
+ *
+ *   3. Any → UNINITIALISED             (onDestroy)
+ *      Reason: terminal teardown must complete from any state.
  *
  * No PCM, no threading, no mode branching — only lifecycle state.
  */
@@ -24,20 +46,22 @@ internal class SttLifecycleController {
         get() = stateMachine.currentState
 
     /**
-     * Initialise lifecycle: move from UNINITIALISED to INITIALISED.
+     * Initialise lifecycle: transition UNINITIALISED → INITIALISED.
      *
+     * Legal from: UNINITIALISED only.
      * Safe to call multiple times — subsequent calls are no-ops when
      * already in INITIALISED or a later state.
      */
     fun onInit() {
         if (currentState !is SttLifecycleState.UNINITIALISED) return
-        stateMachine.forceSet(SttLifecycleState.INITIALISED)
+        stateMachine.transitionTo(SttLifecycleState.INITIALISED)
         SttLogger.lifecycle("SttLifecycleController: onInit() — state=INITIALISED")
     }
 
     /**
-     * Transition to READY state after warm-up is complete.
-     * Legal from: INITIALISED only.
+     * Transition to READY state: INITIALISED → READY.
+     *
+     * Called after warm-up is complete.
      *
      * @return true if the transition was applied.
      */
@@ -50,8 +74,9 @@ internal class SttLifecycleController {
     }
 
     /**
-     * Transition to RECORDING state when capture starts.
-     * Legal from: READY or INITIALISED.
+     * Transition to RECORDING state: READY → RECORDING.
+     *
+     * Called when PCM capture begins.
      *
      * @return true if the transition was applied.
      */
@@ -64,11 +89,15 @@ internal class SttLifecycleController {
     }
 
     /**
-     * Transition to FINALISING state when stop is requested but inference
-     * is still pending.
+     * Transition to FINALISING state: RECORDING → FINALISING.
      *
-     * Legal from: RECORDING, READY, or INITIALISED.
-     * Uses forceSet to allow bypass from non-RECORDING states.
+     * Called when stop is requested but inference is still pending.
+     *
+     * **Bypass:** If the session never reached RECORDING (stop was
+     * called before onStart transitioned), then READY or INITIALISED
+     * may be forceSet to FINALISING. This is intentional — the
+     * stop path needs to finalise regardless of whether start
+     * completed. See bypass case 1 in the class docs.
      *
      * @return true if the state was set to FINALISING.
      */
@@ -77,21 +106,21 @@ internal class SttLifecycleController {
         if (current is SttLifecycleState.RECORDING) {
             return stateMachine.transitionTo(SttLifecycleState.FINALISING)
         }
+        // Bypass case 1: stop before start completed.
         if (current is SttLifecycleState.READY || current is SttLifecycleState.INITIALISED) {
             stateMachine.forceSet(SttLifecycleState.FINALISING)
-            SttLogger.lifecycle("SttLifecycleController: onFinalising() — forceSet to FINALISING")
+            SttLogger.lifecycle("SttLifecycleController: onFinalising() — forceSet to FINALISING (bypass from ${current::class.simpleName})")
             return true
         }
         return false
     }
 
     /**
-     * Transition to STOPPED state when inference has been submitted or
-     * no PCM was accumulated.
+     * Transition to STOPPED state: FINALISING → STOPPED.
      *
-     * Legal from: FINALISING only (or no-op if already STOPPED).
-     * After STOPPED, call [onReset] to transition back to READY for
-     * the next utterance.
+     * Called when inference has completed or was skipped.
+     * After STOPPED, call [onReset] to return to READY for the
+     * next utterance.
      */
     fun onStop() {
         if (stateMachine.currentState is SttLifecycleState.STOPPED) return
@@ -102,10 +131,14 @@ internal class SttLifecycleController {
     /**
      * Reset to READY state for a new session.
      *
-     * Uses transitionTo for STOPPED → READY (legal transition).
-     * Uses forceSet to bypass from RECORDING or FINALISING (illegal via
-     * normal transitions).
-     * Safe to call multiple times; idempotent when already in READY or
+     * **Normal path:** STOPPED → READY via legal [transitionTo].
+     *
+     * **Bypass:** RECORDING or FINALISING → READY via [forceSet].
+     * This occurs when [SpeechToText.resetForNextSession] or
+     * [SpeechToText.destroy] is called while the pipeline is still
+     * active. See bypass case 2 in the class docs.
+     *
+     * Safe to call multiple times. No-op when already in READY or
      * INITIALISED.
      */
     fun onReset() {
@@ -124,19 +157,22 @@ internal class SttLifecycleController {
     }
 
     /**
-     * Tear down lifecycle: transition to UNINITIALISED.
+     * Tear down lifecycle: forceSet to UNINITIALISED from any state.
      *
-     * Uses forceSet from any state.
+     * This is always a bypass — destroy must terminate from any
+     * lifecycle state. See bypass case 3 in the class docs.
      */
     fun onDestroy() {
         val current = stateMachine.currentState
         if (current is SttLifecycleState.RECORDING ||
             current is SttLifecycleState.FINALISING
         ) {
-            stateMachine.transitionTo(SttLifecycleState.STOPPED)
+            stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
+            SttLogger.lifecycle("SttLifecycleController: onDestroy() — state=UNINITIALISED (bypass from ${current::class.simpleName})")
+        } else {
+            stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
+            SttLogger.lifecycle("SttLifecycleController: onDestroy() — state=UNINITIALISED")
         }
-        stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
-        SttLogger.lifecycle("SttLifecycleController: onDestroy() — state=UNINITIALISED")
     }
 
     /**

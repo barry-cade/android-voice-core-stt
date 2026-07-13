@@ -1,3 +1,4 @@
+@file:Suppress("DEPRECATION")
 package dev.barrycade.voicecore.stt
 
 /**

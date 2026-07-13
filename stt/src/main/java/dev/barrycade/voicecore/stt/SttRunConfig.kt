@@ -3,7 +3,7 @@ package dev.barrycade.voicecore.stt
 /**
  * Single configuration object for an STT session.
  *
- * Every field is required — no defaults, no optional fields, no inference.
+ * Every field is required -- no defaults, no optional fields, no inference.
  *
  * Start and stop are independent orthogonal axes:
  * - [startStrategy] defines when capture begins
@@ -24,6 +24,7 @@ package dev.barrycade.voicecore.stt
  * @property bufferSizeSamples Size of the AudioRecord read buffer in samples.
  *        Must be >= 1024 and <= 16000. Default 4000 (0.25s at 16kHz).
  */
+@Deprecated("Use SttConfig instead. SttRunConfig will be removed in a future release.")
 data class SttRunConfig(
     val ttsEngineConfig: TtsEngineConfig,
     val vadConfig: VadConfig,
@@ -44,6 +45,7 @@ data class SttRunConfig(
  * @property wakeWord Wake word phrase for WAKEWORD start (required for WAKEWORD).
  * @property confidenceThreshold Detection confidence threshold for WAKEWORD start (required for WAKEWORD).
  */
+@Deprecated("Use SttConfig instead. StartStrategyConfig will be removed in a future release.")
 data class StartStrategyConfig(
     val type: String,
     val vadStartThreshold: Float? = null,
@@ -59,9 +61,9 @@ data class StartStrategyConfig(
  * @property silenceMs Silence duration that triggers stop (ms). Required for AUTO_SILENCE.
  * @property maxDurationMs Maximum allowed speech duration (ms). Required for AUTO_SILENCE, DURATION.
  */
+@Deprecated("Use SttConfig instead. StopStrategyConfig will be removed in a future release.")
 data class StopStrategyConfig(
     val type: String,
     val silenceMs: Int? = null,
     val maxDurationMs: Int? = null
 )
-
