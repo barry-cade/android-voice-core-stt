@@ -95,6 +95,9 @@ class SpeechToText internal constructor(
     /** Synchronisation lock for state transitions. */
     private val stateLock = Any()
 
+    /** Deterministic pipeline stage holder for runtime flow control. */
+    private val pipelineState = SttPipelineState()
+
     /** True once [initStt] has completed successfully. Idempotency guard. */
     private var isInitialised: Boolean = false
 
@@ -288,6 +291,9 @@ class SpeechToText internal constructor(
             }
 
             currentSessionEpoch = sessionEpoch.incrementAndGet()
+            if (!pipelineState.transitionTo(SttPipelineStage.CAPTURING, "startSession")) {
+                return SessionResult(SttReturnCode.ENGINE_ERROR, null)
+            }
             sessionController.beginSession()
             captureManager.beginPcmCapture()
 
@@ -328,6 +334,11 @@ class SpeechToText internal constructor(
                 return
             }
 
+            if (!pipelineState.transitionTo(SttPipelineStage.FINALISING, "stopAndTranscribe")) {
+                SttLogger.lifecycleW("stopAndTranscribe() ignored -- illegal stage from ${pipelineState.currentStage}")
+                return
+            }
+
             // ── Finalise PCM via CaptureManager (raw PCM, no VAD) ────────
             isRunning.set(false)
             stopRequested = true
@@ -340,6 +351,7 @@ class SpeechToText internal constructor(
 
             if (finalPcm.isEmpty()) {
                 SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED then READY")
+                pipelineState.transitionTo(SttPipelineStage.IDLE, "stopAndTranscribe empty pcm")
                 currentSessionEpoch = 0L
                 lifecycleController.onStop()
                 lifecycleController.onReset()
@@ -359,7 +371,7 @@ class SpeechToText internal constructor(
                 return
             }
 
-            if (!isInferencing.compareAndSet(false, true)) {
+            if (!enterInferencingLocked("stopAndTranscribe")) {
                 SttLogger.lifecycleW("stopAndTranscribe() ignored -- inference already active")
                 return
             }
@@ -370,18 +382,13 @@ class SpeechToText internal constructor(
                 vadActiveMs = 0L,
                 utteranceMs = 0L,
                 captureMs = timingMs,
-                sessionEpochAtSubmission = epoch
+                sessionEpochAtSubmission = epoch,
+                completeStopPath = true
             )
 
             if (!submitted) {
-                isInferencing.set(false)
                 SttLogger.lifecycleW("stopAndTranscribe() -- inference submission failed")
             }
-
-            // Transition to STOPPED after inference is submitted,
-            // then immediately reset to READY for the next utterance.
-            lifecycleController.onStop()
-            lifecycleController.onReset()
         }
     }
 
@@ -404,6 +411,7 @@ class SpeechToText internal constructor(
             sessionController.resetUtteranceTiming()
             currentSessionEpoch = 0L
             sessionEpoch.incrementAndGet()
+            pipelineState.transitionTo(SttPipelineStage.IDLE, "resetForNextSession")
             lifecycleController.onReset()
         }
     }
@@ -420,6 +428,7 @@ class SpeechToText internal constructor(
             currentSessionEpoch = 0L
             sessionEpoch.incrementAndGet()
             sessionController.resetUtteranceTiming()
+            pipelineState.transitionTo(SttPipelineStage.IDLE, "destroy")
             modelManager.unload()
             isInitialised = false
             lifecycleController.onDestroy()
@@ -508,7 +517,12 @@ class SpeechToText internal constructor(
         if (!isRunning.get()) return
         val epoch = currentSessionEpoch
         if (epoch == 0L) return
-        if (!isInferencing.compareAndSet(false, true)) return
+
+        synchronized(stateLock) {
+            if (!enterInferencingLocked("handleUtteranceReady")) {
+                return
+            }
+        }
 
         try {
             val vadMs = modeController.vadActiveMs()
@@ -520,13 +534,28 @@ class SpeechToText internal constructor(
                 vadActiveMs = vadMs,
                 utteranceMs = utterMs,
                 captureMs = captureMs,
-                sessionEpochAtSubmission = epoch
+                sessionEpochAtSubmission = epoch,
+                completeStopPath = false
             )
             if (!submitted) {
-                isInferencing.set(false)
+                synchronized(stateLock) {
+                    isInferencing.set(false)
+                    if (isRunning.get()) {
+                        pipelineState.transitionTo(SttPipelineStage.CAPTURING, "inference submit rejected")
+                    } else {
+                        pipelineState.transitionTo(SttPipelineStage.IDLE, "inference submit rejected")
+                    }
+                }
             }
         } catch (t: Throwable) {
-            isInferencing.set(false)
+            synchronized(stateLock) {
+                isInferencing.set(false)
+                if (isRunning.get()) {
+                    pipelineState.transitionTo(SttPipelineStage.CAPTURING, "inference submit throwable")
+                } else {
+                    pipelineState.transitionTo(SttPipelineStage.IDLE, "inference submit throwable")
+                }
+            }
             callbackDispatcher.dispatchError(t)
         }
     }
@@ -540,14 +569,24 @@ class SpeechToText internal constructor(
         vadActiveMs: Long,
         utteranceMs: Long,
         captureMs: Long,
-        sessionEpochAtSubmission: Long
+        sessionEpochAtSubmission: Long,
+        completeStopPath: Boolean
     ): Boolean {
         val shortPcm = pcm.toShortArray()
         val pipelineStartMs = sessionController.utteranceElapsedMs()
         val effectiveSilenceMs = config.autoSilenceMs.toLong()
 
         val onResultCallback: (String) -> Unit = fun(text: String) {
-            if (sessionEpochAtSubmission != currentSessionEpoch) {
+            val shouldDispatch = synchronized(stateLock) {
+                if (sessionEpochAtSubmission != currentSessionEpoch) {
+                    false
+                } else {
+                    pipelineState.transitionTo(SttPipelineStage.DISPATCHING, "inference result ready")
+                    true
+                }
+            }
+
+            if (!shouldDispatch) {
                 SttLogger.lifecycleW(
                     "stale inference result dropped: submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
                 )
@@ -568,13 +607,59 @@ class SpeechToText internal constructor(
 
             callbackDispatcher.dispatchTiming(captureMs, vadActiveMs, whisperMs, totalMs)
             callbackDispatcher.dispatchResult(text, code, snapshot)
+
+            if (!completeStopPath) {
+                synchronized(stateLock) {
+                    if (sessionEpochAtSubmission != currentSessionEpoch) {
+                        pipelineState.transitionTo(SttPipelineStage.IDLE, "dispatch stale completion")
+                    } else if (isRunning.get()) {
+                        pipelineState.transitionTo(SttPipelineStage.CAPTURING, "dispatch complete")
+                    } else {
+                        pipelineState.transitionTo(SttPipelineStage.IDLE, "dispatch complete not running")
+                    }
+                }
+            }
         }
 
         return modelManager.submitInference(
             pcm = shortPcm,
             onResult = onResultCallback,
-            onComplete = { isInferencing.set(false) }
+            onComplete = {
+                synchronized(stateLock) {
+                    isInferencing.set(false)
+
+                    if (!completeStopPath) {
+                        return@submitInference
+                    }
+
+                    if (sessionEpochAtSubmission != currentSessionEpoch) {
+                        return@submitInference
+                    }
+
+                    pipelineState.transitionTo(SttPipelineStage.IDLE, "stop inference complete")
+                    currentSessionEpoch = 0L
+                    lifecycleController.onStop()
+                    lifecycleController.onReset()
+                }
+            }
         )
+    }
+
+    private fun enterInferencingLocked(reason: String): Boolean {
+        if (!isInferencing.compareAndSet(false, true)) {
+            return false
+        }
+        if (!pipelineState.transitionTo(SttPipelineStage.INFERENCING, reason)) {
+            isInferencing.set(false)
+            return false
+        }
+        return true
+    }
+
+    internal fun currentPipelineStageForTest(): SttPipelineStage {
+        return synchronized(stateLock) {
+            pipelineState.currentStage
+        }
     }
 
     // ======== Helpers =====================================================
