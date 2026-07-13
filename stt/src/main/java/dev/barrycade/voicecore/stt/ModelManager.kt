@@ -25,6 +25,8 @@ internal class ModelManager(
     private var readyListener: SttReadyListener? = null,
     private val whisperModel: WhisperModel = WhisperBridge
 ) {
+    private val stateLock = Any()
+
     /**
      * Dedicated single-thread executor for Whisper lifecycle operations.
      * All loadModel() and unloadModel() calls are serialized through this executor.
@@ -54,11 +56,12 @@ internal class ModelManager(
     /**
      * Idempotency guard for executor shutdown.
      */
-    private var executorsShutdown: Boolean = false
+    private val executorsShutdown = AtomicBoolean(false)
 
     /**
      * Testing hook: when true, initAsync() will fail fast with MODEL_LOAD_FAILED.
      */
+    @Volatile
     var forceWhisperLoadFailure: Boolean = false
 
     /**
@@ -95,7 +98,10 @@ internal class ModelManager(
 
             isReady = true
             SttLogger.lifecycle("ModelManager: model loaded, isReady=true")
-            readyListener?.onSttReady()
+            val listenerSnapshot = synchronized(stateLock) {
+                readyListener
+            }
+            listenerSnapshot?.onSttReady()
             onReady()
         } catch (t: Throwable) {
             SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
@@ -134,9 +140,12 @@ internal class ModelManager(
      * Load the Whisper model. Returns true on success, false on failure.
      */
     private fun loadModel(): Boolean {
-        SttLogger.whisper("loadModel: $modelPath")
+        val modelPathSnapshot = synchronized(stateLock) {
+            modelPath
+        }
+        SttLogger.whisper("loadModel: $modelPathSnapshot")
         return try {
-            whisperModel.loadModel(modelPath)
+            whisperModel.loadModel(modelPathSnapshot)
             true
         } catch (t: Throwable) {
             SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
@@ -154,8 +163,10 @@ internal class ModelManager(
      * been loaded (path is frozen).
      */
     fun updateModelPath(path: String) {
-        if (isReady || initFailed) return
-        modelPath = path
+        synchronized(stateLock) {
+            if (isReady || initFailed) return
+            modelPath = path
+        }
     }
 
     /**
@@ -218,21 +229,31 @@ internal class ModelManager(
      * Callers must post to their own thread if main-thread delivery is required.
      *
      * Safe to call after [shutdown]; the task is silently discarded.
+     *
+     * @return true if the task was accepted by the executor, false otherwise.
      */
-    fun submitInference(pcm: ShortArray, onResult: (String) -> Unit) {
+    fun submitInference(
+        pcm: ShortArray,
+        onResult: (String) -> Unit,
+        onComplete: () -> Unit = {}
+    ): Boolean {
         val runnable = Runnable {
-            val text = try {
-                whisperModel.transcribe(pcm).trim()
+            try {
+                val text = whisperModel.transcribe(pcm).trim()
+                onResult(text)
             } catch (t: Throwable) {
                 SttLogger.whisperE("inference failed: ${t.message}")
-                return@Runnable
+            } finally {
+                onComplete()
             }
-            onResult(text)
         }
         try {
             whisperExecutor.submit(runnable)
+            return true
         } catch (_: RejectedExecutionException) {
             SttLogger.whisperE("submitInference: executor rejected task — may have been shut down")
+            onComplete()
+            return false
         }
     }
 
@@ -251,8 +272,7 @@ internal class ModelManager(
      * Idempotent: multiple calls are safe.
      */
     fun shutdown() {
-        if (executorsShutdown) return
-        executorsShutdown = true
+        if (!executorsShutdown.compareAndSet(false, true)) return
 
         whisperExecutor.shutdown()
         try {
@@ -275,9 +295,15 @@ internal class ModelManager(
      * If [isReady] is already true, the listener is invoked immediately.
      */
     fun setReadyListener(listener: SttReadyListener?) {
-        readyListener = listener
-        if (isReady) {
-            readyListener?.onSttReady()
+        var fireNow = false
+        synchronized(stateLock) {
+            readyListener = listener
+            if (isReady) {
+                fireNow = true
+            }
+        }
+        if (fireNow) {
+            listener?.onSttReady()
         }
     }
 }

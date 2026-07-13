@@ -7,6 +7,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Tests for [ModelManager] using [FakeWhisperModel].
@@ -257,5 +260,47 @@ class ModelManagerTest {
     fun shutdown_twice_isIdempotent() {
         modelManager.shutdown()
         modelManager.shutdown()
+    }
+
+    @Test
+    fun concurrentSetReadyListenerAndInitAsync_doesNotThrow() {
+        val failure = AtomicReference<Throwable?>(null)
+        val done = CountDownLatch(2)
+
+        val listenerThread = Thread({
+            try {
+                repeat(200) {
+                    modelManager.setReadyListener(object : SttReadyListener {
+                        override fun onSttReady() {
+                            // no-op
+                        }
+                    })
+                }
+            } catch (t: Throwable) {
+                failure.compareAndSet(null, t)
+            } finally {
+                done.countDown()
+            }
+        }, "ModelManagerListenerThread")
+
+        val initThread = Thread({
+            try {
+                repeat(20) {
+                    modelManager.initAsync()
+                    Thread.sleep(5)
+                }
+            } catch (t: Throwable) {
+                failure.compareAndSet(null, t)
+            } finally {
+                done.countDown()
+            }
+        }, "ModelManagerInitThread")
+
+        listenerThread.start()
+        initThread.start()
+
+        val finished = done.await(3, TimeUnit.SECONDS)
+        assertTrue("concurrency test threads must finish", finished)
+        assertNull("concurrent listener/init operations must not throw", failure.get())
     }
 }

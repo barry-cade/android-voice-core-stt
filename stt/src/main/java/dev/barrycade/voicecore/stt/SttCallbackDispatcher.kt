@@ -21,6 +21,8 @@ package dev.barrycade.voicecore.stt
  */
 internal class SttCallbackDispatcher {
 
+    private val listenerLock = Any()
+
     /** Result listener: receives transcribed text. */
     private var onResult: ((String) -> Unit)? = null
 
@@ -33,6 +35,9 @@ internal class SttCallbackDispatcher {
     /** Structured STT error listener. */
     private var sttErrorListener: SttErrorListener? = null
 
+    /** Timing listener backing field. */
+    private var timingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
+
     /**
      * Timing listener, called after each inference completes.
      *
@@ -41,34 +46,54 @@ internal class SttCallbackDispatcher {
      * @param whisperMs Duration of the Whisper inference call.
      * @param totalMs End-to-end pipeline time from utterance start to result.
      */
-    var onTimingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
+    var onTimingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)?
+        get() = synchronized(listenerLock) {
+            timingListener
+        }
+        set(value) {
+            synchronized(listenerLock) {
+                timingListener = value
+            }
+        }
 
     // ── Listener registration ────────────────────────────────────────────
 
     /** Register a result listener. */
     fun setOnResultListener(l: (String) -> Unit) {
-        onResult = l
+        synchronized(listenerLock) {
+            onResult = l
+        }
     }
 
     /** Register a result-with-timing listener. */
     fun setOnResultWithTimingListener(l: (text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit) {
-        onResultWithTiming = l
+        synchronized(listenerLock) {
+            onResultWithTiming = l
+        }
     }
 
     /** Register a generic error listener. */
     fun setOnErrorListener(l: (Throwable) -> Unit) {
-        onError = l
+        synchronized(listenerLock) {
+            onError = l
+        }
     }
 
     /** Register a structured STT error listener. */
     fun setSttErrorListener(l: SttErrorListener) {
-        sttErrorListener = l
+        synchronized(listenerLock) {
+            sttErrorListener = l
+        }
     }
 
     /**
      * Get the current STT error listener (for forwarding to components).
      */
-    fun getSttErrorListener(): SttErrorListener? = sttErrorListener
+    fun getSttErrorListener(): SttErrorListener? {
+        return synchronized(listenerLock) {
+            sttErrorListener
+        }
+    }
 
     // ── Dispatch methods ─────────────────────────────────────────────────
 
@@ -81,8 +106,14 @@ internal class SttCallbackDispatcher {
      *               null during early stop paths that bypass the accumulator).
      */
     fun dispatchResult(text: String, code: SttReturnCode, timing: SttTimingSnapshot?) {
-        onResultWithTiming?.invoke(text, code, timing)
-        onResult?.invoke(text)
+        val withTimingSnapshot = synchronized(listenerLock) {
+            onResultWithTiming
+        }
+        val resultSnapshot = synchronized(listenerLock) {
+            onResult
+        }
+        withTimingSnapshot?.invoke(text, code, timing)
+        resultSnapshot?.invoke(text)
     }
 
     /**
@@ -91,8 +122,14 @@ internal class SttCallbackDispatcher {
      * @param t The throwable representing the error.
      */
     fun dispatchError(t: Throwable) {
-        onError?.invoke(t)
-        sttErrorListener?.onSttError(
+        val errorSnapshot = synchronized(listenerLock) {
+            onError
+        }
+        val sttErrorSnapshot = synchronized(listenerLock) {
+            sttErrorListener
+        }
+        errorSnapshot?.invoke(t)
+        sttErrorSnapshot?.onSttError(
             SttError(
                 SttErrorCategory.UNKNOWN,
                 SttErrorCode.INTERNAL_EXCEPTION,
@@ -111,17 +148,22 @@ internal class SttCallbackDispatcher {
      * @param totalMs End-to-end pipeline time (ms).
      */
     fun dispatchTiming(captureMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) {
-        onTimingListener?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
+        val timingSnapshot = synchronized(listenerLock) {
+            timingListener
+        }
+        timingSnapshot?.invoke(captureMs, vadActiveMs, whisperMs, totalMs)
     }
 
     /**
      * Clear all listeners. Called during destroy to prevent memory leaks.
      */
     fun clearListeners() {
-        onResult = null
-        onResultWithTiming = null
-        onError = null
-        sttErrorListener = null
-        onTimingListener = null
+        synchronized(listenerLock) {
+            onResult = null
+            onResultWithTiming = null
+            onError = null
+            sttErrorListener = null
+            timingListener = null
+        }
     }
 }

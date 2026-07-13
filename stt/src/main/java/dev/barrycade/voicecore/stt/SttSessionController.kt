@@ -14,39 +14,37 @@ package dev.barrycade.voicecore.stt
  */
 internal class SttSessionController {
 
+    private val lock = Any()
+
     /** Session start wall time (ms), set by [beginSession]. 0 when no session active. */
-    var sessionStartMs: Long = 0L
-        private set
+    private var sessionStartMs: Long = 0L
 
     /** Inference start wall time (ms), set by [beginInference]. 0 when no inference active. */
-    var inferenceStartMs: Long = 0L
-        private set
+    private var inferenceStartMs: Long = 0L
 
     /** Inference end wall time (ms), set by [endInference]. 0 when no inference has completed. */
-    var inferenceEndMs: Long = 0L
-        private set
+    private var inferenceEndMs: Long = 0L
 
     // ── PCM timing fields (resettable per utterance) ──────────────────────
 
     /** PCM capture start wall time (ms), set when the processor starts. */
-    var timingPcmStartMs: Long = 0L
-        private set
+    private var timingPcmStartMs: Long = 0L
 
     /** Total PCM capture duration (ms) accumulated since last reset. */
-    var timingPcmTotalMs: Long = 0L
-        private set
+    private var timingPcmTotalMs: Long = 0L
 
     /** Utterance start wall time (ms) — tracks pipeline start for timing snapshots. */
-    var timingUtteranceStartMs: Long = 0L
-        private set
+    private var timingUtteranceStartMs: Long = 0L
 
     /**
      * Begin a new session: record session start timestamp.
      * Resets utterance-level timing fields.
      */
     fun beginSession() {
-        sessionStartMs = System.currentTimeMillis()
-        resetUtteranceTiming()
+        synchronized(lock) {
+            sessionStartMs = System.currentTimeMillis()
+            resetUtteranceTimingLocked()
+        }
         SttLogger.lifecycle("SttSessionController: beginSession()")
     }
 
@@ -57,10 +55,12 @@ internal class SttSessionController {
      * @return Elapsed ms since session start, or 0 if session was never started.
      */
     fun endSession(): Long {
-        if (sessionStartMs > 0) {
-            return System.currentTimeMillis() - sessionStartMs
+        synchronized(lock) {
+            if (sessionStartMs > 0) {
+                return System.currentTimeMillis() - sessionStartMs
+            }
+            return 0L
         }
-        return 0L
     }
 
     /**
@@ -68,8 +68,10 @@ internal class SttSessionController {
      * sessionStartMs is cleared.
      */
     fun resetSession() {
-        sessionStartMs = 0L
-        resetUtteranceTiming()
+        synchronized(lock) {
+            sessionStartMs = 0L
+            resetUtteranceTimingLocked()
+        }
         SttLogger.lifecycle("SttSessionController: resetSession()")
     }
 
@@ -77,7 +79,9 @@ internal class SttSessionController {
      * Begin inference: record inference start timestamp.
      */
     fun beginInference() {
-        inferenceStartMs = System.currentTimeMillis()
+        synchronized(lock) {
+            inferenceStartMs = System.currentTimeMillis()
+        }
     }
 
     /**
@@ -86,18 +90,22 @@ internal class SttSessionController {
      * @return Inference duration in ms, or 0 if inference was never started.
      */
     fun endInference(): Long {
-        inferenceEndMs = System.currentTimeMillis()
-        if (inferenceStartMs > 0) {
-            return inferenceEndMs - inferenceStartMs
+        synchronized(lock) {
+            inferenceEndMs = System.currentTimeMillis()
+            if (inferenceStartMs > 0) {
+                return inferenceEndMs - inferenceStartMs
+            }
+            return 0L
         }
-        return 0L
     }
 
     /**
      * Begin PCM capture timing. Records the wall time when the processor starts.
      */
     fun beginPcmTiming() {
-        timingPcmStartMs = System.currentTimeMillis()
+        synchronized(lock) {
+            timingPcmStartMs = System.currentTimeMillis()
+        }
         SttLogger.pcm("[TIMING] PCM capture start")
     }
 
@@ -107,11 +115,13 @@ internal class SttSessionController {
      * @return Total PCM capture duration in ms, or 0 if PCM timing was never started.
      */
     fun endPcmTiming(): Long {
-        if (timingPcmStartMs > 0) {
-            timingPcmTotalMs = System.currentTimeMillis() - timingPcmStartMs
-            return timingPcmTotalMs
+        synchronized(lock) {
+            if (timingPcmStartMs > 0) {
+                timingPcmTotalMs = System.currentTimeMillis() - timingPcmStartMs
+                return timingPcmTotalMs
+            }
+            return 0L
         }
-        return 0L
     }
 
     /**
@@ -119,7 +129,9 @@ internal class SttSessionController {
      * Called when the processor loop begins.
      */
     fun beginUtteranceTiming() {
-        timingUtteranceStartMs = System.currentTimeMillis()
+        synchronized(lock) {
+            timingUtteranceStartMs = System.currentTimeMillis()
+        }
     }
 
     /**
@@ -128,19 +140,55 @@ internal class SttSessionController {
      * @return Elapsed ms since utterance start, or current time if never started.
      */
     fun utteranceElapsedMs(): Long {
-        if (timingUtteranceStartMs > 0) return timingUtteranceStartMs
-        return System.currentTimeMillis()
+        synchronized(lock) {
+            if (timingUtteranceStartMs > 0) {
+                return timingUtteranceStartMs
+            }
+            return System.currentTimeMillis()
+        }
     }
 
     /**
      * Get the PCM capture duration in ms captured during [endPcmTiming].
      */
-    fun captureMs(): Long = timingPcmTotalMs
+    fun captureMs(): Long {
+        return synchronized(lock) {
+            timingPcmTotalMs
+        }
+    }
 
     /**
      * Reset all utterance-level timing fields.
      */
     fun resetUtteranceTiming() {
+        synchronized(lock) {
+            resetUtteranceTimingLocked()
+        }
+    }
+
+    /**
+     * Returns true if PCM timing has started.
+     */
+    fun hasPcmTimingStarted(): Boolean {
+        return synchronized(lock) {
+            timingPcmStartMs > 0
+        }
+    }
+
+    /**
+     * Returns elapsed PCM wall time since beginPcmTiming without mutating stored totals.
+     */
+    fun currentPcmElapsedMs(): Long {
+        return synchronized(lock) {
+            if (timingPcmStartMs > 0) {
+                System.currentTimeMillis() - timingPcmStartMs
+            } else {
+                0L
+            }
+        }
+    }
+
+    private fun resetUtteranceTimingLocked() {
         timingPcmStartMs = 0L
         timingPcmTotalMs = 0L
         timingUtteranceStartMs = 0L

@@ -274,7 +274,10 @@ internal class MinimalPollingController(
     override fun stop() {
         if (!isRunning) return
         isRunning = false
-        workerThread?.join(500)
+        val thread = workerThread
+        if (thread != null && thread !== Thread.currentThread()) {
+            thread.join(500)
+        }
         workerThread = null
     }
 

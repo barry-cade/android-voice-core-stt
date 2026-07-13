@@ -1,7 +1,6 @@
 package dev.barrycade.voicecore.stt
 
 import android.os.Process
-import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * CaptureManager owns the microphone PCM queue.
@@ -54,6 +53,9 @@ internal class CaptureManager(
     private val bufferSizeSamples: Int = 4000
 ) : SessionManager {
 
+    private val stateLock = Any()
+    private val sessionBufferLock = Any()
+
     /** Underlying AudioCapture, created and started in the constructor. */
     private val audioCapture: AudioCapture = AudioCapture(
         sampleRate = sampleRate,
@@ -63,8 +65,7 @@ internal class CaptureManager(
 
     /**
      * Session buffer: accumulates all FloatArray samples received since
-     * [begin] was called. Accessed only from a single thread at a time
-     * (drain thread XOR processor thread), so no synchronisation needed.
+        * [begin] was called. Access is serialised via [sessionBufferLock].
      */
     private val sessionBuffer = mutableListOf<Float>()
 
@@ -123,7 +124,9 @@ internal class CaptureManager(
      * Must be called from a single thread (caller serialises).
      */
     override fun begin(mode: DrainMode) {
-        currentDrainMode = mode
+        synchronized(stateLock) {
+            currentDrainMode = mode
+        }
         beginPcmCapture()
         beginSttProcessing()
     }
@@ -137,16 +140,30 @@ internal class CaptureManager(
      * are available before the drain thread starts.
      */
     override fun beginPcmCapture() {
-        sessionBuffer.clear()
-        sttActive = false
-        draining = true
+        clearSessionBuffer()
+
+        var shouldStartCapture = false
+        synchronized(stateLock) {
+            sttActive = false
+            draining = true
+            if (!captureStarted) {
+                captureStarted = true
+                shouldStartCapture = true
+            }
+        }
 
         // Start AudioCapture synchronously — capture begins immediately.
         // This must complete before the drain thread starts.
-        if (!captureStarted) {
+        if (shouldStartCapture) {
             SttLogger.pcm("[CAPTURE] beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
-            audioCapture.start()
-            captureStarted = true
+            try {
+                audioCapture.start()
+            } catch (t: Throwable) {
+                synchronized(stateLock) {
+                    captureStarted = false
+                }
+                throw t
+            }
             SttLogger.pcm("[CAPTURE] beginPcmCapture() — AudioCapture started")
         }
     }
@@ -157,8 +174,11 @@ internal class CaptureManager(
      * Uses [currentDrainMode] to dispatch to the correct drain-thread strategy.
      */
     override fun beginSttProcessing() {
-        sttActive = true
-        when (currentDrainMode) {
+        val mode = synchronized(stateLock) {
+            sttActive = true
+            currentDrainMode
+        }
+        when (mode) {
             DrainMode.DRAIN_FROM_NEXT_FRAME -> startDrainThreadFromNextFrame()
             DrainMode.DRAIN_FROM_HEAD -> startDrainThreadFromHead()
         }
@@ -176,7 +196,9 @@ internal class CaptureManager(
      * when stop is requested.
      */
     override fun activatePcmCapture() {
-        sttActive = true
+        synchronized(stateLock) {
+            sttActive = true
+        }
         SttLogger.pcm("[CAPTURE] activatePcmCapture() — PCM capture marked active, drain thread NOT started")
     }
 
@@ -202,9 +224,7 @@ internal class CaptureManager(
                 }
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
-                    for (sample in frame) {
-                        sessionBuffer.add(sample)
-                    }
+                    appendFrameToSession(frame)
                 } else {
                     try {
                         Thread.sleep(5)
@@ -216,7 +236,9 @@ internal class CaptureManager(
             }
         }
         val thread = Thread(drainRunnable, "CaptureManagerDrain")
-        drainThread = thread
+        synchronized(stateLock) {
+            drainThread = thread
+        }
         thread.start()
         SttLogger.pcm("[CAPTURE] startDrainThreadFromNextFrame() — drain thread started")
     }
@@ -234,9 +256,7 @@ internal class CaptureManager(
             while (sttActive) {
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
-                    for (sample in frame) {
-                        sessionBuffer.add(sample)
-                    }
+                    appendFrameToSession(frame)
                 } else {
                     break
                 }
@@ -255,9 +275,7 @@ internal class CaptureManager(
                 }
                 val frame = audioCapture.frameQueue.poll()
                 if (frame != null) {
-                    for (sample in frame) {
-                        sessionBuffer.add(sample)
-                    }
+                    appendFrameToSession(frame)
                 } else {
                     try {
                         Thread.sleep(5)
@@ -269,7 +287,9 @@ internal class CaptureManager(
             }
         }
         val thread = Thread(drainRunnable, "CaptureManagerDrain")
-        drainThread = thread
+        synchronized(stateLock) {
+            drainThread = thread
+        }
         thread.start()
         SttLogger.pcm("[CAPTURE] startDrainThreadFromHead() — drain thread started, existing queue drained")
     }
@@ -292,30 +312,35 @@ internal class CaptureManager(
      * Idempotent: after the first call, subsequent calls return empty array.
      */
     override fun finalize(): FloatArray {
-        draining = false
-        drainThread?.let { thread ->
+        val threadToJoin = synchronized(stateLock) {
+            draining = false
+            sttActive = false
+            val thread = drainThread
+            drainThread = null
+            thread
+        }
+
+        threadToJoin?.let { thread ->
             try {
                 thread.join(200)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
         }
-        drainThread = null
 
         // Drain remaining frames from the queue into the buffer.
         while (true) {
             val frame = audioCapture.frameQueue.poll() ?: break
-            for (sample in frame) {
-                sessionBuffer.add(sample)
-            }
+            appendFrameToSession(frame)
         }
 
-        val result = sessionBuffer.toFloatArray()
-        sessionBuffer.clear()
+        val result = snapshotAndClearSessionBuffer()
 
         // Stop AudioCapture — microphone off until next session.
         audioCapture.stop()
-        captureStarted = false
+        synchronized(stateLock) {
+            captureStarted = false
+        }
         SttLogger.pcm("[CAPTURE] finalize() — returned ${result.size} raw PCM samples, AudioCapture stopped")
         return result
     }
@@ -329,12 +354,22 @@ internal class CaptureManager(
      * Idempotent: safe to call multiple times; no-op if capture is already running.
      */
     override fun restartCapture() {
-        if (captureStarted) {
-            SttLogger.pcm("[CAPTURE] restartCapture() — already running, skipping")
-            return
+        synchronized(stateLock) {
+            if (captureStarted) {
+                SttLogger.pcm("[CAPTURE] restartCapture() — already running, skipping")
+                return
+            }
+            captureStarted = true
         }
-        audioCapture.start()
-        captureStarted = true
+
+        try {
+            audioCapture.start()
+        } catch (t: Throwable) {
+            synchronized(stateLock) {
+                captureStarted = false
+            }
+            throw t
+        }
         SttLogger.pcm("[CAPTURE] restartCapture() — AudioCapture restarted")
     }
 
@@ -351,24 +386,29 @@ internal class CaptureManager(
      */
     override fun pollFrame(): FloatArray? {
         // On first call, stop the drain thread — processor takes over.
-        if (draining) {
-            draining = false
-            drainThread?.let { thread ->
-                try {
-                    thread.join(200)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
+        val threadToJoin = synchronized(stateLock) {
+            if (!draining) {
+                null
+            } else {
+                draining = false
+                val thread = drainThread
+                drainThread = null
+                thread
             }
-            drainThread = null
+        }
+
+        threadToJoin?.let { thread ->
+            try {
+                thread.join(200)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
             SttLogger.pcm("[CAPTURE] pollFrame() — drain thread stopped, processor taking over")
         }
 
         val frame = audioCapture.frameQueue.poll()
         if (frame != null) {
-            for (sample in frame) {
-                sessionBuffer.add(sample)
-            }
+            appendFrameToSession(frame)
         }
         return frame
     }
@@ -380,16 +420,22 @@ internal class CaptureManager(
      * discards any pending queue frames. Capture continues running.
      */
     override fun reset() {
-        draining = false
-        drainThread?.let { thread ->
+        val threadToJoin = synchronized(stateLock) {
+            draining = false
+            sttActive = false
+            val thread = drainThread
+            drainThread = null
+            thread
+        }
+
+        threadToJoin?.let { thread ->
             try {
                 thread.join(200)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
         }
-        drainThread = null
-        sessionBuffer.clear()
+        clearSessionBuffer()
         audioCapture.frameQueue.clear()
         SttLogger.pcm("[CAPTURE] reset() — session buffer and queue cleared, capture continues")
     }
@@ -402,18 +448,26 @@ internal class CaptureManager(
      * Called from [SpeechToText.destroy].
      */
     override fun shutdown() {
-        draining = false
-        drainThread?.let { thread ->
+        val threadToJoin = synchronized(stateLock) {
+            draining = false
+            sttActive = false
+            val thread = drainThread
+            drainThread = null
+            thread
+        }
+
+        threadToJoin?.let { thread ->
             try {
                 thread.join(200)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
         }
-        drainThread = null
-        sessionBuffer.clear()
+        clearSessionBuffer()
         audioCapture.stop()
-        captureStarted = false
+        synchronized(stateLock) {
+            captureStarted = false
+        }
         SttLogger.pcm("[CAPTURE] shutdown() — AudioCapture stopped")
     }
 
@@ -424,7 +478,9 @@ internal class CaptureManager(
      * Returns true if capture was successfully initialised.
      */
     override fun startCapture(): Boolean {
-        return captureStarted
+        return synchronized(stateLock) {
+            captureStarted
+        }
     }
 
     /**
@@ -441,5 +497,27 @@ internal class CaptureManager(
      */
     override fun clearQueue() {
         audioCapture.frameQueue.clear()
+    }
+
+    private fun appendFrameToSession(frame: FloatArray) {
+        synchronized(sessionBufferLock) {
+            for (sample in frame) {
+                sessionBuffer.add(sample)
+            }
+        }
+    }
+
+    private fun clearSessionBuffer() {
+        synchronized(sessionBufferLock) {
+            sessionBuffer.clear()
+        }
+    }
+
+    private fun snapshotAndClearSessionBuffer(): FloatArray {
+        synchronized(sessionBufferLock) {
+            val snapshot = sessionBuffer.toFloatArray()
+            sessionBuffer.clear()
+            return snapshot
+        }
     }
 }

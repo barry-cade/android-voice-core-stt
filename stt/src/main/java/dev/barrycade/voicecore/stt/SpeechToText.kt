@@ -2,6 +2,7 @@ package dev.barrycade.voicecore.stt
 
 import android.content.Context
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Main entry point for the STT pipeline.
@@ -36,8 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * | [sttErrorListener] | Same as [onError] |
  *
  * Lifecycle methods ([setConfig], [initStt], [startSession], [stopAndTranscribe],
- * [destroy], [resetForNextSession]) are not thread-safe. Callers must serialise
- * calls to these methods.
+ * [destroy], [resetForNextSession]) are serialized internally via [stateLock].
  */
 class SpeechToText internal constructor(
     context: Context?,
@@ -84,6 +84,13 @@ class SpeechToText internal constructor(
     /** Thread-safe running/inference flags. */
     private val isRunning = AtomicBoolean(false)
     private val isInferencing = AtomicBoolean(false)
+
+    /** Monotonic session epoch for stale-callback rejection. */
+    private val sessionEpoch = AtomicLong(0L)
+
+    /** Current active session epoch. 0 means no active session. */
+    @Volatile
+    private var currentSessionEpoch: Long = 0L
 
     /** Synchronisation lock for state transitions. */
     private val stateLock = Any()
@@ -166,13 +173,15 @@ class SpeechToText internal constructor(
      * Set the [SttRunConfig] for a subsequent [startSession] call.
      */
     fun setConfig(config: SttRunConfig): SessionResult {
-        val validationResult = SttRunConfigValidator.validate(config)
-        if (validationResult != null) {
-            return validationResult
+        synchronized(stateLock) {
+            val validationResult = SttRunConfigValidator.validate(config)
+            if (validationResult != null) {
+                return validationResult
+            }
+            runConfig = config
+            currentDrainMode = config.drainMode
+            return SessionResult(SttReturnCode.SUCCESS, null)
         }
-        runConfig = config
-        currentDrainMode = config.drainMode
-        return SessionResult(SttReturnCode.SUCCESS, null)
     }
 
     /**
@@ -180,120 +189,127 @@ class SpeechToText internal constructor(
      * any STT processing behaviours.
      */
     fun initStt(config: SttRunConfig): SessionResult {
-        // ── Idempotency guard: already initialised or in READY state ─────────
-        if (isInitialised || lifecycleController.currentState is SttLifecycleState.READY) {
-            SttLogger.lifecycle("initStt: already initialised — returning SUCCESS immediately")
+        synchronized(stateLock) {
+            // ── Idempotency guard: already initialised or in READY state ─────────
+            if (isInitialised || lifecycleController.currentState is SttLifecycleState.READY) {
+                SttLogger.lifecycle("initStt: already initialised — returning SUCCESS immediately")
+                return SessionResult(SttReturnCode.SUCCESS, null)
+            }
+
+            // ── Step 0: Validate config ───────────────────────────────────────
+            val validationResult = SttRunConfigValidator.validate(config)
+            if (validationResult != null) {
+                return validationResult
+            }
+            runConfig = config
+            currentDrainMode = config.drainMode
+
+            // ── Step 1: Update model path and load model ──────────────────────
+            modelManager.updateModelPath(config.ttsEngineConfig.modelPath)
+
+            if (!modelManager.loadModelIfNeeded()) {
+                return SessionResult(SttReturnCode.ENGINE_ERROR, null)
+            }
+
+            // ── Step 2: Mandatory warm-up (once per app lifetime) ─────────────
+            if (config.warmupEnabled) {
+                modelManager.runWarmup(config.warmupDurationMs)
+            }
+
+            // ── Step 3: Build runtime config ──────────────────────────────────
+            this.config = RuntimeSttConfig.fromSttRunConfig(config)
+
+            // ── Step 3a: Reconstruct CaptureManager with runtime buffer size ──
+            // If the default CaptureManager was created in the constructor (no
+            // test double injected), replace it with one configured for the
+            // runtime bufferSizeSamples.
+            if (captureManager is CaptureManager) {
+                captureManager = CaptureManager(
+                    bufferSizeSamples = config.bufferSizeSamples
+                )
+            }
+
+            // ── Step 4: Construct STT scaffolding via mode controller ─────────
+            modeController.selectController(
+                config = this.config,
+                captureManager = captureManager,
+                stopRequestedRef = { this.stopRequested },
+                sttErrorListener = callbackDispatcher.getSttErrorListener(),
+                forceTimeout = debugOptions.forceTimeout
+            )
+
+            // Wire the utterance-ready callback.
+            modeController.onUtteranceReadyCallback = { pcm, code ->
+                handleUtteranceReady(pcm, code)
+            }
+
+            // ── Step 5: Mark initialised ──────────────────────────────────────
+            isInitialised = true
+            lifecycleController.onReady()
+            SttLogger.lifecycle("initStt: initialisation complete")
+
             return SessionResult(SttReturnCode.SUCCESS, null)
         }
-
-        // ── Step 0: Validate config ───────────────────────────────────────
-        val validationResult = SttRunConfigValidator.validate(config)
-        if (validationResult != null) {
-            return validationResult
-        }
-        runConfig = config
-        currentDrainMode = config.drainMode
-
-        // ── Step 1: Update model path and load model ──────────────────────
-        modelManager.updateModelPath(config.ttsEngineConfig.modelPath)
-
-        if (!modelManager.loadModelIfNeeded()) {
-            return SessionResult(SttReturnCode.ENGINE_ERROR, null)
-        }
-
-        // ── Step 2: Mandatory warm-up (once per app lifetime) ─────────────
-        if (config.warmupEnabled) {
-            modelManager.runWarmup(config.warmupDurationMs)
-        }
-
-        // ── Step 3: Build runtime config ──────────────────────────────────
-        this.config = RuntimeSttConfig.fromSttRunConfig(config)
-
-        // ── Step 3a: Reconstruct CaptureManager with runtime buffer size ──
-        // If the default CaptureManager was created in the constructor (no
-        // test double injected), replace it with one configured for the
-        // runtime bufferSizeSamples.
-        if (captureManager is CaptureManager) {
-            captureManager = CaptureManager(
-                bufferSizeSamples = config.bufferSizeSamples
-            )
-        }
-
-        // ── Step 4: Construct STT scaffolding via mode controller ─────────
-        modeController.selectController(
-            config = this.config,
-            captureManager = captureManager,
-            stopRequestedRef = { this.stopRequested },
-            sttErrorListener = callbackDispatcher.getSttErrorListener(),
-            forceTimeout = debugOptions.forceTimeout
-        )
-
-        // Wire the utterance-ready callback.
-        modeController.onUtteranceReadyCallback = { pcm, code ->
-            handleUtteranceReady(pcm, code)
-        }
-
-        // ── Step 5: Mark initialised ──────────────────────────────────────
-        isInitialised = true
-        lifecycleController.onReady()
-        SttLogger.lifecycle("initStt: initialisation complete")
-
-        return SessionResult(SttReturnCode.SUCCESS, null)
     }
 
     /**
      * Start an STT session using the config previously set via [setConfig].
      */
     fun startSession(): SessionResult {
-        val storedConfig = runConfig
-        if (storedConfig == null) {
-            return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
-        }
-
-        if (!isInitialised && lifecycleController.currentState !is SttLifecycleState.READY) {
-            SttLogger.lifecycleW("startSession() called before initStt() — returning CONFIG_NOT_SET")
-            return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
-        }
-
-        if (!modelManager.isReady) {
-            SttLogger.lifecycleW("startSession() called but model is not ready — returning ENGINE_ERROR")
-            return SessionResult(SttReturnCode.ENGINE_ERROR, null)
-        }
-
         synchronized(stateLock) {
-            if (lifecycleController.canStartSession()) {
-                events.manualStartPressed.raise()
+            if (runConfig == null) {
+                return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
+            }
 
-                if (!config.startStrategy.shouldStart(events, modeController.activeVad)) {
-                    return SessionResult(SttReturnCode.SUCCESS, null)
-                }
+            if (!isInitialised && lifecycleController.currentState !is SttLifecycleState.READY) {
+                SttLogger.lifecycleW("startSession() called before initStt() — returning CONFIG_NOT_SET")
+                return SessionResult(SttReturnCode.CONFIG_NOT_SET, null)
+            }
 
-                sessionController.beginSession()
-                captureManager.beginPcmCapture()
+            if (!modelManager.isReady) {
+                SttLogger.lifecycleW("startSession() called but model is not ready — returning ENGINE_ERROR")
+                return SessionResult(SttReturnCode.ENGINE_ERROR, null)
+            }
 
-                if (modeController.isManualMode()) {
-                    captureManager.activatePcmCapture()
-                    modeController.minimalProcessorController?.start()
-                } else {
-                    captureManager.beginSttProcessing()
-                    startProcessor()
-                }
-            } else {
+            if (isInferencing.get()) {
+                SttLogger.lifecycleW("startSession() called while inference is still active — returning ENGINE_ERROR")
+                return SessionResult(SttReturnCode.ENGINE_ERROR, null)
+            }
+
+            if (!lifecycleController.canStartSession()) {
                 SttLogger.lifecycleW("startSession() called from ${lifecycleController.currentState} -- ignoring")
                 return SessionResult(SttReturnCode.ENGINE_ERROR, null)
             }
-        }
 
-        return SessionResult(SttReturnCode.SUCCESS, null)
+            events.manualStartPressed.raise()
+
+            if (!config.startStrategy.shouldStart(events, modeController.activeVad)) {
+                return SessionResult(SttReturnCode.SUCCESS, null)
+            }
+
+            currentSessionEpoch = sessionEpoch.incrementAndGet()
+            sessionController.beginSession()
+            captureManager.beginPcmCapture()
+
+            if (modeController.isManualMode()) {
+                captureManager.activatePcmCapture()
+                modeController.minimalProcessorController?.start()
+            } else {
+                captureManager.beginSttProcessing()
+                startProcessor()
+            }
+
+            return SessionResult(SttReturnCode.SUCCESS, null)
+        }
     }
 
     /**
      * Stop the current session and transcribe accumulated audio.
      */
     fun stopAndTranscribe() {
-        val elapsedMs = sessionController.endSession().toInt()
-
         synchronized(stateLock) {
+            val elapsedMs = sessionController.endSession().toInt()
+
             SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${lifecycleController.currentState}")
 
             events.manualStopPressed.raise()
@@ -324,6 +340,7 @@ class SpeechToText internal constructor(
 
             if (finalPcm.isEmpty()) {
                 SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED then READY")
+                currentSessionEpoch = 0L
                 lifecycleController.onStop()
                 lifecycleController.onReset()
                 return
@@ -332,25 +349,37 @@ class SpeechToText internal constructor(
             // Transition to FINALISING (inference pending).
             lifecycleController.onFinalising()
 
-            val timingMs = if (sessionController.timingPcmStartMs > 0) {
-                System.currentTimeMillis() - sessionController.timingPcmStartMs
-            } else {
-                0L
+            val timingMs = sessionController.currentPcmElapsedMs()
+
+            val epoch = currentSessionEpoch
+            if (epoch == 0L) {
+                SttLogger.lifecycleW("stopAndTranscribe() with no active session epoch -- dropping inference")
+                lifecycleController.onStop()
+                lifecycleController.onReset()
+                return
             }
 
-            // Phase 2: Submit inference (outside stateLock)
-            submitInferenceAndDispatch(
+            if (!isInferencing.compareAndSet(false, true)) {
+                SttLogger.lifecycleW("stopAndTranscribe() ignored -- inference already active")
+                return
+            }
+
+            val submitted = submitInferenceAndDispatch(
                 pcm = finalPcm,
                 code = SttReturnCode.SUCCESS,
                 vadActiveMs = 0L,
                 utteranceMs = 0L,
-                captureMs = timingMs
+                captureMs = timingMs,
+                sessionEpochAtSubmission = epoch
             )
-        }
 
-        // Transition to STOPPED after inference is submitted,
-        // then immediately reset to READY for the next utterance.
-        synchronized(stateLock) {
+            if (!submitted) {
+                isInferencing.set(false)
+                SttLogger.lifecycleW("stopAndTranscribe() -- inference submission failed")
+            }
+
+            // Transition to STOPPED after inference is submitted,
+            // then immediately reset to READY for the next utterance.
             lifecycleController.onStop()
             lifecycleController.onReset()
         }
@@ -373,6 +402,8 @@ class SpeechToText internal constructor(
             isRunning.set(false)
             stopRequested = false
             sessionController.resetUtteranceTiming()
+            currentSessionEpoch = 0L
+            sessionEpoch.incrementAndGet()
             lifecycleController.onReset()
         }
     }
@@ -385,6 +416,9 @@ class SpeechToText internal constructor(
             captureManager.shutdown()
             isRunning.set(false)
             stopRequested = false
+            isInferencing.set(false)
+            currentSessionEpoch = 0L
+            sessionEpoch.incrementAndGet()
             sessionController.resetUtteranceTiming()
             modelManager.unload()
             isInitialised = false
@@ -456,9 +490,9 @@ class SpeechToText internal constructor(
             return
         }
 
+        isRunning.set(true)
         controller.start()
         sessionController.beginUtteranceTiming()
-        isRunning.set(true)
     }
 
     // ── Session-scoped state ─────────────────────────────────────────────
@@ -472,15 +506,28 @@ class SpeechToText internal constructor(
      */
     private fun handleUtteranceReady(pcm: FloatArray, code: SttReturnCode) {
         if (!isRunning.get()) return
+        val epoch = currentSessionEpoch
+        if (epoch == 0L) return
         if (!isInferencing.compareAndSet(false, true)) return
 
         try {
             val vadMs = modeController.vadActiveMs()
             val utterMs = modeController.lastUtteranceDurationMs().toLong()
             val captureMs = sessionController.captureMs()
-            submitInferenceAndDispatch(pcm, code, vadMs, utterMs, captureMs)
-        } finally {
+            val submitted = submitInferenceAndDispatch(
+                pcm = pcm,
+                code = code,
+                vadActiveMs = vadMs,
+                utteranceMs = utterMs,
+                captureMs = captureMs,
+                sessionEpochAtSubmission = epoch
+            )
+            if (!submitted) {
+                isInferencing.set(false)
+            }
+        } catch (t: Throwable) {
             isInferencing.set(false)
+            callbackDispatcher.dispatchError(t)
         }
     }
 
@@ -492,13 +539,21 @@ class SpeechToText internal constructor(
         code: SttReturnCode,
         vadActiveMs: Long,
         utteranceMs: Long,
-        captureMs: Long
-    ) {
+        captureMs: Long,
+        sessionEpochAtSubmission: Long
+    ): Boolean {
         val shortPcm = pcm.toShortArray()
         val pipelineStartMs = sessionController.utteranceElapsedMs()
         val effectiveSilenceMs = config.autoSilenceMs.toLong()
 
-        val onResultCallback: (String) -> Unit = { text ->
+        val onResultCallback: (String) -> Unit = fun(text: String) {
+            if (sessionEpochAtSubmission != currentSessionEpoch) {
+                SttLogger.lifecycleW(
+                    "stale inference result dropped: submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
+                )
+                return
+            }
+
             val whisperMs = System.currentTimeMillis() - pipelineStartMs
             val totalMs = System.currentTimeMillis() - pipelineStartMs
 
@@ -515,7 +570,11 @@ class SpeechToText internal constructor(
             callbackDispatcher.dispatchResult(text, code, snapshot)
         }
 
-        modelManager.submitInference(shortPcm, onResultCallback)
+        return modelManager.submitInference(
+            pcm = shortPcm,
+            onResult = onResultCallback,
+            onComplete = { isInferencing.set(false) }
+        )
     }
 
     // ======== Helpers =====================================================
