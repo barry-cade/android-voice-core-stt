@@ -7,44 +7,54 @@ package dev.barrycade.voicecore.stt
  */
 internal class SttPipelineState {
 
+    private val lock = Any()
+
     private var stage: SttPipelineStage = SttPipelineStage.IDLE
 
     val currentStage: SttPipelineStage
-        get() = stage
+        get() = synchronized(lock) {
+            stage
+        }
 
     fun transitionTo(newStage: SttPipelineStage, reason: String): Boolean {
-        val oldStage = stage
-        if (oldStage == newStage) {
+        synchronized(lock) {
+            val oldStage = stage
+            if (oldStage == newStage) {
+                return true
+            }
+
+            val valid = isAllowedTransition(oldStage, newStage)
+
+            if (!valid) {
+                SttLogger.lifecycleW(
+                    "pipeline stage transition blocked: $oldStage -> $newStage (reason=$reason)"
+                )
+                return false
+            }
+
+            stage = newStage
+            SttLogger.lifecycle("pipeline stage: $oldStage -> $newStage (reason=$reason)")
             return true
         }
+    }
 
-        val valid = when (oldStage) {
-            SttPipelineStage.IDLE -> newStage == SttPipelineStage.CAPTURING
+    private fun isAllowedTransition(from: SttPipelineStage, to: SttPipelineStage): Boolean {
+        return when (from) {
+            SttPipelineStage.IDLE -> to == SttPipelineStage.CAPTURING
 
-            SttPipelineStage.CAPTURING -> newStage == SttPipelineStage.INFERENCING ||
-                    newStage == SttPipelineStage.FINALISING ||
-                    newStage == SttPipelineStage.IDLE
+            SttPipelineStage.CAPTURING -> to == SttPipelineStage.INFERENCING ||
+                    to == SttPipelineStage.FINALISING ||
+                    to == SttPipelineStage.IDLE
 
-            SttPipelineStage.FINALISING -> newStage == SttPipelineStage.INFERENCING ||
-                    newStage == SttPipelineStage.IDLE
+            SttPipelineStage.FINALISING -> to == SttPipelineStage.INFERENCING ||
+                    to == SttPipelineStage.IDLE
 
-            SttPipelineStage.INFERENCING -> newStage == SttPipelineStage.DISPATCHING ||
-                    newStage == SttPipelineStage.CAPTURING ||
-                    newStage == SttPipelineStage.IDLE
+            SttPipelineStage.INFERENCING -> to == SttPipelineStage.DISPATCHING ||
+                    to == SttPipelineStage.CAPTURING ||
+                    to == SttPipelineStage.IDLE
 
-            SttPipelineStage.DISPATCHING -> newStage == SttPipelineStage.CAPTURING ||
-                    newStage == SttPipelineStage.IDLE
+            SttPipelineStage.DISPATCHING -> to == SttPipelineStage.CAPTURING ||
+                    to == SttPipelineStage.IDLE
         }
-
-        if (!valid) {
-            SttLogger.lifecycleW(
-                "pipeline stage transition blocked: $oldStage -> $newStage (reason=$reason)"
-            )
-            return false
-        }
-
-        stage = newStage
-        SttLogger.lifecycle("pipeline stage: $oldStage -> $newStage (reason=$reason)")
-        return true
     }
 }
