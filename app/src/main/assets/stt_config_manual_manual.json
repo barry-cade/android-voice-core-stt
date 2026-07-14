@@ -1,0 +1,19 @@
+{
+  "ttsEngineConfig": {
+    "modelPath": "/path/to/model",
+    "language": "en",
+    "debugLoggingEnabled": true
+  },
+  "vadConfig": {
+    "energyThreshold": 0.03,
+    "preRollMs": 0,
+    "stableChunkSizeMs": 500
+  },
+  "drainMode": "DRAIN_FROM_HEAD",
+  "startStrategy": {
+    "type": "MANUAL"
+  },
+  "stopStrategy": {
+    "type": "MANUAL"
+  }
+}
