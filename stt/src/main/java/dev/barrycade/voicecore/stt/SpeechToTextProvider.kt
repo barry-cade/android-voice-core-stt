@@ -56,6 +56,7 @@ object SpeechToTextProvider {
      * Destroys the current instance and clears the reference.
      * The next call to [get] will create a fresh instance.
      */
+    @Suppress("DEPRECATION")
     internal fun resetForTest() {
         synchronized(this) {
             instance?.destroy()

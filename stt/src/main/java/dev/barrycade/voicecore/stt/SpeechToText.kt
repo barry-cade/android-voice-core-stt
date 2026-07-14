@@ -180,28 +180,56 @@ class SpeechToText internal constructor(
 
     /**
      * Register a listener for transcription results.
+     *
+     * @deprecated Use [setOnMessageListener] instead, which receives all
+     *   STT output as unified JSON strings.
      */
+    @Deprecated(
+        message = "Use setOnMessageListener() instead for unified JSON message handling",
+        replaceWith = ReplaceWith("setOnMessageListener(l)")
+    )
     fun setOnResultListener(l: (String) -> Unit) {
         callbackDispatcher.setOnResultListener(l)
     }
 
     /**
      * Register a listener for transcription results with timing snapshot.
+     *
+     * @deprecated Use [setOnMessageListener] instead, which receives timing
+     *   information embedded in the JSON result message.
      */
+    @Deprecated(
+        message = "Use setOnMessageListener() instead — timing is embedded in the JSON result",
+        replaceWith = ReplaceWith("setOnMessageListener(l)")
+    )
     fun setOnResultWithTimingListener(l: (text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit) {
         callbackDispatcher.setOnResultWithTimingListener(l)
     }
 
     /**
      * Register a generic error listener.
+     *
+     * @deprecated Use [setOnMessageListener] instead, which receives errors
+     *   as JSON strings with a "type": "error" discriminator.
      */
+    @Deprecated(
+        message = "Use setOnMessageListener() instead — errors are delivered as JSON with type \"error\"",
+        replaceWith = ReplaceWith("setOnMessageListener(l)")
+    )
     fun setOnErrorListener(l: (Throwable) -> Unit) {
         callbackDispatcher.setOnErrorListener(l)
     }
 
     /**
      * Register a structured STT error listener.
+     *
+     * @deprecated Use [setOnMessageListener] instead, which receives all
+     *   STT output including errors as unified JSON strings.
      */
+    @Deprecated(
+        message = "Use setOnMessageListener() instead for unified JSON message handling",
+        replaceWith = ReplaceWith("setOnMessageListener(l)")
+    )
     fun setSttErrorListener(l: SttErrorListener) {
         callbackDispatcher.setSttErrorListener(l)
     }
@@ -224,6 +252,7 @@ class SpeechToText internal constructor(
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
      * @return A JSON result string on success, or a JSON error string on failure.
      */
+    @Suppress("DEPRECATION")
     fun init(configJson: String): String {
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
@@ -271,6 +300,7 @@ class SpeechToText internal constructor(
      * This is the new entry point for the JSON-boundary API. It replaces
      * [stopAndTranscribe] with a simpler name.
      */
+    @Suppress("DEPRECATION")
     fun transcribe() {
         stopAndTranscribe()
     }
@@ -293,7 +323,14 @@ class SpeechToText internal constructor(
 
     /**
      * Set debug/test options for the pipeline.
+     *
+     * @deprecated Debug options are an internal testing mechanism and will
+     *   be removed in a future release. This method is not intended for
+     *   production use.
      */
+    @Deprecated(
+        message = "Debug options are internal testing mechanisms and will be removed"
+    )
     fun setDebugOptions(
         forceAudioInitFailure: Boolean = false,
         forceWhisperLoadFailure: Boolean = false,
@@ -307,9 +344,13 @@ class SpeechToText internal constructor(
     /**
      * Set the [SttConfig] for a subsequent [startSession] call.
      *
-     * This is the preferred entry point. Replaces the legacy [setConfig] that
-     * accepts [SttRunConfig].
+     * @deprecated Use [init] with a JSON config string instead.
+     *   [init] combines setConfig, initStt, and startSession into one call.
      */
+    @Deprecated(
+        message = "Use init(configJson: String) instead — it accepts JSON and combines all lifecycle steps",
+        replaceWith = ReplaceWith("init(configJson)")
+    )
     fun setConfig(config: SttConfig): SessionResult {
         synchronized(stateLock) {
             return SessionResult(SttReturnCode.SUCCESS, null)
@@ -320,9 +361,13 @@ class SpeechToText internal constructor(
      * Initialise the STT system for the given [config] without activating
      * any STT processing behaviours.
      *
-     * This is the preferred entry point. Replaces the legacy [initStt] that
-     * accepts [SttRunConfig].
+     * @deprecated Use [init] with a JSON config string instead.
+     *   [init] combines setConfig, initStt, and startSession into one call.
      */
+    @Deprecated(
+        message = "Use init(configJson: String) instead — it accepts JSON and combines all lifecycle steps",
+        replaceWith = ReplaceWith("init(configJson)")
+    )
     fun initStt(config: SttConfig): SessionResult {
         synchronized(stateLock) {
             // ── Idempotency guard ─────────────────────────────────────────────
@@ -394,7 +439,14 @@ class SpeechToText internal constructor(
 
     /**
      * Start an STT session using the config previously set via [setConfig].
+     *
+     * @deprecated Use [init] with a JSON config string instead.
+     *   [init] combines setConfig, initStt, and startSession into one call.
      */
+    @Deprecated(
+        message = "Use init(configJson: String) instead — it accepts JSON and starts the session automatically",
+        replaceWith = ReplaceWith("init(configJson)")
+    )
     fun startSession(): SessionResult {
         synchronized(stateLock) {
             val cfg = sessionConfig
@@ -445,7 +497,13 @@ class SpeechToText internal constructor(
 
     /**
      * Stop the current session and transcribe accumulated audio.
+     *
+     * @deprecated Use [transcribe] instead.
      */
+    @Deprecated(
+        message = "Use transcribe() instead — it provides the same behaviour with a simpler name",
+        replaceWith = ReplaceWith("transcribe()")
+    )
     fun stopAndTranscribe() {
         synchronized(stateLock) {
             val cfg = sessionConfig
@@ -529,11 +587,24 @@ class SpeechToText internal constructor(
         }
     }
 
-    fun stop() = stopAndTranscribe()
+    /**
+     * @deprecated Use [transcribe] instead.
+     */
+    @Deprecated(
+        message = "Use transcribe() instead — it provides the same behaviour with a simpler name",
+        replaceWith = ReplaceWith("transcribe()")
+    )
+    fun stop() = transcribe()
 
     /**
      * Reset this instance for a new session without unloading the model.
+     *
+     * @deprecated Session lifecycle is now managed internally by [init] and
+     *   [transcribe]. Callers should not need to reset the session manually.
      */
+    @Deprecated(
+        message = "Session lifecycle is now managed internally — callers should not need to reset manually"
+    )
     fun resetForNextSession() {
         synchronized(stateLock) {
             SttLogger.lifecycle("resetForNextSession: state=${lifecycleController.currentState}")
@@ -555,6 +626,16 @@ class SpeechToText internal constructor(
 
     // ------- destroy() ------------------------------------------------
 
+    /**
+     * Release all resources (model, threads, listeners).
+     *
+     * @deprecated Lifecycle management is now internal. Callers should not
+     *   need to call destroy() explicitly — resources are released when the
+     *   SpeechToText instance is no longer referenced.
+     */
+    @Deprecated(
+        message = "Lifecycle management is now internal — callers should not need to call destroy()"
+    )
     fun destroy() {
         synchronized(stateLock) {
             modeController.stopController()
