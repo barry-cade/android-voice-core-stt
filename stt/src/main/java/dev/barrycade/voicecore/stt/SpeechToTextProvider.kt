@@ -18,7 +18,7 @@ import android.content.Context
  *
  * @see SpeechToText
  */
-object SpeechToTextProvider {
+internal object SpeechToTextProvider {
 
     @Volatile
     private var instance: SpeechToText? = null

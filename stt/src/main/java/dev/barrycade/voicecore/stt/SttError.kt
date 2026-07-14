@@ -18,7 +18,7 @@ package dev.barrycade.voicecore.stt
  * @property cause  Optional originating throwable.
  * @property context  Structured diagnostic fields (never raw exception dumps).
  */
-data class SttError(
+internal data class SttError(
     val category: SttErrorCategory,
     val code: SttErrorCode,
     val message: String,

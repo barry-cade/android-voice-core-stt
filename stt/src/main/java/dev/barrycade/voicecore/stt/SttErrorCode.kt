@@ -4,7 +4,7 @@ package dev.barrycade.voicecore.stt
  * Closed enumeration of all possible STT subsystem error codes.
  * Every failure in the STT pipeline must map to exactly one of these values.
  */
-enum class SttErrorCode {
+internal enum class SttErrorCode {
     MODEL_LOAD_FAILED,
     INFERENCE_FAILED,
     CAPTURE_FAILED,

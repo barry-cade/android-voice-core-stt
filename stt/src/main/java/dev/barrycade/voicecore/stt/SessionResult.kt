@@ -10,7 +10,7 @@ package dev.barrycade.voicecore.stt
  * @property transcript The transcribed text, or null when no speech was produced
  *                      or when the session terminated without transcription.
  */
-data class SessionResult(
+internal data class SessionResult(
     val code: SttReturnCode,
     val transcript: String?
 )

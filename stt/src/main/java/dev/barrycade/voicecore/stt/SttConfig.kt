@@ -43,7 +43,7 @@ package dev.barrycade.voicecore.stt
  * @property bufferSizeSamples Size of the AudioRecord read buffer in samples.
  *        Must be >= 1024 and <= 16000. Default 4000 (0.25s at 16kHz).
  */
-data class SttConfig(
+internal data class SttConfig(
     val modelPath: String,
     val language: String,
     val debugLoggingEnabled: Boolean = false,
@@ -80,7 +80,7 @@ data class SttConfig(
  * @see VadStart Start begins when VAD detects sustained speech.
  * @see WakeWordStart Start begins when a wake word is detected.
  */
-sealed interface StartTrigger {
+internal sealed interface StartTrigger {
     /** Start begins on explicit caller request via [SpeechToText.startSession]. */
     data object Manual : StartTrigger
 
@@ -114,7 +114,7 @@ sealed interface StartTrigger {
  * @see AutoSilence Stop occurs after sustained silence or max duration.
  * @see Duration Stop occurs after a fixed maximum duration.
  */
-sealed interface StopTrigger {
+internal sealed interface StopTrigger {
     /** Stop occurs on explicit caller request via [SpeechToText.stopAndTranscribe]. */
     data object Manual : StopTrigger
 

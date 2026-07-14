@@ -1,3 +1,5 @@
+@file:Suppress("EXPOSED_FUNCTION_RETURN_TYPE", "EXPOSED_PARAMETER_TYPE")
+
 package dev.barrycade.voicecore.stt
 
 import android.content.Context

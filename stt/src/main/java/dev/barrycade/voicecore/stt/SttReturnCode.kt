@@ -28,7 +28,7 @@ package dev.barrycade.voicecore.stt
  * - [UTTERANCE_TOO_LONG] — mapped to [MAX_DURATION_REACHED].
  * - [ERROR] — mapped to [ENGINE_ERROR].
  */
-enum class SttReturnCode {
+internal enum class SttReturnCode {
     // ── Legacy codes (existing pipeline) ────────────────────────────────
 
     /** Utterance transcribed successfully. Maps to [SUCCESS]. */

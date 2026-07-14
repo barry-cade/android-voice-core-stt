@@ -14,7 +14,7 @@ package dev.barrycade.voicecore.stt
  * No other values are valid. Every [CaptureStrategy] MUST declare its
  * [DrainMode] explicitly.
  */
-enum class DrainMode {
+internal enum class DrainMode {
     DRAIN_FROM_NEXT_FRAME,
     DRAIN_FROM_HEAD
 }

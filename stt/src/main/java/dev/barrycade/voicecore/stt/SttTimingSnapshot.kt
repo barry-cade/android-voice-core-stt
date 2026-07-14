@@ -16,7 +16,7 @@ package dev.barrycade.voicecore.stt
  * @property peakRms Peak RMS over the sampling window at utterance end (nullable).
  * @property noiseFloorRms Noise floor RMS estimate at utterance end (nullable).
  */
-data class SttTimingSnapshot(
+internal data class SttTimingSnapshot(
     val vadActiveMs: Long,
     val utteranceDurationMs: Long,
     val silencePaddingMs: Long,
