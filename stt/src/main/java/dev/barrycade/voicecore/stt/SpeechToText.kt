@@ -56,7 +56,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Preserves the app-level API `SpeechToText(applicationContext)` while keeping
  * the primary constructor [internal] for test dependency injection.
  */
-fun SpeechToText(context: Context?): SpeechToText = SpeechToText(context)
+fun SpeechToText(context: Context?): SpeechToText = SpeechToText(context, WhisperBridge, CaptureManager())
 
 class SpeechToText internal constructor(
     @Suppress("UNUSED_PARAMETER") context: Context?,
