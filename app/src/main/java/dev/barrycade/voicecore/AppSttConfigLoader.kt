@@ -1,7 +1,6 @@
 package dev.barrycade.voicecore
 
 import android.content.Context
-import android.util.Log
 import dev.barrycade.voicecore.stt.DrainMode
 import dev.barrycade.voicecore.stt.SttConfig
 import dev.barrycade.voicecore.stt.StartTrigger
@@ -36,8 +35,6 @@ import org.json.JSONObject
  * ```
  */
 object AppSttConfigLoader {
-    private const val TAG = "STT_CONFIG"
-
     /**
      * Load and construct a fully validated [SttConfig] from the given JSON asset file.
      *
@@ -60,7 +57,7 @@ object AppSttConfigLoader {
         return try {
             parseConfig(json, modelPath, language)
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid STT configuration in $configFileName", e)
+            AppLogger.log(AppLogCode.CONFIG_LOAD_FAILED, "$configFileName: ${e.message}")
             throw IllegalStateException("Invalid STT configuration: ${e.message}", e)
         }
     }

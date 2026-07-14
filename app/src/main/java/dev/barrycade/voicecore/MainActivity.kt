@@ -3,7 +3,6 @@ package dev.barrycade.voicecore
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.RadioGroup
@@ -40,11 +39,6 @@ class MainActivity : ComponentActivity() {
 
     private var stt: SpeechToText? = null
     private var isRecording = false
-    private val debugLogging = true
-
-    private fun logInfo(tag: String, message: String) {
-        if (debugLogging) Log.i(tag, message)
-    }
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -83,13 +77,13 @@ class MainActivity : ComponentActivity() {
         }
 
         btnStart.setOnClickListener {
-            logInfo("STT_FLOW", "Start button pressed")
+            AppLogger.log(AppLogCode.START_BUTTON_PRESSED)
             if (hasRecordAudioPermission()) startRecording()
             else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
         btnStop.setOnClickListener {
-            logInfo("STT_FLOW", "Stop button pressed")
+            AppLogger.log(AppLogCode.STOP_BUTTON_PRESSED)
             stopRecording()
         }
 
@@ -127,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 language = "en"
             )
         } catch (e: Exception) {
-            Log.e("STT_CONFIG", "Failed to load config", e)
+            AppLogger.log(AppLogCode.CONFIG_LOAD_FAILED, configFileName)
             postToUi {
                 txtConfigDisplay.visibility = View.VISIBLE
                 txtConfigDisplay.text = "ERROR: Failed to load " + configFileName
@@ -202,12 +196,13 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            logInfo("STT_INIT", "Obtaining singleton STT instance")
+            AppLogger.log(AppLogCode.OBTAINING_STT_INSTANCE)
             val speechToText = SpeechToTextProvider.get(applicationContext)
 
             // Set config on the singleton instance.
             val setConfigResult = speechToText.setConfig(cfg)
             if (setConfigResult.code != SttReturnCode.SUCCESS) {
+                AppLogger.log(AppLogCode.SET_CONFIG_FAILED, setConfigResult.code)
                 postToUi { txtOutput.text = "Config error: " + setConfigResult.code }
                 return
             }
@@ -215,6 +210,7 @@ class MainActivity : ComponentActivity() {
             // Initialise STT (load model + warm-up + build scaffolding).
             val initResult = speechToText.initStt(cfg)
             if (initResult.code != SttReturnCode.SUCCESS) {
+                AppLogger.log(AppLogCode.INIT_FAILED, initResult.code)
                 postToUi { txtOutput.text = "Init error: " + initResult.code }
                 return
             }
@@ -251,9 +247,10 @@ class MainActivity : ComponentActivity() {
             }
 
             val sttResult = speechToText.startSession()
-            logInfo("STT_FLOW", "startSession returned: " + sttResult.code)
+            AppLogger.log(AppLogCode.START_SESSION_RESULT, sttResult.code)
 
             if (sttResult.code != SttReturnCode.SUCCESS) {
+                AppLogger.log(AppLogCode.SESSION_START_FAILED, sttResult.code)
                 postToUi { txtOutput.text = "Session error: " + sttResult.code }
                 return
             }
@@ -272,7 +269,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleConfigError(e: Exception) {
-        Log.e("STT_CONFIG", "Invalid config", e)
+        AppLogger.log(AppLogCode.CONFIG_INVALID, e.message ?: "Unknown error")
         showErrorDialog("Invalid STT Configuration", e.message ?: "Unknown error")
         isRecording = false
         // Do NOT destroy the singleton STT — keep it for the next attempt.
@@ -294,7 +291,7 @@ class MainActivity : ComponentActivity() {
         txtOutput.text = "Processing..."
         val thread = Thread({
             try {
-                Log.d("MainActivity", "STOP pressed -> using stopAndTranscribe()")
+                AppLogger.log(AppLogCode.STOP_USING_STOP_AND_TRANSCRIBE)
                 currentStt.stopAndTranscribe()
                 // Rule 3: Disable stop button only after stopAndTranscribe() returns.
                 postToUi {
@@ -304,6 +301,7 @@ class MainActivity : ComponentActivity() {
                     btnStart.isEnabled = true
                 }
             } catch (t: Throwable) {
+                AppLogger.log(AppLogCode.STOP_FAILED, t.message)
                 postToUi { txtOutput.text = "Error: " + t.message }
             }
         }, "StopAndTranscribeThread")
