@@ -35,17 +35,10 @@ internal class SttProcessingController(
 ) {
 
     /** VAD instance used by the processing pipeline. */
-    val vad: Vad = Vad(config).also {
-        it.debugLogging = config.debugLoggingEnabled
-    }
+    val vad: Vad
 
     /** Utterance accumulator used by the processing pipeline. */
-    val utteranceAccumulator: UtteranceAccumulator = UtteranceAccumulator(config).also {
-        it.sttErrorListener = sttErrorListener
-        if (forceTimeout) {
-            it.forceTimeout = true
-        }
-    }
+    val utteranceAccumulator: UtteranceAccumulator
 
     /** The underlying processor controller that owns the polling loop. */
     val processorController: ProcessorController
@@ -67,6 +60,15 @@ internal class SttProcessingController(
         get() = processorController.rmsSampler
 
     init {
+        vad = Vad(config)
+        vad.debugLogging = config.debugLoggingEnabled
+
+        utteranceAccumulator = UtteranceAccumulator(config)
+        utteranceAccumulator.sttErrorListener = sttErrorListener
+        if (forceTimeout) {
+            utteranceAccumulator.forceTimeout = true
+        }
+
         utteranceAccumulator.onSpeechStart = {
             processorController.resetVadActiveMs()
         }

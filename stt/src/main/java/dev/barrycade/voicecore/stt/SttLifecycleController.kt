@@ -163,16 +163,16 @@ internal class SttLifecycleController {
      * lifecycle state. See bypass case 3 in the class docs.
      */
     fun onDestroy() {
-        val current = stateMachine.currentState
-        if (current is SttLifecycleState.RECORDING ||
-            current is SttLifecycleState.FINALISING
+        val previousState = stateMachine.currentState
+        stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
+        val logMessage = if (previousState is SttLifecycleState.RECORDING ||
+            previousState is SttLifecycleState.FINALISING
         ) {
-            stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
-            SttLogger.lifecycle("SttLifecycleController: onDestroy() — state=UNINITIALISED (bypass from ${current::class.simpleName})")
+            "SttLifecycleController: onDestroy() — state=UNINITIALISED (bypass from ${previousState::class.simpleName})"
         } else {
-            stateMachine.forceSet(SttLifecycleState.UNINITIALISED)
-            SttLogger.lifecycle("SttLifecycleController: onDestroy() — state=UNINITIALISED")
+            "SttLifecycleController: onDestroy() — state=UNINITIALISED"
         }
+        SttLogger.lifecycle(logMessage)
     }
 
     /**

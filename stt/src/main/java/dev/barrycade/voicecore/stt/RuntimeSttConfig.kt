@@ -48,7 +48,27 @@ internal data class RuntimeSttConfig(
          * [StartStrategy] and [StopStrategy] instances.
          */
         fun from(sttCfg: SttConfig): RuntimeSttConfig {
-            val startStrategy: StartStrategy = when (val trigger = sttCfg.startTrigger) {
+            val startStrategy: StartStrategy = createStartStrategy(sttCfg.startTrigger)
+            val stopStrategy: StopStrategy = createStopStrategy(sttCfg.stopTrigger)
+            val autoSilenceMs = resolveAutoSilenceMs(sttCfg.stopTrigger)
+            val autoMaxDurationMs = resolveAutoMaxDurationMs(sttCfg.stopTrigger)
+
+            return RuntimeSttConfig(
+                energyThreshold = sttCfg.energyThreshold,
+                preRollMs = sttCfg.preRollMs,
+                stableChunkSizeMs = sttCfg.stableChunkSizeMs,
+                debugLoggingEnabled = sttCfg.debugLoggingEnabled,
+                startStrategy = startStrategy,
+                stopStrategy = stopStrategy,
+                autoSilenceMs = autoSilenceMs,
+                autoMaxDurationMs = autoMaxDurationMs,
+                warmupEnabled = sttCfg.warmupEnabled,
+                warmupDurationMs = sttCfg.warmupDurationMs
+            )
+        }
+
+        private fun createStartStrategy(trigger: StartTrigger): StartStrategy {
+            return when (trigger) {
                 is StartTrigger.Manual -> ManualStart()
                 is StartTrigger.VadStart -> VadStart(
                     VadStartConfig(
@@ -63,8 +83,10 @@ internal data class RuntimeSttConfig(
                     )
                 )
             }
+        }
 
-            val stopStrategy: StopStrategy = when (val trigger = sttCfg.stopTrigger) {
+        private fun createStopStrategy(trigger: StopTrigger): StopStrategy {
+            return when (trigger) {
                 is StopTrigger.Manual -> ManualStop()
                 is StopTrigger.AutoSilence -> AutoSilenceStop(
                     AutoSilenceConfig(
@@ -76,29 +98,18 @@ internal data class RuntimeSttConfig(
                     maxDurationMs = trigger.maxDurationMs
                 )
             }
+        }
 
-            val autoSilenceMs = when (val trigger = sttCfg.stopTrigger) {
-                is StopTrigger.AutoSilence -> trigger.silenceMs
-                else -> 1200
-            }
-            val autoMaxDurationMs = when (val trigger = sttCfg.stopTrigger) {
+        private fun resolveAutoSilenceMs(trigger: StopTrigger): Int {
+            return if (trigger is StopTrigger.AutoSilence) trigger.silenceMs else 1200
+        }
+
+        private fun resolveAutoMaxDurationMs(trigger: StopTrigger): Int {
+            return when (trigger) {
                 is StopTrigger.AutoSilence -> trigger.maxDurationMs
                 is StopTrigger.Duration -> trigger.maxDurationMs
                 is StopTrigger.Manual -> 30000
             }
-
-            return RuntimeSttConfig(
-                energyThreshold = sttCfg.energyThreshold,
-                preRollMs = sttCfg.preRollMs,
-                stableChunkSizeMs = sttCfg.stableChunkSizeMs,
-                debugLoggingEnabled = sttCfg.debugLoggingEnabled,
-                startStrategy = startStrategy,
-                stopStrategy = stopStrategy,
-                autoSilenceMs = autoSilenceMs,
-                autoMaxDurationMs = autoMaxDurationMs,
-                warmupEnabled = sttCfg.warmupEnabled,
-                warmupDurationMs = sttCfg.warmupDurationMs
-            )
         }
     }
 }

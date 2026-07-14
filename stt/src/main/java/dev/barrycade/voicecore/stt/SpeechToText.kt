@@ -501,9 +501,8 @@ class SpeechToText internal constructor(
      */
     internal fun processStart() {
         synchronized(stateLock) {
-            if (lifecycleController.canStartSession()) {
-                startProcessor()
-            }
+            if (!lifecycleController.canStartSession()) return@synchronized
+            startProcessor()
         }
     }
 
@@ -591,25 +590,10 @@ class SpeechToText internal constructor(
                 completeStopPath = false
             )
             if (!submitted) {
-                synchronized(stateLock) {
-                    isInferencing.set(false)
-                    if (isRunning.get()) {
-                        transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "inference submit rejected")
-                    } else {
-                        transitionPipelineToIdleLocked("inference submit rejected")
-                    }
-                }
+                handleInferenceRejected()
             }
         } catch (t: Throwable) {
-            synchronized(stateLock) {
-                isInferencing.set(false)
-                if (isRunning.get()) {
-                    transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "inference submit throwable")
-                } else {
-                    transitionPipelineToIdleLocked("inference submit throwable")
-                }
-            }
-            callbackDispatcher.dispatchError(t)
+            handleInferenceError(t)
         }
     }
 
@@ -641,65 +625,96 @@ class SpeechToText internal constructor(
             sessionEpochAtSubmission = sessionEpochAtSubmission
         )
 
+        val decideDispatch = createDecideDispatch(sessionEpochAtSubmission)
+        val onPostDispatch = createOnPostDispatch(sessionEpochAtSubmission, completeStopPath)
+        val onComplete = createOnComplete(sessionEpochAtSubmission, completeStopPath)
+
         return inferenceController.submit(
             request = request,
-            decideDispatch = {
-                synchronized(stateLock) {
-                    if (sessionEpochAtSubmission != currentSessionEpoch) {
+            decideDispatch = decideDispatch,
+            onPostDispatch = onPostDispatch,
+            onComplete = onComplete
+        )
+    }
+
+    private fun createDecideDispatch(sessionEpochAtSubmission: Long): () -> SttInferenceController.DispatchDecision {
+        return {
+            synchronized(stateLock) {
+                if (sessionEpochAtSubmission != currentSessionEpoch) {
+                    SttInferenceController.DispatchDecision(
+                        shouldDispatch = false,
+                        dropReason = "stale submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
+                    )
+                } else {
+                    val transitioned = transitionPipelineStageLocked(
+                        SttPipelineStage.DISPATCHING,
+                        "inference result ready"
+                    )
+                    if (transitioned) {
+                        SttInferenceController.DispatchDecision(shouldDispatch = true)
+                    } else {
                         SttInferenceController.DispatchDecision(
                             shouldDispatch = false,
-                            dropReason = "stale submissionEpoch=$sessionEpochAtSubmission currentEpoch=$currentSessionEpoch"
+                            dropReason = "illegal stage transition to DISPATCHING from ${pipelineState.currentStage}"
                         )
-                    } else {
-                        val transitioned = transitionPipelineStageLocked(
-                            SttPipelineStage.DISPATCHING,
-                            "inference result ready"
-                        )
-                        if (transitioned) {
-                            SttInferenceController.DispatchDecision(shouldDispatch = true)
-                        } else {
-                            SttInferenceController.DispatchDecision(
-                                shouldDispatch = false,
-                                dropReason = "illegal stage transition to DISPATCHING from ${pipelineState.currentStage}"
-                            )
-                        }
                     }
                 }
-            },
-            onPostDispatch = {
-                if (completeStopPath) {
-                    return@submit
                 }
+        }
+    }
 
-                synchronized(stateLock) {
-                    if (sessionEpochAtSubmission != currentSessionEpoch) {
-                        transitionPipelineToIdleLocked("dispatch stale completion")
-                    } else if (isRunning.get()) {
-                        transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "dispatch complete")
-                    } else {
-                        transitionPipelineToIdleLocked("dispatch complete not running")
-                    }
+    private fun createOnPostDispatch(sessionEpochAtSubmission: Long, completeStopPath: Boolean): () -> Unit {
+        if (completeStopPath) {
+            return {}
+        }
+        return {
+            synchronized(stateLock) {
+                if (sessionEpochAtSubmission != currentSessionEpoch) {
+                    transitionPipelineToIdleLocked("dispatch stale completion")
+                } else if (isRunning.get()) {
+                    transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "dispatch complete")
+                } else {
+                    transitionPipelineToIdleLocked("dispatch complete not running")
                 }
-            },
-            onComplete = {
-                synchronized(stateLock) {
-                    isInferencing.set(false)
+            }
+        }
+    }
 
-                    if (!completeStopPath) {
-                        return@submit
-                    }
-
-                    if (sessionEpochAtSubmission != currentSessionEpoch) {
-                        return@submit
-                    }
-
+    private fun createOnComplete(sessionEpochAtSubmission: Long, completeStopPath: Boolean): () -> Unit {
+        return {
+            synchronized(stateLock) {
+                isInferencing.set(false)
+                if (completeStopPath && sessionEpochAtSubmission == currentSessionEpoch) {
                     transitionPipelineToIdleLocked("stop inference complete")
                     currentSessionEpoch = 0L
                     lifecycleController.onStop()
                     lifecycleController.onReset()
                 }
             }
-        )
+        }
+    }
+
+    private fun handleInferenceRejected() {
+        synchronized(stateLock) {
+            isInferencing.set(false)
+            if (isRunning.get()) {
+                transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "inference submit rejected")
+            } else {
+                transitionPipelineToIdleLocked("inference submit rejected")
+            }
+        }
+    }
+
+    private fun handleInferenceError(t: Throwable) {
+        synchronized(stateLock) {
+            isInferencing.set(false)
+            if (isRunning.get()) {
+                transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "inference submit throwable")
+            } else {
+                transitionPipelineToIdleLocked("inference submit throwable")
+            }
+        }
+        callbackDispatcher.dispatchError(t)
     }
 
     private fun enterInferencingLocked(reason: String): Boolean {
