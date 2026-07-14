@@ -1,7 +1,7 @@
 package dev.barrycade.voicecore.stt
 
 /**
- * Immutable session configuration, built once during [SpeechToText.initStt].
+ * Immutable session configuration, built once during [SpeechToText.init].
  *
  * Bundles all config-derived values needed across the pipeline into a single
  * immutable value. No mutable fields — once constructed, the configuration

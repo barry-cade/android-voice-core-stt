@@ -328,7 +328,8 @@ internal class CaptureManager(
      * of whether the engine is ready.
      *
      * After this call, [restartCapture] must be called before a new session
-     * can be started. This is done by [SpeechToText.resetForNextSession].
+
+     * can be started.
      *
      * Returns an empty FloatArray if no frames were accumulated since [begin].
      * Idempotent: after the first call, subsequent calls return empty array.
@@ -369,8 +370,6 @@ internal class CaptureManager(
 
     /**
      * Restart AudioCapture after a prior [finalize] stopped it.
-     *
-     * Called from [SpeechToText.resetForNextSession] to prepare for the next
      * utterance. After this call, [begin] starts a new session.
      *
      * Idempotent: safe to call multiple times; no-op if capture is already running.
@@ -467,7 +466,7 @@ internal class CaptureManager(
      *
      * Stops the drain thread, clears session state, and stops AudioCapture.
      * After this call, the CaptureManager cannot be used for new sessions.
-     * Called from [SpeechToText.destroy].
+     * Called on permanent teardown.
      */
     override fun shutdown() {
         val threadToJoin = synchronized(stateLock) {

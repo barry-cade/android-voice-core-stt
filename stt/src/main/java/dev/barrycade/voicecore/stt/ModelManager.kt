@@ -168,7 +168,8 @@ internal class ModelManager(
      * Load the Whisper model if it is not already loaded.
      *
      * Synchronous, blocking call. Returns immediately if the model is
-     * already loaded ([isReady] is true). Used by [SpeechToText.initStt]
+
+     * already loaded ([isReady] is true). Used by [SpeechToText.init]
      * to ensure model readiness before STT scaffolding is constructed.
      *
      * @return true if the model was loaded successfully or was already ready,

@@ -13,11 +13,9 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
-import dev.barrycade.voicecore.stt.SpeechToTextProvider
-import dev.barrycade.voicecore.stt.SttConfig
-import dev.barrycade.voicecore.stt.SttReturnCode
 import java.io.File
 import java.io.FileOutputStream
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
@@ -62,10 +60,10 @@ class MainActivity : ComponentActivity() {
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
-        // Initialise the singleton STT instance once per app lifetime.
+        // Construct the singleton STT instance once per app lifetime.
         // The model is NOT loaded here — only the SpeechToText object is created.
-        // Call initStt() with a config to load the model and build scaffolding.
-        stt = SpeechToTextProvider.get(applicationContext)
+        // Call init(configJson) to load the model and build scaffolding.
+        stt = SpeechToText(applicationContext)
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -73,7 +71,7 @@ class MainActivity : ComponentActivity() {
                 else -> "MANUAL"
             }
             selectedStopType = newStopType
-            loadAndApplyConfig(newStopType)
+            displayConfigForStopType(newStopType)
         }
 
         btnStart.setOnClickListener {
@@ -101,179 +99,153 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        loadAndApplyConfig("MANUAL")
+        displayConfigForStopType("MANUAL")
         updateUi()
     }
 
-    private fun loadAndApplyConfig(stopType: String) {
-        val configFileName = when (stopType) {
-            "AUTO_SILENCE" -> "stt_config_manual_auto.json"
-            else -> "stt_config_manual_manual.json"
-        }
+    private fun displayConfigForStopType(stopType: String) {
+        activeStopType = stopType
 
         val modelPath = getModelPath()
 
-        val cfg: SttConfig = try {
-            AppSttConfigLoader.loadConfig(
-                context = this,
-                configFileName = configFileName,
-                modelPath = modelPath,
-                language = "en"
-            )
-        } catch (e: Exception) {
-            AppLogger.log(AppLogCode.CONFIG_LOAD_FAILED, configFileName)
-            postToUi {
-                txtConfigDisplay.visibility = View.VISIBLE
-                txtConfigDisplay.text = "ERROR: Failed to load " + configFileName
-            }
-            return
-        }
-
-        val currentStt = stt
-        if (currentStt != null) {
-            val setConfigResult = currentStt.setConfig(cfg)
-            if (setConfigResult.code != SttReturnCode.SUCCESS) {
-                postToUi {
-                    txtConfigDisplay.visibility = View.VISIBLE
-                    txtConfigDisplay.text = "Config error: " + setConfigResult.code
-                }
-                return
-            }
-        }
-
-        displayConfig(cfg)
-    }
-
-    private fun displayConfig(cfg: SttConfig) {
-        activeStopType = when (val stop = cfg.stopTrigger) {
-            is dev.barrycade.voicecore.stt.StopTrigger.Manual -> "MANUAL"
-            is dev.barrycade.voicecore.stt.StopTrigger.AutoSilence -> "AUTO_SILENCE"
-            is dev.barrycade.voicecore.stt.StopTrigger.Duration -> "DURATION"
-        }
         txtConfigDisplay.visibility = View.VISIBLE
         txtConfigDisplay.text = buildString {
             appendLine("=== Active Config ===")
-            appendLine("model:     " + cfg.modelPath)
-            appendLine("language:  " + cfg.language)
-            appendLine("drainMode: " + cfg.drainMode)
-            appendLine("start:     " + cfg.startTrigger)
-            appendLine("stop:      " + cfg.stopTrigger)
+            appendLine("model:     $modelPath")
+            appendLine("language:  en")
+            appendLine("drainMode: DRAIN_FROM_HEAD")
+            appendLine("start:     MANUAL")
+            appendLine("stop:      $stopType")
             appendLine("--- VAD ---")
-            appendLine("energyThreshold: " + cfg.energyThreshold)
-            appendLine("preRollMs:       " + cfg.preRollMs)
-            appendLine("stableChunkSizeMs: " + cfg.stableChunkSizeMs)
-            val stop = cfg.stopTrigger
-            if (stop is dev.barrycade.voicecore.stt.StopTrigger.AutoSilence) {
+            appendLine("energyThreshold: 0.03")
+            appendLine("preRollMs:       0")
+            appendLine("stableChunkSizeMs: 500")
+            if (stopType == "AUTO_SILENCE") {
                 appendLine("--- Auto-silence ---")
-                appendLine("silenceMs:     " + stop.silenceMs)
-                appendLine("maxDurationMs: " + stop.maxDurationMs)
+                appendLine("silenceMs:     1200")
+                appendLine("maxDurationMs: 30000")
             }
         }
     }
 
+    private fun buildConfigJson(
+        modelPath: String,
+        language: String,
+        stopType: String
+    ): String {
+        val root = JSONObject()
+        root.put("modelPath", modelPath)
+        root.put("language", language)
+        root.put("debugLoggingEnabled", true)
+        root.put("energyThreshold", 0.03)
+        root.put("preRollMs", 0)
+        root.put("stableChunkSizeMs", 500)
+        root.put("drainMode", "DRAIN_FROM_HEAD")
+        root.put("startType", "MANUAL")
+        root.put("stopType", stopType)
+        root.put("warmupEnabled", true)
+        root.put("warmupDurationMs", 3000)
+
+        if (stopType == "AUTO_SILENCE") {
+            root.put("silenceMs", 1200)
+            root.put("maxDurationMs", 30000)
+        }
+
+        return root.toString()
+    }
+
     private fun hasRecordAudioPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun startRecording() {
-        val configFileName = when (selectedStopType) {
-            "AUTO_SILENCE" -> "stt_config_manual_auto.json"
-            else -> "stt_config_manual_manual.json"
-        }
-
         val modelPath = getModelPath()
+        val configJson = buildConfigJson(modelPath, "en", selectedStopType)
 
-        val cfg = try {
-            AppSttConfigLoader.loadConfig(
-                context = this,
-                configFileName = configFileName,
-                modelPath = modelPath,
-                language = "en"
-            )
-        } catch (e: Exception) {
-            handleConfigError(e)
+        val currentStt = stt
+        if (currentStt == null) {
+            postToUi { txtOutput.text = "Error: STT not initialised" }
             return
         }
 
         try {
             AppLogger.log(AppLogCode.OBTAINING_STT_INSTANCE)
-            val speechToText = SpeechToTextProvider.get(applicationContext)
 
-            // Set config on the singleton instance.
-            val setConfigResult = speechToText.setConfig(cfg)
-            if (setConfigResult.code != SttReturnCode.SUCCESS) {
-                AppLogger.log(AppLogCode.SET_CONFIG_FAILED, setConfigResult.code)
-                postToUi { txtOutput.text = "Config error: " + setConfigResult.code }
-                return
-            }
-
-            // Initialise STT (load model + warm-up + build scaffolding).
-            val initResult = speechToText.initStt(cfg)
-            if (initResult.code != SttReturnCode.SUCCESS) {
-                AppLogger.log(AppLogCode.INIT_FAILED, initResult.code)
-                postToUi { txtOutput.text = "Init error: " + initResult.code }
-                return
-            }
-
-            speechToText.setOnResultWithTimingListener { text, code, timing ->
+            currentStt.setOnMessageListener { json ->
                 postToUi {
-                    val timingInfo = if (timing != null) {
-                        val vadMs = timing.vadActiveMs
-                        val utteranceMs = timing.utteranceDurationMs
-                        val inferenceMs = timing.inferenceMs
-                        val totalMs = timing.totalPipelineMs
-                        "Timing: vad=${vadMs}ms, " +
-                        "utterance=${utteranceMs}ms, " +
-                        "inference=${inferenceMs}ms, " +
-                        "total=${totalMs}ms"
-                    } else ""
-                    txtOutput.text = "[$code] $text"
-                    txtDiagnostics.text = timingInfo
-                    txtDiagnostics.visibility = android.view.View.VISIBLE
+                    try {
+                        val obj = JSONObject(json)
+                        val type = obj.optString("type", "")
+                        when (type) {
+                            "result" -> {
+                                val text = obj.optString("text", "")
+                                val code = obj.optString("code", "")
+                                val timing = obj.optJSONObject("timing")
+                                val timingInfo = if (timing != null) {
+                                    val captureMs = timing.optLong("captureMs", 0)
+                                    val inferenceMs = timing.optLong("inferenceMs", 0)
+                                    val totalMs = timing.optLong("totalMs", 0)
+                                    "Timing: capture=${captureMs}ms, " +
+                                    "inference=${inferenceMs}ms, " +
+                                    "total=${totalMs}ms"
+                                } else ""
+                                txtOutput.text = "[$code] $text"
+                                txtDiagnostics.text = timingInfo
+                                txtDiagnostics.visibility = View.VISIBLE
 
-                    if (text == BLANK_AUDIO_MARKER || text == "") {
-                        blankAudioCount += 1
-                        if (blankAudioCount >= blankAudioThreshold) {
-                            txtOutput.text = "No speech detected. Tap Stop to end the session."
+                                if (text == BLANK_AUDIO_MARKER || text == "") {
+                                    blankAudioCount += 1
+                                    if (blankAudioCount >= blankAudioThreshold) {
+                                        txtOutput.text =
+                                            "No speech detected. Tap Stop to end the session."
+                                    }
+                                } else {
+                                    blankAudioCount = 0
+                                }
+                            }
+                            "error" -> {
+                                val errorCode = obj.optString("code", "")
+                                val message = obj.optString("message", "")
+                                txtOutput.text = "Error [$errorCode]: $message"
+                            }
                         }
-                    } else {
-                        blankAudioCount = 0
+                    } catch (_: Exception) {
+                        txtOutput.text = "Malformed message: $json"
                     }
                 }
             }
 
-            speechToText.setOnErrorListener { t ->
-                postToUi { txtOutput.text = "Error: " + t.message }
-            }
-
-            val sttResult = speechToText.startSession()
-            AppLogger.log(AppLogCode.START_SESSION_RESULT, sttResult.code)
-
-            if (sttResult.code != SttReturnCode.SUCCESS) {
-                AppLogger.log(AppLogCode.SESSION_START_FAILED, sttResult.code)
-                postToUi { txtOutput.text = "Session error: " + sttResult.code }
+            val initResultJson = currentStt.init(configJson)
+            val initObj = JSONObject(initResultJson)
+            if (initObj.optString("type") == "error") {
+                val errorCode = initObj.optString("code", "")
+                val message = initObj.optString("message", "")
+                AppLogger.log(AppLogCode.INIT_FAILED, "$errorCode: $message")
+                postToUi { txtOutput.text = "Init error: $message" }
                 return
             }
 
-            stt = speechToText
-            displayConfig(cfg)
             blankAudioCount = 0
             isRecording = true
             txtOutput.text = "Recording..."
-
             btnStop.isEnabled = true
             btnStart.isEnabled = false
-        } catch (e: IllegalArgumentException) {
-            handleConfigError(e)
-        }
-    }
 
-    private fun handleConfigError(e: Exception) {
-        AppLogger.log(AppLogCode.CONFIG_INVALID, e.message ?: "Unknown error")
-        showErrorDialog("Invalid STT Configuration", e.message ?: "Unknown error")
-        isRecording = false
-        // Do NOT destroy the singleton STT — keep it for the next attempt.
-        updateUi()
+            txtConfigDisplay.visibility = View.VISIBLE
+        } catch (e: IllegalArgumentException) {
+            AppLogger.log(AppLogCode.CONFIG_INVALID, e.message ?: "Unknown error")
+            showErrorDialog("Invalid STT Configuration", e.message ?: "Unknown error")
+            isRecording = false
+            updateUi()
+        } catch (e: Exception) {
+            AppLogger.log(AppLogCode.INTERNAL_ERROR, e.message ?: "Unknown error")
+            showErrorDialog("STT Error", e.message ?: "Unknown error")
+            isRecording = false
+            updateUi()
+        }
     }
 
     private fun showErrorDialog(title: String, message: String) {
@@ -286,17 +258,13 @@ class MainActivity : ComponentActivity() {
             postToUi { txtOutput.text = "Not yet started" }
             return
         }
-        // Rule 2: Stop button must call stopAndTranscribe() every time.
-        // No conditions, no gating, no "only if speech detected."
         txtOutput.text = "Processing..."
         val thread = Thread({
             try {
                 AppLogger.log(AppLogCode.STOP_USING_STOP_AND_TRANSCRIBE)
-                currentStt.stopAndTranscribe()
-                // Rule 3: Disable stop button only after stopAndTranscribe() returns.
+                currentStt.transcribe()
                 postToUi {
                     isRecording = false
-                    // Rule 3: Stop button disabled only when session actually ended.
                     btnStop.isEnabled = false
                     btnStart.isEnabled = true
                 }
@@ -304,17 +272,14 @@ class MainActivity : ComponentActivity() {
                 AppLogger.log(AppLogCode.STOP_FAILED, t.message)
                 postToUi { txtOutput.text = "Error: " + t.message }
             }
-        }, "StopAndTranscribeThread")
+        }, "TranscribeThread")
         thread.start()
     }
 
     private fun updateUi() {
-        // Rule 6: UI must reflect strategy configuration.
-        // Start button visibility.
         val showStart = !isRecording
         btnStart.visibility = if (showStart) View.VISIBLE else View.GONE
 
-        // Stop button visibility.
         val showStop = activeStopType == "MANUAL"
         btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
 

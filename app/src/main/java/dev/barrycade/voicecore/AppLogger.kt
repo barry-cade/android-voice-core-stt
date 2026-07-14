@@ -19,7 +19,7 @@ import android.util.Log
  *
  * Messages with runtime values use printf-style templates in the enum:
  * ```
- * AppLogger.log(AppLogCode.START_SESSION_RESULT, sttResult.code)
+ * AppLogger.log(AppLogCode.INIT_FAILED, "MODEL_NOT_FOUND")
  * ```
  *
  * ## No magic strings
@@ -70,7 +70,7 @@ internal object AppLogger {
  * Entries with no runtime data use a plain string template.
  * Entries with runtime values use `%s` placeholders:
  * ```
- * AppLogger.log(AppLogCode.START_SESSION_RESULT, sttResult.code)
+ * AppLogger.log(AppLogCode.INIT_FAILED, "MODEL_NOT_FOUND")
  * ```
  */
 internal enum class AppLogCode(
@@ -89,33 +89,21 @@ internal enum class AppLogCode(
     /** Obtaining singleton STT instance. */
     OBTAINING_STT_INSTANCE("OBTAINING_STT_INSTANCE", "Obtaining singleton STT instance", "FLOW"),
 
-    /** startSession returned with a result code. */
-    START_SESSION_RESULT("START_SESSION_RESULT", "startSession returned %s", "FLOW"),
-
-    /** stopAndTranscribe has been invoked. */
-    STOP_USING_STOP_AND_TRANSCRIBE("STOP_USING_STOP_AND_TRANSCRIBE", "STOP pressed -> using stopAndTranscribe()", "FLOW"),
+    /** transcribe has been invoked. */
+    STOP_USING_STOP_AND_TRANSCRIBE("STOP_USING_STOP_AND_TRANSCRIBE", "STOP pressed -> using transcribe()", "FLOW"),
 
     // ── Config events ───────────────────────────────────────────────
-
-    /** Config asset failed to load. */
-    CONFIG_LOAD_FAILED("CONFIG_LOAD_FAILED", "Failed to load config asset: %s", "CONFIG"),
 
     /** Config validation failed. */
     CONFIG_INVALID("CONFIG_INVALID", "Invalid STT configuration: %s", "CONFIG"),
 
     // ── Config error path ───────────────────────────────────────────
 
-    /** setConfig returned non-SUCCESS. */
-    SET_CONFIG_FAILED("SET_CONFIG_FAILED", "setConfig returned %s", "CONFIG"),
+    /** init returned non-SUCCESS. */
+    INIT_FAILED("INIT_FAILED", "init returned %s", "ERROR"),
 
-    /** initStt returned non-SUCCESS. */
-    INIT_FAILED("INIT_FAILED", "initStt returned %s", "ERROR"),
-
-    /** startSession returned non-SUCCESS. */
-    SESSION_START_FAILED("SESSION_START_FAILED", "Session error: %s", "ERROR"),
-
-    /** stopAndTranscribe threw an exception. */
-    STOP_FAILED("STOP_FAILED", "stopAndTranscribe threw: %s", "ERROR"),
+    /** transcribe threw an exception. */
+    STOP_FAILED("STOP_FAILED", "transcribe threw: %s", "ERROR"),
 
     // ── Generic internal error ──────────────────────────────────────
 

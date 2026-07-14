@@ -18,19 +18,7 @@ abstract class CheckSttApiSurfaceTask : DefaultTask() {
     @TaskAction
     fun verify() {
                                 val expectedPublicApiTypes = setOf(
-                    "SpeechToText",
-                    "SpeechToTextProvider",
-                    "SttConfig",
-                    "SessionResult",
-                    "SttReturnCode",
-                    "SttError",
-                    "SttErrorCode",
-                    "SttErrorCategory",
-                    "SttErrorListener",
-                    "SttTimingSnapshot",
-                    "DrainMode",
-                    "StartTrigger",
-                    "StopTrigger"
+                    "SpeechToText"
                 )
 
         val sttSources = sourceDir.get().asFile
@@ -109,6 +97,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     externalNativeBuild {

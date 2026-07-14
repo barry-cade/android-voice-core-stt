@@ -25,12 +25,12 @@ package dev.barrycade.voicecore.stt
  * use [SttLifecycleStateMachine.forceSet].
  *
  *   1. READY/INITIALISED → FINALISING  (onFinalising)
- *      Reason: stopAndTranscribe() may be called before onStart()
- *      has transitioned to RECORDING (early stop path).
+ *      Reason: stop may be requested before onStart() has transitioned
+ *      to RECORDING (early stop path).
  *
  *   2. RECORDING/FINALISING → READY    (onReset)
- *      Reason: resetForNextSession() or destroy() may be called
- *      while still recording/finalising (abnormal teardown).
+ *      Reason: reset or destroy may be called while still recording
+ *      or finalising (abnormal teardown).
  *
  *   3. Any → UNINITIALISED             (onDestroy)
  *      Reason: terminal teardown must complete from any state.
@@ -134,9 +134,8 @@ internal class SttLifecycleController {
      * **Normal path:** STOPPED → READY via legal [transitionTo].
      *
      * **Bypass:** RECORDING or FINALISING → READY via [forceSet].
-     * This occurs when [SpeechToText.resetForNextSession] or
-     * [SpeechToText.destroy] is called while the pipeline is still
-     * active. See bypass case 2 in the class docs.
+     * This occurs when reset or destroy is called while the pipeline
+     * is still active. See bypass case 2 in the class docs.
      *
      * Safe to call multiple times. No-op when already in READY or
      * INITIALISED.

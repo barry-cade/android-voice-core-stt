@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ## Ownership
  *
  * - Owner: [SpeechToText]
- * - Write site: [raise] — called from [SpeechToText.stopAndTranscribe]
- * - Reset: [clear] — called from [SpeechToText.resetForNextSession] and [SpeechToText.destroy]
+ * - Write site: [raise] — called from [SpeechToText.transcribe]
+ * - Reset: [clear] — called on session reset and teardown
  * - Read: [isRequested] — polled by [MinimalPollingController] and [ProcessorController]
  *   via [asSupplier] lambda
  *

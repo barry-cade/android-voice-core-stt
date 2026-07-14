@@ -1,4 +1,3 @@
-
 # stt — Android Speech‑to‑Text Module
 
 The **stt** module provides offline speech‑to‑text functionality for Android using:
@@ -7,7 +6,7 @@ The **stt** module provides offline speech‑to‑text functionality for Android
 - Deterministic voice activity detection (VAD)
 - Configurable PCM capture pipeline
 - Command‑window behaviour (pre‑roll, silence padding, early close)
-- A clean Kotlin API suitable for robotics, agents, and embedded systems
+- A pure JSON boundary between the app and the STT engine
 
 This module is designed to be reusable and independent of the demo app.
 
@@ -25,11 +24,9 @@ This module is designed to be reusable and independent of the demo app.
 Energy‑based voice activity detection with configurable parameters:
 
 - `energyThreshold`
-- `silencePaddingMs`
 - `preRollMs`
 - `stableChunkSizeMs`
-- `maxUtteranceLengthMs`
-- Motion‑mode overrides
+- Silence‑based auto‑stop
 
 ### PCM Capture Pipeline
 
@@ -37,285 +34,238 @@ Energy‑based voice activity detection with configurable parameters:
 - Dedicated audio capture thread
 - Fixed frame size
 - Pre‑roll buffer
-- Silence padding
-- Deterministic command window
+- Silence padding / early close
 
-### Clean Kotlin API
+### Pure JSON Boundary
 
-The public API surface is strictly enforced — only the following types are exposed:
+All inter-module communication uses JSON strings:
+
+- `init(configJson: String): String` — accepts JSON config, returns JSON result
+- `transcribe()` — stops capture, runs inference, delivers JSON via listener
+- `setOnMessageListener(l: (String) -> Unit)` — receives JSON result/error messages
+
+## Public API
+
+The public API surface is strictly enforced by `checkSttApiSurface` in `build.gradle.kts`.
+Only the following top-level type is exposed:
 
 - `SpeechToText` — main entry point
-- `SttConfig` — static configuration data class
-- `AudioCapture` — raw microphone capture (primarily for internal use)
-- `WhisperBridge` — JNI bridge for Whisper (primarily for internal use)
-- `SttError`, `SttErrorCode`, `SttErrorCategory` — structured error types
-- `SttErrorListener` — callback interface for structured errors
-- `SttReadyListener` — callback interface for model readiness
-- `SttTimingSnapshot` — timing diagnostics data class
-- `SttLifecycleState` — state machine enum
 
-All other classes are internal.
+All other types are internal.
+
+### Factory function
+
+```kotlin
+fun SpeechToText(context: Context?): SpeechToText
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `init(configJson: String): String` | Initialise STT from a JSON config string. Returns JSON result or error. Starts capture. |
+| `transcribe()` | Stop capture, run inference, deliver result via `setOnMessageListener`. |
+| `setOnMessageListener(l: (String) -> Unit)` | Unified message listener. Receives JSON result or error strings. |
+
+## JSON Schemas
+
+### Input config (to `init()`)
+
+```json
+{
+  "modelPath": "/path/to/ggml-tiny.en.bin",
+  "language": "en",
+  "debugLoggingEnabled": true,
+  "energyThreshold": 0.03,
+  "preRollMs": 100,
+  "stableChunkSizeMs": 500,
+  "drainMode": "DRAIN_FROM_NEXT_FRAME",
+  "startType": "MANUAL",
+  "stopType": "MANUAL",
+  "warmupEnabled": true,
+  "warmupDurationMs": 3000
+}
+```
+
+#### Input fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `modelPath` | `string` | Yes | Absolute path to the Whisper model binary |
+| `language` | `string` | No (default: `"en"`) | Language code |
+| `debugLoggingEnabled` | `boolean` | No (default: `false`) | Enable detailed debug logging |
+| `energyThreshold` | `number` | Yes | RMS energy threshold for VAD speech detection |
+| `preRollMs` | `integer` | Yes | Pre-roll PCM duration before utterance start (ms) |
+| `stableChunkSizeMs` | `integer` | Yes | Stable speech chunk duration for utterance confirmation (ms) |
+| `drainMode` | `string` | Yes | `"DRAIN_FROM_NEXT_FRAME"` or `"DRAIN_FROM_HEAD"` |
+| `startType` | `string` | No (default: `"MANUAL"`) | `"MANUAL"`, `"VAD_START"`, or `"WAKEWORD"` |
+| `stopType` | `string` | No (default: `"MANUAL"`) | `"MANUAL"`, `"AUTO_SILENCE"`, or `"DURATION"` |
+| `warmupEnabled` | `boolean` | No (default: `false`) | Enable Whisper warm-up |
+| `warmupDurationMs` | `integer` | No (default: `0`) | Warm-up duration (ms) |
+
+For `stopType = "AUTO_SILENCE"`, also include:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `silenceMs` | `integer` | Yes | Silence duration that triggers stop (ms) |
+| `maxDurationMs` | `integer` | Yes | Maximum allowed session duration (ms) |
+
+For `startType = "VAD_START"`, also include:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vadStartThreshold` | `number` | Yes | Energy threshold for VAD-based start |
+| `minSpeechMs` | `integer` | Yes | Minimum consecutive speech ms for VAD-based start |
+
+For `startType = "WAKEWORD"`, also include:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `wakeWord` | `string` | Yes | Wake word phrase |
+| `confidenceThreshold` | `number` | Yes | Detection confidence threshold |
+
+### Output result (from `init()` return value and `setOnMessageListener`)
+
+**Success:**
+```json
+{
+  "type": "result",
+  "text": "transcribed text",
+  "code": "SUCCESS",
+  "timing": {
+    "captureMs": 3200,
+    "inferenceMs": 450,
+    "totalMs": 5200
+  }
+}
+```
+
+**Error:**
+```json
+{
+  "type": "error",
+  "code": "MODEL_LOAD_FAILED",
+  "message": "File not found at /data/app/model.bin"
+}
+```
+
+**Init result (success):**
+```json
+{
+  "type": "result",
+  "text": "",
+  "code": "SUCCESS",
+  "timing": null
+}
+```
+
+**Init result (error):**
+```json
+{
+  "type": "error",
+  "code": "INVALID_CONFIG",
+  "message": "Missing required field: modelPath"
+}
+```
+
+## Threading and Callbacks
+
+- **Audio capture** runs on a dedicated thread (`AudioCaptureThread` with `THREAD_PRIORITY_AUDIO`)
+- **Whisper inference** runs on a dedicated single-thread executor (`WhisperExecutor`)
+- **Callbacks** (via `setOnMessageListener`) are delivered on the inference thread, **not** on the main thread
+- Callers must post to their own `Handler` or `Dispatchers.Main` for UI updates
+- **Lifecycle methods** (`init`, `transcribe`) are serialised internally via `stateLock`
+- **Do not call lifecycle methods from within callbacks** — this produces undefined behaviour
+
+## Lifecycle
+
+```
+UNINITIALISED → INITIALISED → READY → CAPTURING → INFERENCING → DISPATCHING → IDLE → ...
+```
+
+- `init()` transitions to `READY` and automatically starts capture
+- `transcribe()` transitions to `FINALISING`, runs inference, then returns to `READY`
+- Construction creates the object but does NOT load the model — call `init()` first
+
+## Stale Callback Rejection (Epoch Model)
+
+- Each session has a monotonically incrementing `sessionEpoch` (`AtomicLong`)
+- At inference submission, the current epoch is snapshotted
+- Callbacks whose epoch does not match the current active epoch are dropped
+- This prevents stale results from out-of-order sessions
+
+## Manual vs Auto Modes
+
+- **Manual mode** (`startType: "MANUAL"`, `stopType: "MANUAL"`):
+  - Start and stop on explicit caller request
+  - No VAD processing during capture
+  - PCM buffered until `transcribe()` is called
+
+- **Auto mode** (`stopType: "AUTO_SILENCE"`):
+  - Capture stops automatically after sustained silence
+  - VAD is active during capture
+  - UtteranceAccumulator manages utterance boundaries
 
 ## Installation
 
-Add the module to your project:
-
-1. Copy the `stt` folder into your Android project.
-2. Add it to `settings.gradle.kts`:
-
 ```kotlin
+// settings.gradle.kts
 include(":stt")
-```
 
-1. Add dependency in your app module:
-
-```kotlin
+// app/build.gradle.kts
 implementation(project(":stt"))
 ```
 
-## Basic Usage
-
-### 1. Create SpeechToText via the companion factory
+## Basic Usage Example
 
 ```kotlin
-val config = SttConfig(
-    energyThreshold = 0.03f,
-    silencePaddingMs = 300,
-    preRollMs = 100,
-    maxUtteranceLengthMs = 4000,
-    stableChunkSizeMs = 500,
-    motionModeEnergyThreshold = 0.05f,
-    motionModeSilencePaddingMs = 150,
-    modelPath = "/path/to/ggml-tiny.en.bin"
-)
-val stt = SpeechToText.create(config)
-```
+val stt = SpeechToText(applicationContext)
 
-### 2. Register result listener
-
-```kotlin
-stt.setOnResultListener { text ->
-    // handle transcription
-}
-```
-
-### 3. Start recording
-
-```kotlin
-stt.start()
-// If the model is still loading, start() queues automatically
-// and executes once the model is ready.
-```
-
-### 4. Stop and transcribe
-
-```kotlin
-stt.stopAndTranscribe()
-// Runs blocking on the calling thread — dispatch to background if needed.
-```
-
-### 5. Optional: be notified when the model is ready
-
-```kotlin
-stt.setReadyListener(object : SttReadyListener {
-    override fun onSttReady() {
-        // model loaded and warmed up
+stt.setOnMessageListener { json ->
+    // json is a JSON string — inspect "type" field
+    // "result": successful transcription
+    // "error": an error occurred
+    runOnUiThread {
+        // update UI
     }
-})
-```
-
-### 6. Optional: structured error handling
-
-```kotlin
-stt.setSttErrorListener(SttErrorListener { error ->
-    Log.e("STT", "${error.category} - ${error.code}: ${error.message}")
-})
-```
-
-### 7. Clean up
-
-```kotlin
-stt.destroy()
-```
-
-## Public API Reference
-
-### SpeechToText
-
-Main class controlling PCM capture, VAD, and Whisper inference.
-
-**Factory method:**
-
-```kotlin
-companion object {
-    fun create(config: SttConfig): SpeechToText
 }
-```
 
-**Methods:**
+val configJson = buildConfigJson(modelPath, "en", "MANUAL")
+val initResult = stt.init(configJson)
+// initResult is a JSON string — check for errors
 
-| Method | Description |
-| --- | --- |
-| `start()` | Begins PCM capture and VAD. Safe to call before model is ready — auto-queues. |
-| `stopAndTranscribe()` | Stops capture, drains buffered audio, runs Whisper inference, delivers result. |
-| `stop()` | Alias for `stopAndTranscribe()`. |
-| `destroy()` | Releases audio resources, unloads Whisper model. |
-| `setOnResultListener(l: (String) -> Unit)` | Registers callback for transcription text. |
-| `setOnResultWithTimingListener(l: (text: String, timing: SttTimingSnapshot?) -> Unit)` | Registers callback with optional timing snapshot. |
-| `setOnErrorListener(l: (Throwable) -> Unit)` | Legacy error callback. |
-| `setSttErrorListener(l: SttErrorListener)` | Structured error callback. |
-| `setReadyListener(l: SttReadyListener)` | Callback when model load completes. |
-| `setDebugOptions(...)` | Test hooks for forced failure scenarios. |
-
-**Properties:**
-
-| Property | Type | Description |
-| --- | --- | --- |
-| `onTimingListener` | `((Long, Long, Long, Long) -> Unit)?` | Timing diagnostics: PCM, VAD active, Whisper, total (all in ms). |
-
-### SttConfig
-
-Static configuration data class passed to `SpeechToText.create()`.
-
-```kotlin
-data class SttConfig(
-    val energyThreshold: Float = 0.03f,
-    val silencePaddingMs: Int = 600,
-    val preRollMs: Int = 100,
-    val maxUtteranceLengthMs: Int = 7000,
-    val stableChunkSizeMs: Int = 500,
-    val motionModeEnergyThreshold: Float = 0.05f,
-    val motionModeSilencePaddingMs: Int = 300,
-    val modelPath: String
-)
-```
-
-### AudioCapture
-
-Provides a dedicated microphone thread reading PCM16 mono audio. Publishes `FloatArray` frames into a `ConcurrentLinkedQueue`.
-
-```kotlin
-class AudioCapture(
-    sampleRate: Int = 16000,
-    requestedBufferSizeInBytes: Int
-) {
-    fun start()    // begins capture thread
-    fun stop()     // stops capture and releases AudioRecord
-    val frameQueue: ConcurrentLinkedQueue<FloatArray>
-    fun getQueue(): ConcurrentLinkedQueue<FloatArray>
-}
-```
-
-### WhisperBridge
-
-Object exposing JNI bindings to `whisper.cpp`.
-
-```kotlin
-object WhisperBridge {
-    external fun loadModel(modelPath: String)
-    external fun transcribe(samples: ShortArray): String
-}
-```
-
-### SttErrorListener
-
-```kotlin
-fun interface SttErrorListener {
-    fun onSttError(error: SttError)
-}
-```
-
-### SttReadyListener
-
-```kotlin
-fun interface SttReadyListener {
-    fun onSttReady()
-}
-```
-
-### SttError
-
-```kotlin
-data class SttError(
-    val category: SttErrorCategory,
-    val code: SttErrorCode,
-    val message: String,
-    val lastRms: Float? = null,
-    val lastVadState: Boolean? = null,
-    val timingSnapshotMs: Map<String, Long>? = null,
-    val context: Map<String, Any> = emptyMap(),
-    val cause: Throwable? = null
-)
-```
-
-### SttTimingSnapshot
-
-```kotlin
-data class SttTimingSnapshot(
-    val vadMs: Int,
-    val utteranceMs: Int,
-    val whisperMs: Int,
-    val totalMs: Int
-)
+// To stop and transcribe:
+stt.transcribe()
 ```
 
 ## VAD Behaviour
 
 The VAD pipeline classifies each PCM frame as speech or silence.
 
-Early‑close logic:
-
-- When speech transitions to silence for the configured `silencePaddingMs` duration
+Early-close logic (Auto mode):
+- When speech transitions to silence for the configured `silenceMs` duration
 - The command window closes immediately
 - Whisper receives only the relevant PCM
 
-## Whisper Backend
+## Error Codes
 
-The JNI layer provides:
-
-- Model loading
-- Model unloading
-- Full inference (`whisper_full`)
-- Segment extraction
-- Text assembly
-
-The `ggml-tiny.en` model is recommended for mobile performance.
-
-## Threading Model
-
-- Audio capture runs on a dedicated thread (`AudioCaptureThread` with `THREAD_PRIORITY_AUDIO`)
-- Whisper inference runs synchronously on the calling thread (`stopAndTranscribe()`) or on the processor thread (streaming)
-- Callbacks are delivered on whatever thread posted them — use `runOnUiThread` or a handler if UI updates are needed
-
-## Lifecycle
-
-``` text
-UNINITIALISED → READY → RECORDING → FINALISING → READY → ...
-```
-
-- `destroy()` returns to `UNINITIALISED`.
-
-## Error Handling
-
-Errors are surfaced via `SttErrorListener` or `setOnErrorListener`:
-
-- AudioRecord failure
-- Whisper model missing / load failure
-- JNI load failure
-- Timeout due to `maxUtteranceLengthMs`
-- Illegal state transitions
+| Code | Description |
+|------|-------------|
+| `SUCCESS` | Operation completed successfully |
+| `INVALID_CONFIG` | JSON config parsing failed |
+| `MODEL_LOAD_FAILED` | Whisper model failed to load |
+| `INIT_FAILED` | Initialisation failed |
+| `INTERNAL_EXCEPTION` | Unexpected internal error |
 
 ## Testing
 
 The demo app in the root project demonstrates:
-
-- VAD behaviour
-- PCM capture
+- JSON config construction
+- Manual and auto-silence stop modes
 - Whisper inference timing
 - Configuration tuning
 
-Use the demo app to validate your integration.
-
-## License
-
-MIT (or the license defined in the root project)
+Run the unit tests:
+```bash
+./gradlew :stt:test
+```

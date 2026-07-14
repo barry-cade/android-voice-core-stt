@@ -71,15 +71,16 @@ internal interface SessionManager : AudioSource {
 
     /**
      * Shut down capture permanently. After this call, no new sessions
-     * can be started. Called from [SpeechToText.destroy].
      */
     fun shutdown()
 
     /**
      * Restart the underlying audio capture after a prior [finalize] stopped it.
      *
-     * Called from [SpeechToText.resetForNextSession] to prepare for the next
-     * utterance. After this call, [begin] can start a new session.
+
+
+     * Called to prepare for the next utterance.
+     * After this call, [begin] can start a new session.
      *
      * Safe to call multiple times — idempotent if capture is already running.
      * Must NOT be called after [shutdown].

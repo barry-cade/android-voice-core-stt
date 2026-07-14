@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package dev.barrycade.voicecore.stt
 
 /**
@@ -81,7 +80,6 @@ internal data class SttConfig(
  * @see WakeWordStart Start begins when a wake word is detected.
  */
 internal sealed interface StartTrigger {
-    /** Start begins on explicit caller request via [SpeechToText.startSession]. */
     data object Manual : StartTrigger
 
     /**
@@ -115,7 +113,8 @@ internal sealed interface StartTrigger {
  * @see Duration Stop occurs after a fixed maximum duration.
  */
 internal sealed interface StopTrigger {
-    /** Stop occurs on explicit caller request via [SpeechToText.stopAndTranscribe]. */
+
+    /** Stop occurs on explicit caller request via [SpeechToText.transcribe]. */
     data object Manual : StopTrigger
 
     /**

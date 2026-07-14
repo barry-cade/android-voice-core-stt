@@ -1,7 +1,5 @@
 package dev.barrycade.voicecore.stt
 
-import org.json.JSONObject
-
 /**
  * Internal JSON adapter that serialises and deserialises data crossing
  * the STT/application boundary.
@@ -47,7 +45,7 @@ internal object SttJsonAdapter {
      * }
      * ```
      *
-     * Also supports the legacy nested format used by [AppSttConfigLoader]:
+     * Also supports the legacy nested format:
      * ```json
      * {
      *   "ttsEngineConfig": { "modelPath": "...", "language": "en", "debugLoggingEnabled": true },
@@ -60,31 +58,34 @@ internal object SttJsonAdapter {
      * }
      * ```
      *
+     * Uses manual JSON parsing (no org.json.JSONObject dependency) to avoid
+     * mocking issues in the Android unit test environment.
+     *
      * @throws IllegalArgumentException if required fields are missing or invalid.
      */
     fun parseConfig(json: String): SttConfig {
-        val root = JSONObject(json)
-
         // ── Model path & language ────────────────────────────────────────
-        val modelPath = resolveString(root, "modelPath") ?: resolveNestedEngineField(root, "modelPath")
+        val modelPath = resolveString(json, "modelPath")
+            ?: resolveNestedEngineString(json, "modelPath")
             ?: throw IllegalArgumentException("Missing required field: modelPath")
-        val language = resolveString(root, "language") ?: resolveNestedEngineField(root, "language") ?: "en"
-        val debugLoggingEnabled = resolveBoolean(root, "debugLoggingEnabled")
-            ?: resolveNestedEngineFieldBoolean(root, "debugLoggingEnabled") ?: false
+        val language = resolveString(json, "language")
+            ?: resolveNestedEngineString(json, "language") ?: "en"
+        val debugLoggingEnabled = resolveBoolean(json, "debugLoggingEnabled")
+            ?: resolveNestedEngineBoolean(json, "debugLoggingEnabled") ?: false
 
         // ── VAD config ───────────────────────────────────────────────────
-        val energyThreshold = resolveDouble(root, "energyThreshold")
-            ?: resolveNestedVadFieldDouble(root, "energyThreshold")
+        val energyThreshold = resolveDouble(json, "energyThreshold")
+            ?: resolveNestedVadDouble(json, "energyThreshold")
             ?: throw IllegalArgumentException("Missing required field: energyThreshold")
-        val preRollMs = resolveInt(root, "preRollMs")
-            ?: resolveNestedVadFieldInt(root, "preRollMs")
+        val preRollMs = resolveInt(json, "preRollMs")
+            ?: resolveNestedVadInt(json, "preRollMs")
             ?: throw IllegalArgumentException("Missing required field: preRollMs")
-        val stableChunkSizeMs = resolveInt(root, "stableChunkSizeMs")
-            ?: resolveNestedVadFieldInt(root, "stableChunkSizeMs")
+        val stableChunkSizeMs = resolveInt(json, "stableChunkSizeMs")
+            ?: resolveNestedVadInt(json, "stableChunkSizeMs")
             ?: throw IllegalArgumentException("Missing required field: stableChunkSizeMs")
 
         // ── Drain mode ───────────────────────────────────────────────────
-        val drainModeString = resolveString(root, "drainMode")
+        val drainModeString = resolveString(json, "drainMode")
             ?: throw IllegalArgumentException("Missing required field: drainMode")
         val drainMode = try {
             DrainMode.valueOf(drainModeString)
@@ -95,17 +96,17 @@ internal object SttJsonAdapter {
         }
 
         // ── Start strategy ───────────────────────────────────────────────
-        val startTrigger = parseStartTrigger(root)
+        val startTrigger = parseStartTrigger(json)
 
         // ── Stop strategy ────────────────────────────────────────────────
-        val stopTrigger = parseStopTrigger(root)
+        val stopTrigger = parseStopTrigger(json)
 
         // ── Warmup (optional) ────────────────────────────────────────────
-        val warmupEnabled = resolveBoolean(root, "warmupEnabled") ?: false
-        val warmupDurationMs = resolveInt(root, "warmupDurationMs") ?: 0
+        val warmupEnabled = resolveBoolean(json, "warmupEnabled") ?: false
+        val warmupDurationMs = resolveInt(json, "warmupDurationMs") ?: 0
 
         // ── Buffer size (optional) ───────────────────────────────────────
-        val bufferSizeSamples = resolveInt(root, "bufferSizeSamples") ?: 4000
+        val bufferSizeSamples = resolveInt(json, "bufferSizeSamples") ?: 4000
 
         return SttConfig(
             modelPath = modelPath,
@@ -149,20 +150,23 @@ internal object SttJsonAdapter {
         code: SttReturnCode,
         timing: SttTimingSnapshot?
     ): String {
-        val obj = JSONObject()
-        obj.put("type", "result")
-        obj.put("text", text)
-        obj.put("code", code.name)
+        val sb = StringBuilder()
+        sb.append("{\"type\":\"result\",\"text\":\"")
+        sb.append(escapeJson(text))
+        sb.append("\",\"code\":\"")
+        sb.append(code.name)
+        sb.append('"')
 
         if (timing != null) {
-            val timingObj = JSONObject()
-            timingObj.put("captureMs", timing.utteranceDurationMs)
-            timingObj.put("inferenceMs", timing.inferenceMs)
-            timingObj.put("totalMs", timing.totalPipelineMs)
-            obj.put("timing", timingObj)
+            sb.append(",\"timing\":{")
+            sb.append("\"captureMs\":").append(timing.utteranceDurationMs).append(',')
+            sb.append("\"inferenceMs\":").append(timing.inferenceMs).append(',')
+            sb.append("\"totalMs\":").append(timing.totalPipelineMs)
+            sb.append('}')
         }
 
-        return obj.toString()
+        sb.append('}')
+        return sb.toString()
     }
 
     /**
@@ -178,11 +182,13 @@ internal object SttJsonAdapter {
      * ```
      */
     fun buildErrorJson(code: String, message: String): String {
-        val obj = JSONObject()
-        obj.put("type", "error")
-        obj.put("code", code)
-        obj.put("message", message)
-        return obj.toString()
+        val sb = StringBuilder()
+        sb.append("{\"type\":\"error\",\"code\":\"")
+        sb.append(escapeJson(code))
+        sb.append("\",\"message\":\"")
+        sb.append(escapeJson(message))
+        sb.append("\"}")
+        return sb.toString()
     }
 
     /**
@@ -197,47 +203,51 @@ internal object SttJsonAdapter {
      * ```
      */
     fun buildDebugJson(message: String): String {
-        val obj = JSONObject()
-        obj.put("type", "debug")
-        obj.put("message", message)
-        return obj.toString()
+        val sb = StringBuilder()
+        sb.append("{\"type\":\"debug\",\"message\":\"")
+        sb.append(escapeJson(message))
+        sb.append("\"}")
+        return sb.toString()
+    }
+
+    /**
+     * Minimal JSON string escaping for string values.
+     */
+    private fun escapeJson(value: String): String {
+        return value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
     }
 
     // ═════════════════════════════════════════════════════════════════════
     // Internal helpers — start/stop strategy parsing
     // ═════════════════════════════════════════════════════════════════════
 
-    private fun parseStartTrigger(root: JSONObject): StartTrigger {
-        // Support both flat (startType) and nested (startStrategy.type) formats
-        val startType = resolveString(root, "startType")
-            ?: root.optJSONObject("startStrategy")?.optString("type")
+    private fun parseStartTrigger(json: String): StartTrigger {
+        val startType = resolveString(json, "startType")
+            ?: resolveNestedString(json, "startStrategy", "type")
             ?: "MANUAL"
-
-        val startObj = root.optJSONObject("startStrategy") ?: root
 
         return when (startType) {
             "MANUAL" -> StartTrigger.Manual
             "VAD_START" -> {
-                val threshold = startObj.optDouble("vadStartThreshold", -1.0)
-                val minSpeech = startObj.optInt("minSpeechMs", -1)
-                if (threshold < 0 || minSpeech < 0) {
-                    throw IllegalArgumentException(
-                        "VAD_START requires vadStartThreshold and minSpeechMs"
-                    )
-                }
+                val threshold = resolveNestedDouble(json, "startStrategy", "vadStartThreshold")
+                    ?: throw IllegalArgumentException("VAD_START requires vadStartThreshold")
+                val minSpeech = resolveNestedInt(json, "startStrategy", "minSpeechMs")
+                    ?: throw IllegalArgumentException("VAD_START requires minSpeechMs")
                 StartTrigger.VadStart(
                     vadStartThreshold = threshold.toFloat(),
                     minSpeechMs = minSpeech
                 )
             }
             "WAKEWORD" -> {
-                val wakeWord = startObj.optString("wakeWord", "")
-                val confidence = startObj.optDouble("confidenceThreshold", -1.0)
-                if (wakeWord.isEmpty() || confidence < 0) {
-                    throw IllegalArgumentException(
-                        "WAKEWORD requires wakeWord and confidenceThreshold"
-                    )
-                }
+                val wakeWord = resolveNestedString(json, "startStrategy", "wakeWord")
+                    ?: throw IllegalArgumentException("WAKEWORD requires wakeWord")
+                val confidence = resolveNestedDouble(json, "startStrategy", "confidenceThreshold")
+                    ?: throw IllegalArgumentException("WAKEWORD requires confidenceThreshold")
                 StartTrigger.WakeWordStart(
                     wakeWord = wakeWord,
                     confidenceThreshold = confidence.toFloat()
@@ -247,20 +257,19 @@ internal object SttJsonAdapter {
         }
     }
 
-    private fun parseStopTrigger(root: JSONObject): StopTrigger {
-        // Support both flat (stopType) and nested (stopStrategy.type) formats
-        val stopType = resolveString(root, "stopType")
-            ?: root.optJSONObject("stopStrategy")?.optString("type")
+    private fun parseStopTrigger(json: String): StopTrigger {
+        val stopType = resolveString(json, "stopType")
+            ?: resolveNestedString(json, "stopStrategy", "type")
             ?: "MANUAL"
-
-        val stopObj = root.optJSONObject("stopStrategy") ?: root
 
         return when (stopType) {
             "MANUAL" -> StopTrigger.Manual
             "AUTO_SILENCE" -> {
-                val silenceMs = resolveInt(stopObj, "silenceMs")
+                val silenceMs = resolveInt(json, "silenceMs")
+                    ?: resolveNestedInt(json, "stopStrategy", "silenceMs")
                     ?: throw IllegalArgumentException("AUTO_SILENCE requires silenceMs")
-                val maxDurationMs = resolveInt(stopObj, "maxDurationMs")
+                val maxDurationMs = resolveInt(json, "maxDurationMs")
+                    ?: resolveNestedInt(json, "stopStrategy", "maxDurationMs")
                     ?: throw IllegalArgumentException("AUTO_SILENCE requires maxDurationMs")
                 StopTrigger.AutoSilence(
                     silenceMs = silenceMs,
@@ -268,7 +277,8 @@ internal object SttJsonAdapter {
                 )
             }
             "DURATION" -> {
-                val maxDurationMs = resolveInt(stopObj, "maxDurationMs")
+                val maxDurationMs = resolveInt(json, "maxDurationMs")
+                    ?: resolveNestedInt(json, "stopStrategy", "maxDurationMs")
                     ?: throw IllegalArgumentException("DURATION requires maxDurationMs")
                 StopTrigger.Duration(maxDurationMs = maxDurationMs)
             }
@@ -277,67 +287,123 @@ internal object SttJsonAdapter {
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // Generic JSON resolution helpers
+    // Manual JSON value extraction helpers (no Android dependency)
     // ═════════════════════════════════════════════════════════════════════
 
     /**
-     * Resolve a string field that may live at the root or inside
-     * a nested "ttsEngineConfig" object (legacy format).
+     * Extract a string value for [key] from the top-level JSON object.
      */
-    private fun resolveString(root: JSONObject, key: String): String? {
-        if (root.has(key)) {
-            return root.getString(key)
-        }
-        return null
+    private fun resolveString(json: String, key: String): String? {
+        val regex = Regex(""""$key"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+        return regex.find(json)?.groupValues?.get(1)
     }
 
-    private fun resolveInt(root: JSONObject, key: String): Int? {
-        if (root.has(key)) {
-            return root.getInt(key)
-        }
-        return null
+    /**
+     * Extract an integer value for [key] from the top-level JSON object.
+     */
+    private fun resolveInt(json: String, key: String): Int? {
+        val regex = Regex(""""$key"\s*:\s*(-?\d+)(?:[,\s}]|$)""")
+        return regex.find(json)?.groupValues?.get(1)?.toIntOrNull()
     }
 
-    private fun resolveDouble(root: JSONObject, key: String): Double? {
-        if (root.has(key)) {
-            return root.getDouble(key)
-        }
-        return null
+    /**
+     * Extract a double value for [key] from the top-level JSON object.
+     */
+    private fun resolveDouble(json: String, key: String): Double? {
+        val regex = Regex(""""$key"\s*:\s*(-?\d+(?:\.\d+)?)(?:[,\s}]|$)""")
+        return regex.find(json)?.groupValues?.get(1)?.toDoubleOrNull()
     }
 
-    private fun resolveBoolean(root: JSONObject, key: String): Boolean? {
-        if (root.has(key)) {
-            return root.getBoolean(key)
-        }
-        return null
+    /**
+     * Extract a boolean value for [key] from the top-level JSON object.
+     */
+    private fun resolveBoolean(json: String, key: String): Boolean? {
+        val regex = Regex(""""$key"\s*:\s*(true|false)""")
+        return regex.find(json)?.groupValues?.get(1)?.toBooleanStrictOrNull()
     }
 
-    private fun resolveNestedEngineField(root: JSONObject, key: String): String? {
-        val engine = root.optJSONObject("ttsEngineConfig") ?: return null
-        return if (engine.has(key)) engine.getString(key) else null
+    /**
+     * Extract a string value from a nested JSON object: "parent": { "child": "value" }
+     */
+    private fun resolveNestedString(json: String, parent: String, child: String): String? {
+        val content = extractNestedObject(json, parent) ?: return null
+        val childRegex = Regex(""""$child"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+        return childRegex.find(content)?.groupValues?.get(1)
     }
 
-    private fun resolveNestedEngineFieldBoolean(root: JSONObject, key: String): Boolean? {
-        val engine = root.optJSONObject("ttsEngineConfig") ?: return null
-        return if (engine.has(key)) engine.getBoolean(key) else null
+    /**
+     * Extract an integer value from a nested JSON object.
+     */
+    private fun resolveNestedInt(json: String, parent: String, child: String): Int? {
+        val content = extractNestedObject(json, parent) ?: return null
+        val childRegex = Regex(""""$child"\s*:\s*(-?\d+)(?:[,\s}]|$)""")
+        return childRegex.find(content)?.groupValues?.get(1)?.toIntOrNull()
     }
 
-    private fun resolveNestedVadFieldDouble(root: JSONObject, key: String): Double? {
-        val vad = root.optJSONObject("vadConfig") ?: return null
-        return if (vad.has(key)) {
-            vad.get(key).let { value ->
-                when (value) {
-                    is Number -> value.toDouble()
-                    else -> throw IllegalArgumentException("Expected numeric value for $key")
+    /**
+     * Extract a double value from a nested JSON object.
+     */
+    private fun resolveNestedDouble(json: String, parent: String, child: String): Double? {
+        val content = extractNestedObject(json, parent) ?: return null
+        val childRegex = Regex(""""$child"\s*:\s*(-?\d+(?:\.\d+)?)(?:[,\s}]|$)""")
+        return childRegex.find(content)?.groupValues?.get(1)?.toDoubleOrNull()
+    }
+
+    /**
+     * Extract the raw content of a nested JSON object.
+     * Returns the content between { and } of the matching parent object.
+     */
+    private fun extractNestedObject(json: String, parent: String): String? {
+        val parentRegex = Regex(""""$parent"\s*:\s*\{""")
+        val matchResult = parentRegex.find(json) ?: return null
+        val startIndex = matchResult.range.last + 1
+        val endIndex = findMatchingBrace(json, startIndex) ?: return null
+        return json.substring(startIndex, endIndex)
+    }
+
+    /**
+     * Find the matching closing brace for an opening brace at [startIndex].
+     * Skips over string literals, handles nested braces.
+     */
+    private fun findMatchingBrace(json: String, startIndex: Int): Int? {
+        var depth = 1
+        var i = startIndex
+        while (i < json.length && depth > 0) {
+            when (json[i]) {
+                '{' -> depth++
+                '}' -> depth--
+                '"' -> {
+                    i++
+                    while (i < json.length) {
+                        if (json[i] == '\\') i++
+                        else if (json[i] == '"') break
+                        i++
+                    }
                 }
             }
-        } else {
-            null
+            i++
         }
+        return if (depth == 0) i - 1 else null
     }
 
-    private fun resolveNestedVadFieldInt(root: JSONObject, key: String): Int? {
-        val vad = root.optJSONObject("vadConfig") ?: return null
-        return if (vad.has(key)) vad.getInt(key) else null
+    /**
+     * Legacy nested format helpers (ttsEngineConfig).
+     */
+    private fun resolveNestedEngineString(json: String, key: String): String? {
+        return resolveNestedString(json, "ttsEngineConfig", key)
+    }
+
+    private fun resolveNestedEngineBoolean(json: String, key: String): Boolean? {
+        val content = extractNestedObject(json, "ttsEngineConfig") ?: return null
+        val childRegex = Regex(""""$key"\s*:\s*(true|false)""")
+        return childRegex.find(content)?.groupValues?.get(1)?.toBooleanStrictOrNull()
+    }
+
+    private fun resolveNestedVadDouble(json: String, key: String): Double? {
+        return resolveNestedDouble(json, "vadConfig", key)
+    }
+
+    private fun resolveNestedVadInt(json: String, key: String): Int? {
+        return resolveNestedInt(json, "vadConfig", key)
     }
 }

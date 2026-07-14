@@ -11,13 +11,10 @@ import android.os.IBinder
 import android.util.Log
 
 /**
- * Audio test service.
+ * Audio test service stub.
  *
- * AudioCapture has been internalized. For direct audio capture, use
- * [SpeechToTextProvider.get] to obtain the STT singleton and call
- * startSession/stopAndTranscribe on it.
- *
- * This service is preserved as a stub for future diagnostics integration.
+ * Preserved for future diagnostics integration.
+ * Use [SpeechToText] directly via JSON config for STT operations.
  */
 class AudioTestService : Service() {
 
@@ -35,20 +32,21 @@ class AudioTestService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+        val notification: Notification
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notification = Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Audio Test")
                 .setContentText("Recording audio")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .build()
         } else {
-            Notification.Builder(this)
+            @Suppress("DEPRECATION")
+            notification = Notification.Builder(this)
                 .setContentTitle("Audio Test")
                 .setContentText("Recording audio")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .build()
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 1,
@@ -59,7 +57,7 @@ class AudioTestService : Service() {
             startForeground(1, notification)
         }
 
-        Log.d("AudioTestService", "AudioTestService running — direct AudioCapture access removed. Use SpeechToTextProvider.get() instead.")
+        Log.d("AudioTestService", "AudioTestService running — direct AudioCapture access removed. Use SpeechToText.init() instead.")
 
         return START_STICKY
     }
@@ -74,3 +72,4 @@ class AudioTestService : Service() {
         private const val CHANNEL_ID = "audio_test_service"
     }
 }
+

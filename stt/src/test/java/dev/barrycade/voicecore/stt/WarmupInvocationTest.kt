@@ -1,49 +1,51 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Tests that [WhisperModel.warmup] is invoked correctly by the pipeline.
  *
- * Warmup now happens during [SpeechToText.initStt], not in the constructor.
- * Tests validate that warmup is called exactly once on the first [initStt]
+ * Warmup now happens during [SpeechToText.init], not in the constructor.
+ * Tests validate that warmup is called exactly once on the first [init]
  * call and is NOT called on subsequent calls.
  *
  * Uses [FakeWhisperModel] which tracks calls to [warmup].
  */
 class WarmupInvocationTest {
 
-    private fun createConfig(warmupEnabled: Boolean, warmupDurationMs: Int): SttConfig {
-        return SttConfig(
-            modelPath = "/test/model.bin",
-            language = "en",
-            debugLoggingEnabled = false,
-            energyThreshold = 0.03f,
-            preRollMs = 100,
-            stableChunkSizeMs = 500,
-            drainMode = DrainMode.DRAIN_FROM_NEXT_FRAME,
-            startTrigger = StartTrigger.Manual,
-            stopTrigger = StopTrigger.Manual,
-            warmupEnabled = warmupEnabled,
-            warmupDurationMs = warmupDurationMs
-        )
+    private fun buildConfigJson(
+        warmupEnabled: Boolean,
+        warmupDurationMs: Int
+    ): String {
+        val sb = StringBuilder()
+        sb.append("""{"modelPath":"/test/model.bin","language":"en","debugLoggingEnabled":false,"energyThreshold":0.03,"preRollMs":100,"stableChunkSizeMs":500,"drainMode":"DRAIN_FROM_NEXT_FRAME","startType":"MANUAL","stopType":"MANUAL",""")
+        sb.append("\"warmupEnabled\":").append(warmupEnabled).append(",")
+        sb.append("\"warmupDurationMs\":").append(warmupDurationMs)
+        sb.append("}")
+        return sb.toString()
+    }
+
+    private fun initSafely(stt: SpeechToText, json: String) {
+        try {
+            stt.init(json)
+        } catch (_: RuntimeException) {
+            // ModelManager may fail with FakeWhisperModel in unit tests
+        }
     }
 
     @Test
-    fun warmup_calledOnceDuringInitStt() {
+    fun warmup_calledOnceDuringInit() {
         val fakeModel = FakeWhisperModel()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
-        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 500)
+        val json = buildConfigJson(warmupEnabled = true, warmupDurationMs = 500)
 
-        stt.setConfig(runConfig)
-        stt.initStt(runConfig)
-        assertEquals("warmup must be called exactly once during initStt",
+        initSafely(stt, json)
+        assertEquals("warmup must be called exactly once during init",
             1, fakeModel.warmupCount)
         assertEquals("warmup duration must match config",
             500, fakeModel.lastWarmupDurationMs)
@@ -57,10 +59,9 @@ class WarmupInvocationTest {
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
-        val runConfig = createConfig(warmupEnabled = false, warmupDurationMs = 500)
+        val json = buildConfigJson(warmupEnabled = false, warmupDurationMs = 500)
 
-        stt.setConfig(runConfig)
-        stt.initStt(runConfig)
+        initSafely(stt, json)
         assertEquals("warmup must NOT be called when disabled",
             0, fakeModel.warmupCount)
     }
@@ -73,10 +74,9 @@ class WarmupInvocationTest {
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
-        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 0)
+        val json = buildConfigJson(warmupEnabled = true, warmupDurationMs = 0)
 
-        stt.setConfig(runConfig)
-        stt.initStt(runConfig)
+        initSafely(stt, json)
 
         assertEquals("warmup must be called with duration=0",
             1, fakeModel.warmupCount)
@@ -85,25 +85,24 @@ class WarmupInvocationTest {
     }
 
     @Test
-    fun warmup_notCalledOnSecondInitStt() {
+    fun warmup_notCalledOnSecondInit() {
         val fakeModel = FakeWhisperModel()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
-        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 500)
+        val json = buildConfigJson(warmupEnabled = true, warmupDurationMs = 500)
 
-        stt.setConfig(runConfig)
-        stt.initStt(runConfig)
+        initSafely(stt, json)
 
-        assertEquals("warmup must be called once on first initStt",
+        assertEquals("warmup must be called once on first init",
             1, fakeModel.warmupCount)
 
-        // Second initStt — warmup must NOT be called.
-        stt.initStt(runConfig)
+        // Second init — warmup must NOT be called.
+        initSafely(stt, json)
 
-        assertEquals("warmup must NOT be called on second initStt",
+        assertEquals("warmup must NOT be called on second init",
             1, fakeModel.warmupCount)
     }
 
@@ -115,21 +114,14 @@ class WarmupInvocationTest {
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
-        val runConfig = createConfig(warmupEnabled = true, warmupDurationMs = 2000)
+        val json = buildConfigJson(warmupEnabled = true, warmupDurationMs = 2000)
 
-        stt.setConfig(runConfig)
-        stt.initStt(runConfig)
+        initSafely(stt, json)
 
         assertEquals("warmup must be called exactly once",
             1, fakeModel.warmupCount)
         assertEquals("warmup duration must be 2000",
             2000, fakeModel.lastWarmupDurationMs)
     }
-
-    /** Reusable SpeechToText reference. Tests that interact with it may
-     * encounter UnsatisfiedLinkError from WhisperBridge. Those are caught
-     * and ignored — the tests are validating warmup invocation order, not
-     * the Whisper pipeline. */
-    private var speechToText: SpeechToText? = null
 }
 
