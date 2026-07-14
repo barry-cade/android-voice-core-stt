@@ -39,6 +39,12 @@ internal class SttCallbackDispatcher {
     private var timingListener: ((pcmMs: Long, vadActiveMs: Long, whisperMs: Long, totalMs: Long) -> Unit)? = null
 
     /**
+     * JSON message listener for the JSON-boundary API.
+     * Receives result, error, and debug JSON strings.
+     */
+    private var onMessageListener: ((String) -> Unit)? = null
+
+    /**
      * Timing listener, called after each inference completes.
      *
      * @param pcmMs Wall-clock duration of PCM capture.
@@ -87,6 +93,17 @@ internal class SttCallbackDispatcher {
     }
 
     /**
+     * Register a JSON message listener for the JSON-boundary API.
+     *
+     * Receives result, error, and debug JSON strings.
+     */
+    fun setOnMessageListener(l: (String) -> Unit) {
+        synchronized(listenerLock) {
+            onMessageListener = l
+        }
+    }
+
+    /**
      * Get the current STT error listener (for forwarding to components).
      */
     fun getSttErrorListener(): SttErrorListener? {
@@ -112,8 +129,12 @@ internal class SttCallbackDispatcher {
         val resultSnapshot = synchronized(listenerLock) {
             onResult
         }
+        val messageSnapshot = synchronized(listenerLock) {
+            onMessageListener
+        }
         withTimingSnapshot?.invoke(text, code, timing)
         resultSnapshot?.invoke(text)
+        messageSnapshot?.invoke(SttJsonAdapter.buildResultJson(text, code, timing))
     }
 
     /**
@@ -128,6 +149,9 @@ internal class SttCallbackDispatcher {
         val sttErrorSnapshot = synchronized(listenerLock) {
             sttErrorListener
         }
+        val messageSnapshot = synchronized(listenerLock) {
+            onMessageListener
+        }
         errorSnapshot?.invoke(t)
         sttErrorSnapshot?.onSttError(
             SttError(
@@ -136,6 +160,9 @@ internal class SttCallbackDispatcher {
                 t.message ?: "Unknown error",
                 cause = t
             )
+        )
+        messageSnapshot?.invoke(
+            SttJsonAdapter.buildErrorJson("INTERNAL_EXCEPTION", t.message ?: "Unknown error")
         )
     }
 
@@ -164,6 +191,7 @@ internal class SttCallbackDispatcher {
             onError = null
             sttErrorListener = null
             timingListener = null
+            onMessageListener = null
         }
     }
 }

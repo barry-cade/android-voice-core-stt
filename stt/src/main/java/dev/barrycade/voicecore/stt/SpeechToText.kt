@@ -206,6 +206,91 @@ class SpeechToText internal constructor(
         callbackDispatcher.setSttErrorListener(l)
     }
 
+    // ======== JSON-based public API ====================================
+    //
+    // These methods form the new JSON boundary API. They accept or return
+    // only JSON strings. All internal types remain hidden behind the adapter.
+    //
+    // They coexist with the existing typed API until the migration is complete.
+    // ===================================================================
+
+    /**
+     * Initialise STT from a JSON config string and start a session.
+     *
+     * This is the new entry point for the JSON-boundary API. It replaces:
+     * [setConfig] + [initStt] + [startSession] with a single call.
+     *
+     * @param configJson A JSON string conforming to the input config schema.
+     *                   See [SttJsonAdapter.parseConfig] for the expected shape.
+     * @return A JSON result string on success, or a JSON error string on failure.
+     */
+    fun init(configJson: String): String {
+        val sttConfig = try {
+            SttJsonAdapter.parseConfig(configJson)
+        } catch (e: IllegalArgumentException) {
+            return SttJsonAdapter.buildErrorJson("INVALID_CONFIG", e.message ?: "Config parse failed")
+        }
+
+        // ── setConfig ─────────────────────────────────────────────────────
+        val setConfigResult = setConfig(sttConfig)
+        if (setConfigResult.code != SttReturnCode.SUCCESS) {
+            return SttJsonAdapter.buildErrorJson(
+                "CONFIG_FAILED",
+                "setConfig returned ${setConfigResult.code}"
+            )
+        }
+
+        // ── initStt ───────────────────────────────────────────────────────
+        val initResult = initStt(sttConfig)
+        if (initResult.code != SttReturnCode.SUCCESS) {
+            return SttJsonAdapter.buildErrorJson(
+                "INIT_FAILED",
+                "initStt returned ${initResult.code}"
+            )
+        }
+
+        // ── startSession ──────────────────────────────────────────────────
+        val sessionResult = startSession()
+        if (sessionResult.code != SttReturnCode.SUCCESS) {
+            return SttJsonAdapter.buildErrorJson(
+                "SESSION_START_FAILED",
+                "startSession returned ${sessionResult.code}"
+            )
+        }
+
+        return SttJsonAdapter.buildResultJson(
+            text = "",
+            code = SttReturnCode.SUCCESS,
+            timing = null
+        )
+    }
+
+    /**
+     * Transcribe the current utterance and return the result via the message listener.
+     *
+     * This is the new entry point for the JSON-boundary API. It replaces
+     * [stopAndTranscribe] with a simpler name.
+     */
+    fun transcribe() {
+        stopAndTranscribe()
+    }
+
+    /**
+     * Unified JSON message listener.
+     *
+     * Receives all STT output as JSON strings. The caller should inspect the
+     * `"type"` field to distinguish:
+     * - `"result"` — successful transcription (see [SttJsonAdapter.buildResultJson])
+     * - `"error"` — an error occurred (see [SttJsonAdapter.buildErrorJson])
+     * - `"debug"` — optional debug messages (see [SttJsonAdapter.buildDebugJson])
+     *
+     * **Delivery thread:** Varies (Whisper executor for results, error thread for errors).
+     * Post to your own Handler or coroutine dispatcher if main-thread delivery is required.
+     */
+    fun setOnMessageListener(l: (String) -> Unit) {
+        callbackDispatcher.setOnMessageListener(l)
+    }
+
     /**
      * Set debug/test options for the pipeline.
      */
