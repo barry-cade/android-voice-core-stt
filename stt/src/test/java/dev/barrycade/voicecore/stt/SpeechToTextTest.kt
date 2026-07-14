@@ -20,6 +20,7 @@ class SpeechToTextTest {
     fun setUp() {
         lastMessageJson = null
 
+        SpeechToText.resetForTest()
         speechToText = SpeechToText(
             context = null,
             whisperModel = FakeWhisperModel(),

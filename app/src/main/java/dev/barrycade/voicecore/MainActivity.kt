@@ -35,7 +35,6 @@ class MainActivity : ComponentActivity() {
     private var blankAudioCount: Int = 0
     private val blankAudioThreshold: Int = 3
 
-    private var stt: SpeechToText? = null
     private var isRecording = false
 
     private fun postToUi(action: () -> Unit) {
@@ -60,10 +59,52 @@ class MainActivity : ComponentActivity() {
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
-        // Construct the singleton STT instance once per app lifetime.
-        // The model is NOT loaded here — only the SpeechToText object is created.
-        // Call init(configJson) to load the model and build scaffolding.
-        stt = SpeechToText(applicationContext)
+        // Register the JSON message listener before init.
+        // The listener is buffered by the companion and wired once the
+        // singleton is created inside init().
+        SpeechToText.setOnMessageListener { json ->
+            postToUi {
+                try {
+                    val obj = JSONObject(json)
+                    val type = obj.optString("type", "")
+                    when (type) {
+                        "result" -> {
+                            val text = obj.optString("text", "")
+                            val code = obj.optString("code", "")
+                            val timing = obj.optJSONObject("timing")
+                            val timingInfo = if (timing != null) {
+                                val captureMs = timing.optLong("captureMs", 0)
+                                val inferenceMs = timing.optLong("inferenceMs", 0)
+                                val totalMs = timing.optLong("totalMs", 0)
+                                "Timing: capture=${captureMs}ms, " +
+                                "inference=${inferenceMs}ms, " +
+                                "total=${totalMs}ms"
+                            } else ""
+                            txtOutput.text = "[$code] $text"
+                            txtDiagnostics.text = timingInfo
+                            txtDiagnostics.visibility = View.VISIBLE
+
+                            if (text == BLANK_AUDIO_MARKER || text == "") {
+                                blankAudioCount += 1
+                                if (blankAudioCount >= blankAudioThreshold) {
+                                    txtOutput.text =
+                                        "No speech detected. Tap Stop to end the session."
+                                }
+                            } else {
+                                blankAudioCount = 0
+                            }
+                        }
+                        "error" -> {
+                            val errorCode = obj.optString("code", "")
+                            val message = obj.optString("message", "")
+                            txtOutput.text = "Error [$errorCode]: $message"
+                        }
+                    }
+                } catch (_: Exception) {
+                    txtOutput.text = "Malformed message: $json"
+                }
+            }
+        }
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -165,60 +206,13 @@ class MainActivity : ComponentActivity() {
         val modelPath = getModelPath()
         val configJson = buildConfigJson(modelPath, "en", selectedStopType)
 
-        val currentStt = stt
-        if (currentStt == null) {
-            postToUi { txtOutput.text = "Error: STT not initialised" }
-            return
-        }
-
         try {
             AppLogger.log(AppLogCode.OBTAINING_STT_INSTANCE)
 
-            currentStt.setOnMessageListener { json ->
-                postToUi {
-                    try {
-                        val obj = JSONObject(json)
-                        val type = obj.optString("type", "")
-                        when (type) {
-                            "result" -> {
-                                val text = obj.optString("text", "")
-                                val code = obj.optString("code", "")
-                                val timing = obj.optJSONObject("timing")
-                                val timingInfo = if (timing != null) {
-                                    val captureMs = timing.optLong("captureMs", 0)
-                                    val inferenceMs = timing.optLong("inferenceMs", 0)
-                                    val totalMs = timing.optLong("totalMs", 0)
-                                    "Timing: capture=${captureMs}ms, " +
-                                    "inference=${inferenceMs}ms, " +
-                                    "total=${totalMs}ms"
-                                } else ""
-                                txtOutput.text = "[$code] $text"
-                                txtDiagnostics.text = timingInfo
-                                txtDiagnostics.visibility = View.VISIBLE
-
-                                if (text == BLANK_AUDIO_MARKER || text == "") {
-                                    blankAudioCount += 1
-                                    if (blankAudioCount >= blankAudioThreshold) {
-                                        txtOutput.text =
-                                            "No speech detected. Tap Stop to end the session."
-                                    }
-                                } else {
-                                    blankAudioCount = 0
-                                }
-                            }
-                            "error" -> {
-                                val errorCode = obj.optString("code", "")
-                                val message = obj.optString("message", "")
-                                txtOutput.text = "Error [$errorCode]: $message"
-                            }
-                        }
-                    } catch (_: Exception) {
-                        txtOutput.text = "Malformed message: $json"
-                    }
-                }
-            }
-
-            val initResultJson = currentStt.init(configJson)
+            // The message listener was already registered in onCreate().
+            // init() creates the singleton if needed, wires the buffer listener,
+            // and returns the init result.
+            val initResultJson = SpeechToText.init(this, configJson)
             val initObj = JSONObject(initResultJson)
             if (initObj.optString("type") == "error") {
                 val errorCode = initObj.optString("code", "")
@@ -253,16 +247,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopRecording() {
-        val currentStt = stt
-        if (currentStt == null) {
-            postToUi { txtOutput.text = "Not yet started" }
-            return
-        }
         txtOutput.text = "Processing..."
         val thread = Thread({
             try {
                 AppLogger.log(AppLogCode.STOP_USING_STOP_AND_TRANSCRIBE)
-                currentStt.transcribe()
+                SpeechToText.transcribe()
                 postToUi {
                     isRecording = false
                     btnStop.isEnabled = false

@@ -37,6 +37,7 @@ class WarmupInvocationTest {
     @Test
     fun warmup_calledOnceDuringInit() {
         val fakeModel = FakeWhisperModel()
+        SpeechToText.resetForTest()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
@@ -54,6 +55,7 @@ class WarmupInvocationTest {
     @Test
     fun warmup_notCalledWhenDisabled() {
         val fakeModel = FakeWhisperModel()
+        SpeechToText.resetForTest()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
@@ -69,6 +71,7 @@ class WarmupInvocationTest {
     @Test
     fun warmup_durationZeroCausesNoError() {
         val fakeModel = FakeWhisperModel()
+        SpeechToText.resetForTest()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
@@ -87,6 +90,7 @@ class WarmupInvocationTest {
     @Test
     fun warmup_notCalledOnSecondInit() {
         val fakeModel = FakeWhisperModel()
+        SpeechToText.resetForTest()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,
@@ -109,6 +113,7 @@ class WarmupInvocationTest {
     @Test
     fun warmup_enabledAndDurationPassedCorrectly() {
         val fakeModel = FakeWhisperModel()
+        SpeechToText.resetForTest()
         val stt = SpeechToText(
             context = null,
             whisperModel = fakeModel,

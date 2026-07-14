@@ -71,6 +71,7 @@ class SttStaleCallbackStressTest {
         blockingModel = BlockingWhisperModel()
         resultCount.set(0)
 
+        SpeechToText.resetForTest()
         speechToText = SpeechToText(
             context = null,
             whisperModel = blockingModel,

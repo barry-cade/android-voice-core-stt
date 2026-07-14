@@ -50,14 +50,6 @@ import java.util.concurrent.atomic.AtomicLong
  * Callers MUST NOT call lifecycle methods from within callbacks — doing so
  * will produce undefined behavior (potential deadlock or re-entrancy).
  */
-/**
- * Public top-level factory function for [SpeechToText].
- *
- * Preserves the app-level API `SpeechToText(applicationContext)` while keeping
- * the primary constructor [internal] for test dependency injection.
- */
-fun SpeechToText(context: Context?): SpeechToText = SpeechToText(context, WhisperBridge, CaptureManager())
-
 class SpeechToText internal constructor(
     @Suppress("UNUSED_PARAMETER") context: Context?,
     private val whisperModel: WhisperModel = WhisperBridge,
@@ -624,4 +616,76 @@ class SpeechToText internal constructor(
         }
     }
 
+    companion object {
+        @Volatile
+        var instance: SpeechToText? = null
+            internal set
+
+        @Volatile
+        private var pendingListener: ((String) -> Unit)? = null
+
+        /**
+         * Initialise or retrieve the STT singleton and start a session.
+         *
+         * The singleton is created on the first call; subsequent calls
+         * delegate to the existing instance's [init].
+         *
+         * @param context Application or Activity context (applicationContext is used internally).
+         * @param configJson A JSON string conforming to the input config schema.
+         * @return A JSON result string on success, or a JSON error string on failure.
+         */
+        fun init(context: Context, configJson: String): String {
+            val appCtx = context.applicationContext
+
+            val stt = instance ?: synchronized(this) {
+                instance ?: SpeechToText(
+                    appCtx,
+                    WhisperBridge,
+                    CaptureManager()
+                ).also { newInstance ->
+                    instance = newInstance
+                    // Wire any listener that was registered before init
+                    pendingListener?.let { newInstance.setOnMessageListener(it) }
+                }
+            }
+
+            return stt.init(configJson)
+        }
+
+        /**
+         * Transcribe the current utterance via the singleton instance.
+         *
+         * If [init] has not been called, a warning is logged and the call is ignored.
+         */
+        fun transcribe() {
+            val stt = instance
+            if (stt == null) {
+                SttLogger.lifecycleW("SpeechToText.transcribe() called before init() — ignoring")
+                return
+            }
+            stt.transcribe()
+        }
+
+        /**
+         * Register a JSON message listener.
+         *
+         * Safe to call before [init]; the listener is buffered and wired
+         * to the singleton once it is created.
+         */
+        fun setOnMessageListener(listener: (String) -> Unit) {
+            pendingListener = listener
+            instance?.setOnMessageListener(listener)
+        }
+
+        /**
+         * Reset the singleton for testing.
+         *
+         * Clears the instance and any pending listener so the next call
+         * to [init] creates a fresh singleton.
+         */
+        internal fun resetForTest() {
+            instance = null
+            pendingListener = null
+        }
+    }
 }

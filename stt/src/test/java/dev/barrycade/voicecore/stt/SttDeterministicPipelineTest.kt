@@ -68,6 +68,7 @@ class SttDeterministicPipelineTest {
     fun setUp() {
         captureManager = FakeCaptureManager()
         blockingModel = BlockingWhisperModel()
+        SpeechToText.resetForTest()
         speechToText = SpeechToText(
             context = null,
             whisperModel = blockingModel,
