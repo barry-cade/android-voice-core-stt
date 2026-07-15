@@ -21,6 +21,7 @@ internal object SttLogger {
     fun pcmD(msg: String) = safeLog { Log.d(TAG, "[PCM] $msg") }
     fun pcmW(msg: String) = safeLog { Log.w(TAG, "[PCM] $msg") }
     fun pcmE(msg: String) = safeLog { Log.e(TAG, "[PCM] $msg") }
+    fun pcmE(msg: String, throwable: Throwable) = safeLog { Log.e(TAG, "[PCM] $msg", throwable) }
 
     fun vad(msg: String) = safeLog { Log.i(TAG, "[VAD] $msg") }
     fun vadD(msg: String) = safeLog { Log.d(TAG, "[VAD] $msg") }
@@ -60,3 +61,4 @@ internal object SttLogger {
         }
     }
 }
+

@@ -55,7 +55,7 @@ internal class SttInferenceController(
     ): Boolean {
         val shortPcm = request.pcm.toShortArray()
 
-        val onResultCallback: (String) -> Unit = fun(text: String) {
+        val onResultCallback: (Long, String) -> Unit = fun(inferenceStartMs: Long, text: String) {
             val decision = decideDispatch()
             if (!decision.shouldDispatch) {
                 if (decision.dropReason != null) {
@@ -64,11 +64,13 @@ internal class SttInferenceController(
                 return
             }
 
-            val whisperMs = System.currentTimeMillis() - request.pipelineStartMs
-            val totalMs = System.currentTimeMillis() - request.pipelineStartMs
+            val now = System.currentTimeMillis()
+            val whisperMs = now - inferenceStartMs
+            val totalMs = now - request.pipelineStartMs
 
             val snapshot = SttTimingSnapshot(
                 vadActiveMs = request.vadActiveMs,
+                captureMs = request.captureMs,
                 utteranceDurationMs = request.utteranceMs,
                 silencePaddingMs = request.autoSilenceMs,
                 preRollMs = request.preRollMs,
@@ -96,6 +98,7 @@ internal class SttInferenceController(
                 .toInt()
                 .toShort()
         }
-        return shorts
+                        return shorts
     }
 }
+

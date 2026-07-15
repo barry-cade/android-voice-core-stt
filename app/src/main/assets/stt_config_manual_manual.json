@@ -1,6 +1,5 @@
 {
   "ttsEngineConfig": {
-    "modelPath": "/path/to/model",
     "language": "en",
     "debugLoggingEnabled": true
   },

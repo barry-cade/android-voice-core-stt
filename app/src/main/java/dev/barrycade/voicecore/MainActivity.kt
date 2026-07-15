@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val BLANK_AUDIO_MARKER = "[BLANK_AUDIO]"
+        private const val CONFIG_MANUAL_MANUAL = "stt_config_manual_manual.json"
+        private const val CONFIG_MANUAL_AUTO = "stt_config_manual_auto.json"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,9 +61,9 @@ class MainActivity : ComponentActivity() {
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
-        // Register the JSON message listener before init.
+        // Register the JSON message listener before loadModel.
         // The listener is buffered by the companion and wired once the
-        // singleton is created inside init().
+        // singleton is created inside loadModel().
         SpeechToText.setOnMessageListener { json ->
             postToUi {
                 try {
@@ -73,12 +75,23 @@ class MainActivity : ComponentActivity() {
                             val code = obj.optString("code", "")
                             val timing = obj.optJSONObject("timing")
                             val timingInfo = if (timing != null) {
-                                val captureMs = timing.optLong("captureMs", 0)
+                                val vadActiveMs = timing.optLong("vadActiveMs", 0)
+                                val utteranceMs = timing.optLong("utteranceMs", 0)
                                 val inferenceMs = timing.optLong("inferenceMs", 0)
-                                val totalMs = timing.optLong("totalMs", 0)
-                                "Timing: capture=${captureMs}ms, " +
-                                "inference=${inferenceMs}ms, " +
-                                "total=${totalMs}ms"
+                                buildString {
+                                    appendLine("Timing (ms):")
+                                    if (vadActiveMs > 0 || utteranceMs > 0) {
+                                        appendLine("  vad    = $vadActiveMs")
+                                        appendLine("  speech = $utteranceMs")
+                                    }
+                                    appendLine("  infer  = $inferenceMs")
+                                    if (utteranceMs > 0 && text.trim().length > 0) {
+                                        val speechSecs = utteranceMs / 1000.0
+                                        val textLen = text.trim().length
+                                        val ratio = "%.1f".format(textLen / speechSecs)
+                                        appendLine("  chars/s= $ratio ($textLen chars in ${"%.1f".format(speechSecs)}s)")
+                                    }
+                                }
                             } else ""
                             txtOutput.text = "[$code] $text"
                             txtDiagnostics.text = timingInfo
@@ -105,6 +118,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // ── Preload model at startup ──────────────────────────────────────────
+        preloadModelAsync()
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -147,57 +163,82 @@ class MainActivity : ComponentActivity() {
     private fun displayConfigForStopType(stopType: String) {
         activeStopType = stopType
 
-        val modelPath = getModelPath()
+        val assetName = configAssetForStopType(stopType)
+        val configJson = try {
+            assets.open(assetName).bufferedReader().use { it.readText() }
+        } catch (_: Exception) {
+            "Error loading $assetName"
+        }
 
         txtConfigDisplay.visibility = View.VISIBLE
         txtConfigDisplay.text = buildString {
             appendLine("=== Active Config ===")
-            appendLine("model:     $modelPath")
-            appendLine("language:  en")
-            appendLine("drainMode: DRAIN_FROM_HEAD")
-            appendLine("start:     MANUAL")
-            appendLine("stop:      $stopType")
-            appendLine("--- VAD ---")
-            appendLine("energyThreshold: 0.03")
-            appendLine("preRollMs:       0")
-            appendLine("stableChunkSizeMs: 500")
-            if (stopType == "AUTO_SILENCE") {
-                appendLine("--- Auto-silence ---")
-                appendLine("silenceMs:     1200")
-                appendLine("maxDurationMs: 30000")
-            }
+            appendLine("Config: $assetName")
+            appendLine("Model:  ${getModelPath()}")
+            appendLine("")
+            append(configJson)
         }
     }
 
-    private fun buildConfigJson(
-        modelPath: String,
-        language: String,
-        stopType: String
-    ): String {
-        val sb = StringBuilder()
-        sb.append("{\"modelPath\":\"")
-        sb.append(modelPath)
-        sb.append("\",\"language\":\"")
-        sb.append(language)
-        sb.append("\",\"debugLoggingEnabled\":true")
-        sb.append(",\"energyThreshold\":0.03")
-        sb.append(",\"preRollMs\":0")
-        sb.append(",\"stableChunkSizeMs\":500")
-        sb.append(",\"drainMode\":\"DRAIN_FROM_HEAD\"")
-        sb.append(",\"startType\":\"MANUAL\"")
-        sb.append(",\"stopType\":\"")
-        sb.append(stopType)
-        sb.append('"')
-        sb.append(",\"warmupEnabled\":true")
-        sb.append(",\"warmupDurationMs\":3000")
+    private fun configAssetForStopType(stopType: String): String {
+        return when (stopType) {
+            "AUTO_SILENCE" -> CONFIG_MANUAL_AUTO
+            else -> CONFIG_MANUAL_MANUAL
+        }
+    }
 
-        if (stopType == "AUTO_SILENCE") {
-            sb.append(",\"silenceMs\":1200")
-            sb.append(",\"maxDurationMs\":30000")
+    /**
+     * Preload the STT model in the background at app startup.
+     * Ensures the model file is copied from assets and the
+     * singleton is initialised before the user presses Start.
+     */
+    private fun preloadModelAsync() {
+        Thread({
+            try {
+                val configJson = loadConfigForStopType(selectedStopType)
+                val resultJson = SpeechToText.loadModel(this, configJson)
+                postToUi {
+                    if (resultJson.contains("\"type\":\"error\"")) {
+                        txtOutput.text = "Model preload error"
+                    } else {
+                        txtOutput.text = "Model loaded. Tap Start to record."
+                    }
+                }
+            } catch (t: Throwable) {
+                postToUi {
+                    txtOutput.text = "Model preload failed: ${t.message}"
+                }
+            }
+        }, "ModelPreloadThread").start()
+    }
+
+    private fun loadConfigForStopType(stopType: String): String {
+        val assetName = configAssetForStopType(stopType)
+        val template = try {
+            assets.open(assetName).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Failed to load config asset: $assetName", e)
         }
 
-        sb.append('}')
+        val modelPath = getModelPath()
+        // Inject modelPath into the JSON — the asset file doesn't carry it
+        // since it's a runtime/environment concern, not a behavioural config knob.
+        val sb = StringBuilder()
+        sb.append("{\"modelPath\":\"")
+        sb.append(escapeJsonString(modelPath))
+        sb.append("\",")
+        // Strip the opening { from the template and append the rest
+        sb.append(template.trimStart().removePrefix("{").trimStart())
         return sb.toString()
+    }
+
+    private fun escapeJsonString(value: String): String {
+        return value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
     }
 
     private fun hasRecordAudioPermission(): Boolean {
@@ -208,22 +249,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRecording() {
-        val modelPath = getModelPath()
-        val configJson = buildConfigJson(modelPath, "en", selectedStopType)
-
         try {
             AppLogger.log(AppLogCode.OBTAINING_STT_INSTANCE)
 
             // The message listener was already registered in onCreate().
-            // init() creates the singleton if needed, wires the buffer listener,
-            // and returns the init result.
-            val initResultJson = SpeechToText.init(this, configJson)
-            val initObj = JSONObject(initResultJson)
-            if (initObj.optString("type") == "error") {
-                val errorCode = initObj.optString("code", "")
-                val message = initObj.optString("message", "")
+            // startSession() starts the capture — the singleton and model
+            // were already loaded at app startup via loadModel().
+            val sessionResultJson = SpeechToText.startSession()
+            val sessionObj = JSONObject(sessionResultJson)
+            if (sessionObj.optString("type") == "error") {
+                val errorCode = sessionObj.optString("code", "")
+                val message = sessionObj.optString("message", "")
                 AppLogger.log(AppLogCode.INIT_FAILED, "$errorCode: $message")
-                postToUi { txtOutput.text = "Init error: $message" }
+                postToUi { txtOutput.text = "Session error: $message" }
                 return
             }
 

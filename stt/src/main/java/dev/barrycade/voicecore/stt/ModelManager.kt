@@ -230,13 +230,14 @@ internal class ModelManager(
      */
     fun submitInference(
         pcm: ShortArray,
-        onResult: (String) -> Unit,
+        onResult: (inferenceStartMs: Long, text: String) -> Unit,
         onComplete: () -> Unit = {}
     ): Boolean {
         val runnable = Runnable {
             try {
+                val inferenceStartMs = System.currentTimeMillis()
                 val text = whisperModel.transcribe(pcm).trim()
-                onResult(text)
+                onResult(inferenceStartMs, text)
             } catch (t: Throwable) {
                 SttLogger.whisperE("inference failed: ${t.message}")
             } finally {

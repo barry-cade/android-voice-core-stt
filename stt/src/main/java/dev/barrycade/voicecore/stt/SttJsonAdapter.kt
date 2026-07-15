@@ -138,7 +138,8 @@ internal object SttJsonAdapter {
      *   "text": "transcribed text",
      *   "code": "SUCCESS",
      *   "timing": {
-     *     "captureMs": 3200,
+     *     "vadActiveMs": 1200,
+     *     "utteranceMs": 3200,
      *     "inferenceMs": 450,
      *     "totalMs": 5200
      *   }
@@ -159,7 +160,11 @@ internal object SttJsonAdapter {
 
         if (timing != null) {
             sb.append(",\"timing\":{")
-            sb.append("\"captureMs\":").append(timing.utteranceDurationMs).append(',')
+            sb.append("\"vadActiveMs\":").append(timing.vadActiveMs).append(',')
+            sb.append("\"utteranceMs\":").append(timing.utteranceDurationMs).append(',')
+            if (timing.silencePaddingMs > 0) {
+                sb.append("\"silencePaddingMs\":").append(timing.silencePaddingMs).append(',')
+            }
             sb.append("\"inferenceMs\":").append(timing.inferenceMs).append(',')
             sb.append("\"totalMs\":").append(timing.totalPipelineMs)
             sb.append('}')

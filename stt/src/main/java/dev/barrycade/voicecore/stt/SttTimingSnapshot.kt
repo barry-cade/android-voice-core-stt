@@ -6,6 +6,7 @@ package dev.barrycade.voicecore.stt
  *
  * @property vadActiveMs Total time VAD reported SPEECH (ms).
  * @property utteranceDurationMs Total duration of the utterance from first speech frame (ms).
+ * @property captureMs Wall-clock duration of PCM capture (ms).
  * @property silencePaddingMs Silence padding applied after speech end to trigger utterance end (ms).
  * @property preRollMs Pre-roll duration configured for the pipeline (ms).
  * @property inferenceMs Whisper inference duration (ms).
@@ -19,6 +20,7 @@ package dev.barrycade.voicecore.stt
 internal data class SttTimingSnapshot(
     val vadActiveMs: Long,
     val utteranceDurationMs: Long,
+    val captureMs: Long = 0L,
     val silencePaddingMs: Long,
     val preRollMs: Long,
     val inferenceMs: Long,
@@ -29,3 +31,4 @@ internal data class SttTimingSnapshot(
     val peakRms: Float? = null,
     val noiseFloorRms: Float? = null
 )
+

@@ -9,17 +9,21 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Lifecycle
  *
- * 1. Call [init] with a JSON config string to initialise and start a session.
- * 2. Call [transcribe] to stop the current utterance and transcribe it.
- * 3. Results and errors arrive via the listener registered with [setOnMessageListener].
+ * 1. Call [loadModel] with a JSON config string to load the model and configure the pipeline.
+ *    Safe to call at app startup — model loading and warmup happen without starting capture.
+ * 2. Call [startSession] to begin audio capture and start a transcription session.
+ *    Returns immediately since the model is already loaded.
+ * 3. Call [transcribe] to stop the current utterance and transcribe it.
+ * 4. Results and errors arrive via the listener registered with [setOnMessageListener].
+ *
+ * For backward compatibility, [init] performs both [loadModel] and [startSession]
+ * in a single call. Prefer the two-phase API for responsive UI startup.
  *
  * ## Threading and lock model
  *
- * ### Thread ownership
- *
  * | Thread | Owns | Notes |
  * |--------|------|-------|
- * | Caller thread | Public lifecycle methods ([init], [transcribe], etc.) | Serialized via [stateLock] |
+ * | Caller thread | Public lifecycle methods ([loadModel], [startSession], [init], [transcribe]) | Serialized via [stateLock] |
  * | Audio capture (T1) | [AudioRecord] reads, PCM frame enqueue | Guarded by [AudioCapture.stateLock] for start/stop |
  * | Capture drain (T2) | Warm-up PCM buffering into session buffer | Guarded by [CaptureManager.sessionBufferLock] |
  * | Processor (T3) | VAD, utterance accumulation, PCM polling | Started/stopped via [ProcessorController] |
@@ -45,7 +49,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Callers must post to their own [android.os.Handler] or
  * [kotlinx.coroutines.Dispatchers.Main] if main-thread delivery is required.
  *
- * All lifecycle methods ([init], [transcribe]) are serialized internally via [stateLock].
+ * All lifecycle methods ([loadModel], [startSession], [init], [transcribe]) are
+ * serialized internally via [stateLock].
  *
  * Callers MUST NOT call lifecycle methods from within callbacks — doing so
  * will produce undefined behavior (potential deadlock or re-entrancy).
@@ -151,16 +156,20 @@ class SpeechToText internal constructor(
     // ------- Public JSON API ------------------------------------------
 
     /**
-     * Initialise STT from a JSON config string and start a session.
+     * Load the STT model and configure the pipeline without starting capture.
      *
      * Parses the JSON config, loads the model, runs warm-up (if configured),
-     * builds internal scaffolding, and starts the capture session.
+     * and builds internal scaffolding. Does NOT start audio capture or begin
+     * a session — call [startSession] to do that.
+     *
+     * Safe to call at app startup. Idempotent — subsequent calls return
+     * immediately once the model is loaded.
      *
      * @param configJson A JSON string conforming to the input config schema.
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
      * @return A JSON result string on success, or a JSON error string on failure.
      */
-    fun init(configJson: String): String {
+    fun loadModel(configJson: String): String {
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
         } catch (e: IllegalArgumentException) {
@@ -170,7 +179,7 @@ class SpeechToText internal constructor(
         synchronized(stateLock) {
             // ── Idempotency guard ─────────────────────────────────────────────
             if (sessionConfig != null || lifecycleController.currentState is SttLifecycleState.READY) {
-                SttLogger.lifecycle("init: already initialised — returning SUCCESS")
+                SttLogger.lifecycle("loadModel: already initialised — returning SUCCESS")
                 return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
             }
 
@@ -225,19 +234,52 @@ class SpeechToText internal constructor(
                 vad = procController.vad
             }
 
-            // ── Step 6: Mark initialised ──────────────────────────────────────
+            // ── Step 6: Mark ready ────────────────────────────────────────────
             lifecycleController.onReady()
+            SttLogger.lifecycle("loadModel: model loaded, pipeline configured — call startSession() to begin capture")
 
-            // ── Step 7: Start session ─────────────────────────────────────────
+            return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+        }
+    }
+
+    /**
+     * Start a capture session.
+     *
+     * Begins audio capture, starts the processor, and transitions to
+     * the CAPTURING pipeline stage. Must be called after [loadModel]
+     * has completed successfully.
+     *
+     * Idempotent — returns immediately if a session is already active.
+     *
+     * @return A JSON result string on success, or a JSON error string
+     *         on failure (e.g. model not loaded).
+     */
+    fun startSession(): String {
+        synchronized(stateLock) {
+            // ── Guard: must have loaded a model ───────────────────────────────
+            val cfg = sessionConfig
+            if (cfg == null) {
+                return SttJsonAdapter.buildErrorJson(
+                    "SESSION_FAILED",
+                    "loadModel() must be called before startSession()"
+                )
+            }
+
+            val runtimeCfg = cfg.runtimeConfig
+
             if (!modelManager.isReady) {
-                return SttJsonAdapter.buildErrorJson("INIT_FAILED", "Model not ready after init")
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Model not ready")
             }
             if (isInferencing.get()) {
-                return SttJsonAdapter.buildErrorJson("INIT_FAILED", "Inference already active")
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Inference already active")
             }
             if (!lifecycleController.canStartSession()) {
+                // If already in a session (RECORDING or CAPTURING), return success
+                if (lifecycleController.isRecording() || pipelineState.currentStage == SttPipelineStage.CAPTURING) {
+                    return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+                }
                 return SttJsonAdapter.buildErrorJson(
-                    "INIT_FAILED",
+                    "SESSION_FAILED",
                     "Cannot start session from state ${lifecycleController.currentState}"
                 )
             }
@@ -248,21 +290,42 @@ class SpeechToText internal constructor(
             }
 
             currentSessionEpoch = sessionEpoch.incrementAndGet()
-            if (!transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "init")) {
-                return SttJsonAdapter.buildErrorJson("INIT_FAILED", "Pipeline stage transition failed")
+            if (!transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "startSession")) {
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Pipeline stage transition failed")
             }
             sessionController.beginSession()
             captureController.startCapture(modeController.isManualMode())
 
             if (modeController.isManualMode()) {
                 captureController.activatePcmCapture()
+                sessionController.beginUtteranceTiming()
                 modeController.minimalProcessorController?.start()
             } else {
                 startProcessor()
             }
 
+            SttLogger.lifecycle("startSession: capture started")
             return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
         }
+    }
+
+    /**
+     * Initialise STT and start a session in a single call.
+     *
+     * Convenience method equivalent to calling [loadModel] then [startSession].
+     * For responsive UI startup, prefer the two-phase API:
+     * call [loadModel] at app startup and [startSession] on the Start button.
+     *
+     * @param configJson A JSON string conforming to the input config schema.
+     *                   See [SttJsonAdapter.parseConfig] for the expected shape.
+     * @return A JSON result string on success, or a JSON error string on failure.
+     */
+    fun init(configJson: String): String {
+        val loadResult = loadModel(configJson)
+        if (hasJsonError(loadResult)) {
+            return loadResult
+        }
+        return startSession()
     }
 
     /**
@@ -337,11 +400,13 @@ class SpeechToText internal constructor(
                 return
             }
 
+            val vadMs = processingController?.vadActiveMs ?: 0L
+            val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
             val submitted = submitInferenceAndDispatch(
                 pcm = finalPcm,
                 code = SttReturnCode.SUCCESS,
-                vadActiveMs = 0L,
-                utteranceMs = 0L,
+                vadActiveMs = vadMs,
+                utteranceMs = utterMs,
                 captureMs = timingMs,
                 sessionEpochAtSubmission = epoch,
                 completeStopPath = true
@@ -495,7 +560,7 @@ class SpeechToText internal constructor(
             captureMs = captureMs,
             preRollMs = runtimeCfg.preRollMs.toLong(),
             autoSilenceMs = runtimeCfg.autoSilenceMs.toLong(),
-            pipelineStartMs = sessionController.utteranceElapsedMs(),
+            pipelineStartMs = sessionController.utteranceStartMs(),
             sessionEpochAtSubmission = sessionEpochAtSubmission
         )
 
@@ -616,6 +681,13 @@ class SpeechToText internal constructor(
         }
     }
 
+    /**
+     * Returns true if the given JSON result string represents an error.
+     */
+    private fun hasJsonError(json: String): Boolean {
+        return json.contains("\"type\":\"error\"")
+    }
+
     companion object {
         @Volatile
         var instance: SpeechToText? = null
@@ -625,10 +697,64 @@ class SpeechToText internal constructor(
         private var pendingListener: ((String) -> Unit)? = null
 
         /**
-         * Initialise or retrieve the STT singleton and start a session.
+         * Load the STT model and configure the pipeline without starting capture.
+         *
+         * Creates the singleton on first call; subsequent calls delegate to the
+         * existing instance's [loadModel].
+         *
+         * Safe to call at app startup. The model is loaded and warmup runs on the
+         * Whisper executor thread. Call [startSession] when you want to begin
+         * audio capture.
+         *
+         * @param context Application or Activity context (applicationContext is used internally).
+         * @param configJson A JSON string conforming to the input config schema.
+         * @return A JSON result string on success, or a JSON error string on failure.
+         */
+        fun loadModel(context: Context, configJson: String): String {
+            val appCtx = context.applicationContext
+
+            val stt = instance ?: synchronized(this) {
+                instance ?: SpeechToText(
+                    appCtx,
+                    WhisperBridge,
+                    CaptureManager()
+                ).also { newInstance ->
+                    instance = newInstance
+                    pendingListener?.let { newInstance.setOnMessageListener(it) }
+                }
+            }
+
+            return stt.loadModel(configJson)
+        }
+
+        /**
+         * Start a capture session.
+         *
+         * Delegates to the singleton instance's [startSession].
+         * [loadModel] must have been called first.
+         *
+         * @return A JSON result string on success, or a JSON error string on failure.
+         */
+        fun startSession(): String {
+            val stt = instance
+            if (stt == null) {
+                return SttJsonAdapter.buildErrorJson(
+                    "SESSION_FAILED",
+                    "loadModel() must be called before startSession()"
+                )
+            }
+            return stt.startSession()
+        }
+
+        /**
+         * Initialise STT and start a session in a single call.
          *
          * The singleton is created on the first call; subsequent calls
          * delegate to the existing instance's [init].
+         *
+         * This is a convenience method. For responsive UI startup, prefer
+         * calling [loadModel] at app startup and [startSession] on the
+         * Start button.
          *
          * @param context Application or Activity context (applicationContext is used internally).
          * @param configJson A JSON string conforming to the input config schema.
@@ -644,7 +770,6 @@ class SpeechToText internal constructor(
                     CaptureManager()
                 ).also { newInstance ->
                     instance = newInstance
-                    // Wire any listener that was registered before init
                     pendingListener?.let { newInstance.setOnMessageListener(it) }
                 }
             }
@@ -655,7 +780,7 @@ class SpeechToText internal constructor(
         /**
          * Transcribe the current utterance via the singleton instance.
          *
-         * If [init] has not been called, a warning is logged and the call is ignored.
+         * If [loadModel] has not been called, a warning is logged and the call is ignored.
          */
         fun transcribe() {
             val stt = instance
@@ -669,7 +794,7 @@ class SpeechToText internal constructor(
         /**
          * Register a JSON message listener.
          *
-         * Safe to call before [init]; the listener is buffered and wired
+         * Safe to call before [loadModel]; the listener is buffered and wired
          * to the singleton once it is created.
          */
         fun setOnMessageListener(listener: (String) -> Unit) {

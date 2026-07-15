@@ -151,14 +151,27 @@ internal class SttSessionController {
     /**
      * Get elapsed ms since utterance start, used for timing snapshots.
      *
-     * @return Elapsed ms since utterance start, or current time if never started.
+     * @return Elapsed ms since utterance start, or 0 if never started.
      */
     fun utteranceElapsedMs(): Long {
         synchronized(lock) {
             if (timingUtteranceStartMs > 0) {
-                return timingUtteranceStartMs
+                return System.currentTimeMillis() - timingUtteranceStartMs
             }
-            return System.currentTimeMillis()
+            return 0L
+        }
+    }
+
+    /**
+     * Return the utterance start wall clock timestamp (ms).
+     * Used as a baseline for computing inference and total pipeline duration
+     * inside [SttInferenceController].
+     *
+     * @return Wall clock timestamp (ms) of utterance start, or 0 if never started.
+     */
+    fun utteranceStartMs(): Long {
+        return synchronized(lock) {
+            timingUtteranceStartMs
         }
     }
 

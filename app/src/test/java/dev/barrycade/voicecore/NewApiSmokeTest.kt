@@ -79,7 +79,7 @@ class NewApiSmokeTest {
 
     @Test
     fun resultJson_parsesCorrectly() {
-        val json = """{"type":"result","text":"hello world","code":"SUCCESS","timing":{"captureMs":3200,"inferenceMs":450,"totalMs":5200}}"""
+        val json = """{"type":"result","text":"hello world","code":"SUCCESS","timing":{"vadActiveMs":1200,"utteranceMs":3200,"inferenceMs":450,"totalMs":5200}}"""
         val obj = JSONObject(json)
 
         assertEquals("result", obj.getString("type"))
@@ -87,7 +87,8 @@ class NewApiSmokeTest {
         assertEquals("SUCCESS", obj.getString("code"))
 
         val timing = obj.getJSONObject("timing")
-        assertEquals(3200, timing.getLong("captureMs"))
+        assertEquals(1200, timing.getLong("vadActiveMs"))
+        assertEquals(3200, timing.getLong("utteranceMs"))
         assertEquals(450, timing.getLong("inferenceMs"))
         assertEquals(5200, timing.getLong("totalMs"))
     }

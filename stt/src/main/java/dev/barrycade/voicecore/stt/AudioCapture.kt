@@ -5,7 +5,6 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Process
-import android.util.Log
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -131,14 +130,14 @@ internal class AudioCapture(
                 val running = isRunning
                 if (running) {
                     frameQueue.offer(floatFrame)
-                    Log.d("STT_PCM", "enqueue frame, size=${floatFrame.size}")
+                    SttLogger.pcmD("enqueue frame, size=${floatFrame.size}")
                 }
             } else if (readCount < 0) {
                 handleReadError(readCount)
                 if (readCount == AudioRecord.ERROR_DEAD_OBJECT) break
             }
         }
-        Log.d("AudioCapture", "Worker thread exiting")
+        SttLogger.pcmD("Worker thread exiting")
     }
 
     private fun handleReadError(errorCode: Int) {
@@ -148,7 +147,7 @@ internal class AudioCapture(
             AudioRecord.ERROR_DEAD_OBJECT -> "ERROR_DEAD_OBJECT"
             else -> "Unknown error ($errorCode)"
         }
-        Log.e("AudioCapture", "Read error: $message")
+        SttLogger.pcmE("Read error: $message")
     }
 
     fun stop() {
@@ -165,7 +164,7 @@ internal class AudioCapture(
                     ar.stop()
                 }
             } catch (e: Exception) {
-                Log.e("AudioCapture", "Error stopping AudioRecord", e)
+                SttLogger.pcmE("Error stopping AudioRecord", e)
             }
 
             threadToJoin = workerThread
@@ -179,7 +178,7 @@ internal class AudioCapture(
                 threadToJoin.join(500)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                Log.w("AudioCapture", "Interrupted during join")
+                SttLogger.pcmW("Interrupted during join")
             }
         }
 
@@ -188,7 +187,7 @@ internal class AudioCapture(
             audioRecord?.release()
             audioRecord = null
             frameQueue.clear()
-            Log.d("AudioCapture", "Capture stopped")
+            SttLogger.pcmD("Capture stopped")
         }
     }
 }
