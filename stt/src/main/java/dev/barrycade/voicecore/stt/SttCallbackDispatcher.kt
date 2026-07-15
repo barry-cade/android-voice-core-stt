@@ -140,9 +140,10 @@ internal class SttCallbackDispatcher {
     /**
      * Dispatch an error to all registered error listeners.
      *
-     * @param t The throwable representing the error.
+     * @param error The structured [SttError] representing the failure.
+     *              Provides category, code, message, and optional context.
      */
-    fun dispatchError(t: Throwable) {
+    fun dispatchError(error: SttError) {
         val errorSnapshot = synchronized(listenerLock) {
             onError
         }
@@ -152,17 +153,10 @@ internal class SttCallbackDispatcher {
         val messageSnapshot = synchronized(listenerLock) {
             onMessageListener
         }
-        errorSnapshot?.invoke(t)
-        sttErrorSnapshot?.onSttError(
-            SttError(
-                SttErrorCategory.UNKNOWN,
-                SttErrorCode.INTERNAL_EXCEPTION,
-                t.message ?: "Unknown error",
-                cause = t
-            )
-        )
+        errorSnapshot?.invoke(error.cause ?: RuntimeException(error.message))
+        sttErrorSnapshot?.onSttError(error)
         messageSnapshot?.invoke(
-            SttJsonAdapter.buildErrorJson("INTERNAL_EXCEPTION", t.message ?: "Unknown error")
+            SttJsonAdapter.buildErrorJson(error.category.name, error.code.name, error.message)
         )
     }
 

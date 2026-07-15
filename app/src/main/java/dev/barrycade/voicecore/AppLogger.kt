@@ -67,7 +67,7 @@ internal object AppLogger {
  * Each entry owns three things:
  * - [logCode] — the `CODE=` value in the log line (no magic strings).
  * - [template] — a `String.format` template for the human-readable message.
- * - [category] — the subsystem bracket, e.g. FLOW, CONFIG, ERROR.
+ * - [category] — the subsystem bracket, e.g. FLOW, CONFIG_ERROR, PIPELINE_ERROR.
  *
  * Entries with no runtime data use a plain string template.
  * Entries with runtime values use `%s` placeholders:
@@ -88,32 +88,42 @@ internal enum class AppLogCode(
     /** Stop button pressed. */
     STOP_BUTTON_PRESSED("STOP_BUTTON_PRESSED", "Stop button pressed", "FLOW"),
 
-    /** Obtaining singleton STT instance. */
-    OBTAINING_STT_INSTANCE("OBTAINING_STT_INSTANCE", "Obtaining singleton STT instance", "FLOW"),
-
     /** transcribe has been invoked. */
     STOP_USING_STOP_AND_TRANSCRIBE("STOP_USING_STOP_AND_TRANSCRIBE", "STOP pressed -> using transcribe()", "FLOW"),
 
-    // ── Config events ───────────────────────────────────────────────
+    /** Blank audio threshold breached (3+ consecutive blanks). */
+    BLANK_AUDIO_THRESHOLD("BLANK_AUDIO_THRESHOLD", "Blank audio threshold breached (%s consecutive blanks)", "FLOW"),
+
+    // ── Config errors ──────────────────────────────────────────────
 
     /** Config validation failed. */
-    CONFIG_INVALID("CONFIG_INVALID", "Invalid STT configuration: %s", "CONFIG"),
+    CONFIG_INVALID("CONFIG_INVALID", "Invalid STT configuration: %s", "CONFIG_ERROR"),
 
-    // ── Config error path ───────────────────────────────────────────
+    /** Model preload at startup failed. */
+    PRELOAD_FAILED("PRELOAD_FAILED", "Model preload failed: %s", "CONFIG_ERROR"),
+
+    // ── Pipeline errors ────────────────────────────────────────────
 
     /** init returned non-SUCCESS. */
-    INIT_FAILED("INIT_FAILED", "init returned %s", "ERROR"),
+    INIT_FAILED("INIT_FAILED", "init returned %s", "PIPELINE_ERROR"),
 
     /** transcribe threw an exception. */
-    STOP_FAILED("STOP_FAILED", "transcribe threw: %s", "ERROR"),
+    STOP_FAILED("STOP_FAILED", "transcribe threw: %s", "PIPELINE_ERROR"),
+
+    /** startSession() returned an error JSON. */
+    SESSION_ERROR("SESSION_ERROR", "Session error: %s", "PIPELINE_ERROR"),
+
+    /** Async error received via JSON listener during capture. */
+    ASYNC_ERROR("ASYNC_ERROR", "Async error: %s", "PIPELINE_ERROR"),
 
     // ── Generic internal error ──────────────────────────────────────
 
     /** Unexpected internal exception. */
-    INTERNAL_ERROR("INTERNAL_ERROR", "Error: %s", "ERROR"),
+    INTERNAL_ERROR("INTERNAL_ERROR", "Error: %s", "INTERNAL_ERROR"),
 
     // ── Audio test service ─────────────────────────────────────────
 
     /** Audio test service started. */
     AUDIO_TEST_SERVICE_STARTED("AUDIO_TEST_SERVICE_STARTED", "AudioTestService running — direct AudioCapture access removed. Use SpeechToText.init() instead.", "AUDIO");
 }
+

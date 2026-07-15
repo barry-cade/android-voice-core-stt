@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtOutput: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
+    private lateinit var txtErrorBanner: TextView
     private lateinit var radioGroupStrategy: RadioGroup
 
     private var selectedStopType: String = "MANUAL"
@@ -59,6 +60,7 @@ class MainActivity : ComponentActivity() {
         txtOutput = findViewById(R.id.txtOutput)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
+        txtErrorBanner = findViewById(R.id.txtErrorBanner)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
         // Register the JSON message listener before loadModel.
@@ -102,15 +104,24 @@ class MainActivity : ComponentActivity() {
                                 if (blankAudioCount >= blankAudioThreshold) {
                                     txtOutput.text =
                                         "No speech detected. Tap Stop to end the session."
+                                    AppLogger.log(AppLogCode.BLANK_AUDIO_THRESHOLD, blankAudioCount)
                                 }
                             } else {
                                 blankAudioCount = 0
                             }
                         }
                         "error" -> {
-                            val errorCode = obj.optString("code", "")
-                            val message = obj.optString("message", "")
-                            txtOutput.text = "Error [$errorCode]: $message"
+                            // Route through the error router: logs, shows banner, updates output.
+                            val action = AppErrorRouter.route(obj)
+                            if (action.logCode != null) {
+                                AppLogger.log(action.logCode, *action.logArgs)
+                            }
+                            txtErrorBanner.visibility = if (action.showBanner) View.VISIBLE else View.GONE
+                            action.bannerText?.let { txtErrorBanner.text = it }
+                            action.outputText?.let { txtOutput.text = it }
+                            // Hide stale timing diagnostics on error.
+                            txtDiagnostics.visibility = View.GONE
+                            txtDiagnostics.text = ""
                         }
                     }
                 } catch (_: Exception) {
@@ -199,12 +210,14 @@ class MainActivity : ComponentActivity() {
                 val resultJson = SpeechToText.loadModel(this, configJson)
                 postToUi {
                     if (resultJson.contains("\"type\":\"error\"")) {
+                        AppLogger.log(AppLogCode.PRELOAD_FAILED, "STT returned error JSON")
                         txtOutput.text = "Model preload error"
                     } else {
                         txtOutput.text = "Model loaded. Tap Start to record."
                     }
                 }
             } catch (t: Throwable) {
+                AppLogger.log(AppLogCode.PRELOAD_FAILED, t.message ?: "Unknown error")
                 postToUi {
                     txtOutput.text = "Model preload failed: ${t.message}"
                 }
@@ -258,7 +271,7 @@ class MainActivity : ComponentActivity() {
             if (sessionObj.optString("type") == "error") {
                 val errorCode = sessionObj.optString("code", "")
                 val message = sessionObj.optString("message", "")
-                AppLogger.log(AppLogCode.INIT_FAILED, "$errorCode: $message")
+                AppLogger.log(AppLogCode.SESSION_ERROR, "$errorCode: $message")
                 postToUi { txtOutput.text = "Session error: $message" }
                 return
             }

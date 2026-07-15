@@ -25,13 +25,21 @@ class SttCallbackDispatcherTest {
 
         dispatcher.dispatchResult("before", SttReturnCode.SUCCESS, null)
         dispatcher.dispatchTiming(1, 2, 3, 4)
-        dispatcher.dispatchError(RuntimeException("before"))
+        dispatcher.dispatchError(SttError(
+            category = SttErrorCategory.UNKNOWN,
+            code = SttErrorCode.INTERNAL_EXCEPTION,
+            message = "before"
+        ))
 
         dispatcher.clearListeners()
 
         dispatcher.dispatchResult("after", SttReturnCode.SUCCESS, null)
         dispatcher.dispatchTiming(1, 2, 3, 4)
-        dispatcher.dispatchError(RuntimeException("after"))
+        dispatcher.dispatchError(SttError(
+            category = SttErrorCategory.UNKNOWN,
+            code = SttErrorCode.INTERNAL_EXCEPTION,
+            message = "after"
+        ))
 
         assertTrue("result listener should be called once before clear", resultCalls == 1)
         assertTrue("timing listener should be called once before clear", timingCalls == 1)
@@ -82,7 +90,11 @@ class SttCallbackDispatcherTest {
             try {
                 startLatch.await()
                 repeat(1000) {
-                    dispatcher.dispatchError(RuntimeException("boom"))
+                    dispatcher.dispatchError(SttError(
+                        category = SttErrorCategory.UNKNOWN,
+                        code = SttErrorCode.INTERNAL_EXCEPTION,
+                        message = "boom"
+                    ))
                 }
             } catch (t: Throwable) {
                 failure.compareAndSet(null, t)
