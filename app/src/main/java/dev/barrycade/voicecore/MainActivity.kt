@@ -174,25 +174,30 @@ class MainActivity : ComponentActivity() {
         language: String,
         stopType: String
     ): String {
-        val root = JSONObject()
-        root.put("modelPath", modelPath)
-        root.put("language", language)
-        root.put("debugLoggingEnabled", true)
-        root.put("energyThreshold", 0.03)
-        root.put("preRollMs", 0)
-        root.put("stableChunkSizeMs", 500)
-        root.put("drainMode", "DRAIN_FROM_HEAD")
-        root.put("startType", "MANUAL")
-        root.put("stopType", stopType)
-        root.put("warmupEnabled", true)
-        root.put("warmupDurationMs", 3000)
+        val sb = StringBuilder()
+        sb.append("{\"modelPath\":\"")
+        sb.append(modelPath)
+        sb.append("\",\"language\":\"")
+        sb.append(language)
+        sb.append("\",\"debugLoggingEnabled\":true")
+        sb.append(",\"energyThreshold\":0.03")
+        sb.append(",\"preRollMs\":0")
+        sb.append(",\"stableChunkSizeMs\":500")
+        sb.append(",\"drainMode\":\"DRAIN_FROM_HEAD\"")
+        sb.append(",\"startType\":\"MANUAL\"")
+        sb.append(",\"stopType\":\"")
+        sb.append(stopType)
+        sb.append('"')
+        sb.append(",\"warmupEnabled\":true")
+        sb.append(",\"warmupDurationMs\":3000")
 
         if (stopType == "AUTO_SILENCE") {
-            root.put("silenceMs", 1200)
-            root.put("maxDurationMs", 30000)
+            sb.append(",\"silenceMs\":1200")
+            sb.append(",\"maxDurationMs\":30000")
         }
 
-        return root.toString()
+        sb.append('}')
+        return sb.toString()
     }
 
     private fun hasRecordAudioPermission(): Boolean {
