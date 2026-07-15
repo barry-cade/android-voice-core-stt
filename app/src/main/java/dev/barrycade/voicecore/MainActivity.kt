@@ -250,8 +250,6 @@ class MainActivity : ComponentActivity() {
 
     private fun startRecording() {
         try {
-            AppLogger.log(AppLogCode.OBTAINING_STT_INSTANCE)
-
             // The message listener was already registered in onCreate().
             // startSession() starts the capture — the singleton and model
             // were already loaded at app startup via loadModel().
