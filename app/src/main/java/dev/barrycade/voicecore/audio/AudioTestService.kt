@@ -62,10 +62,6 @@ class AudioTestService : Service() {
         return START_STICKY
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-    }
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
