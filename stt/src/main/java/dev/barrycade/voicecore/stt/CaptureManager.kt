@@ -130,7 +130,7 @@ internal class CaptureManager(
     private var currentDrainMode: DrainMode = DrainMode.DRAIN_FROM_NEXT_FRAME
 
     init {
-        SttLogger.pcm("[CAPTURE] CaptureManager initialised — capture NOT started")
+        SttLogger.pcm("CaptureManager initialised — capture NOT started")
     }
 
     // ── Session lifecycle ─────────────────────────────────────────────────
@@ -177,7 +177,7 @@ internal class CaptureManager(
         // Start AudioCapture synchronously — capture begins immediately.
         // This must complete before the drain thread starts.
         if (shouldStartCapture) {
-            SttLogger.pcm("[CAPTURE] beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
+            SttLogger.pcm("beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
             try {
                 audioCapture.start()
             } catch (t: Throwable) {
@@ -186,7 +186,7 @@ internal class CaptureManager(
                 }
                 throw t
             }
-            SttLogger.pcm("[CAPTURE] beginPcmCapture() — AudioCapture started")
+            SttLogger.pcm("beginPcmCapture() — AudioCapture started")
         }
     }
 
@@ -221,7 +221,7 @@ internal class CaptureManager(
         synchronized(stateLock) {
             sttActive = true
         }
-        SttLogger.pcm("[CAPTURE] activatePcmCapture() — PCM capture marked active, drain thread NOT started")
+        SttLogger.pcm("activatePcmCapture() — PCM capture marked active, drain thread NOT started")
     }
 
     /**
@@ -262,7 +262,7 @@ internal class CaptureManager(
             drainThread = thread
         }
         thread.start()
-        SttLogger.pcm("[CAPTURE] startDrainThreadFromNextFrame() — drain thread started")
+        SttLogger.pcm("startDrainThreadFromNextFrame() — drain thread started")
     }
 
     /**
@@ -313,7 +313,7 @@ internal class CaptureManager(
             drainThread = thread
         }
         thread.start()
-        SttLogger.pcm("[CAPTURE] startDrainThreadFromHead() — drain thread started, existing queue drained")
+        SttLogger.pcm("startDrainThreadFromHead() — drain thread started, existing queue drained")
     }
 
     /**
@@ -364,7 +364,7 @@ internal class CaptureManager(
         synchronized(stateLock) {
             captureStarted = false
         }
-        SttLogger.pcm("[CAPTURE] finalize() — returned ${result.size} raw PCM samples, AudioCapture stopped")
+        SttLogger.pcm("finalize() — returned ${result.size} raw PCM samples, AudioCapture stopped")
         return result
     }
 
@@ -377,7 +377,7 @@ internal class CaptureManager(
     override fun restartCapture() {
         synchronized(stateLock) {
             if (captureStarted) {
-                SttLogger.pcm("[CAPTURE] restartCapture() — already running, skipping")
+                SttLogger.pcm("restartCapture() — already running, skipping")
                 return
             }
             captureStarted = true
@@ -391,7 +391,7 @@ internal class CaptureManager(
             }
             throw t
         }
-        SttLogger.pcm("[CAPTURE] restartCapture() — AudioCapture restarted")
+        SttLogger.pcm("restartCapture() — AudioCapture restarted")
     }
 
     /**
@@ -424,7 +424,7 @@ internal class CaptureManager(
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-            SttLogger.pcm("[CAPTURE] pollFrame() — drain thread stopped, processor taking over")
+            SttLogger.pcm("pollFrame() — drain thread stopped, processor taking over")
         }
 
         val frame = audioCapture.frameQueue.poll()
@@ -458,7 +458,7 @@ internal class CaptureManager(
         }
         clearSessionBuffer()
         audioCapture.frameQueue.clear()
-        SttLogger.pcm("[CAPTURE] reset() — session buffer and queue cleared, capture continues")
+        SttLogger.pcm("reset() — session buffer and queue cleared, capture continues")
     }
 
     /**
@@ -489,7 +489,7 @@ internal class CaptureManager(
         synchronized(stateLock) {
             captureStarted = false
         }
-        SttLogger.pcm("[CAPTURE] shutdown() — AudioCapture stopped")
+        SttLogger.pcm("shutdown() — AudioCapture stopped")
     }
 
     // ── AudioSource implementation ────────────────────────────────────────

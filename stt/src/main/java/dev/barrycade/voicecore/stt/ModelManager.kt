@@ -275,15 +275,15 @@ internal class ModelManager(
         try {
             val terminated = whisperExecutor.awaitTermination(5, TimeUnit.SECONDS)
             if (terminated) {
-                SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=TERMINATED")
+                SttLogger.pcm("shutdown: whisperExecutor status=TERMINATED")
             } else {
                 whisperExecutor.shutdownNow()
-                SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=TIMEOUT")
+                SttLogger.pcm("shutdown: whisperExecutor status=TIMEOUT")
             }
         } catch (e: InterruptedException) {
             whisperExecutor.shutdownNow()
             Thread.currentThread().interrupt()
-            SttLogger.pcm("[EXECUTOR] shutdown: whisperExecutor status=INTERRUPTED")
+            SttLogger.pcm("shutdown: whisperExecutor status=INTERRUPTED")
         }
     }
 

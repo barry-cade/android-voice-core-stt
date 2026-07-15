@@ -107,7 +107,7 @@ internal class FakeCaptureManager(
         if (!isStarted) {
             isStarted = true
         }
-        SttLogger.pcm("[CAPTURE] FakeCaptureManager.beginPcmCapture() — capture started")
+        SttLogger.pcm("FakeCaptureManager.beginPcmCapture() — capture started")
     }
 
     /**
@@ -145,7 +145,7 @@ internal class FakeCaptureManager(
      */
     override fun activatePcmCapture() {
         sttActive = true
-        SttLogger.pcm("[CAPTURE] FakeCaptureManager.activatePcmCapture() — PCM capture marked active")
+        SttLogger.pcm("FakeCaptureManager.activatePcmCapture() — PCM capture marked active")
     }
 
     /**

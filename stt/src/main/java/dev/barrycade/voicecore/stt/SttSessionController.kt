@@ -120,7 +120,7 @@ internal class SttSessionController {
         synchronized(lock) {
             timingPcmStartMs = System.currentTimeMillis()
         }
-        SttLogger.pcm("[TIMING] PCM capture start")
+        SttLogger.pcm("PCM capture start")
     }
 
     /**

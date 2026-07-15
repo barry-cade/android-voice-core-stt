@@ -8,8 +8,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
-
+import dev.barrycade.voicecore.AppLogger
+import dev.barrycade.voicecore.AppLogCode
 /**
  * Audio test service stub.
  *
@@ -57,7 +57,7 @@ class AudioTestService : Service() {
             startForeground(1, notification)
         }
 
-        Log.d("AudioTestService", "AudioTestService running — direct AudioCapture access removed. Use SpeechToText.init() instead.")
+        AppLogger.log(AppLogCode.AUDIO_TEST_SERVICE_STARTED)
 
         return START_STICKY
     }

@@ -345,7 +345,7 @@ class SpeechToText internal constructor(
             val runtimeCfg = cfg.runtimeConfig
             val elapsedMs = sessionController.endSession().toInt()
 
-            SttLogger.pcm("[STOP] entered -- isRunning=${isRunning.get()}, state=${lifecycleController.currentState}")
+            SttLogger.pcm("entered -- isRunning=${isRunning.get()}, state=${lifecycleController.currentState}")
 
             events.manualStopPressed.raise()
 
@@ -354,12 +354,12 @@ class SpeechToText internal constructor(
             }
 
             if (lifecycleController.currentState is SttLifecycleState.STOPPED) {
-                SttLogger.pcm("[STOP] ignoring -- state=STOPPED")
+                SttLogger.pcm("ignoring -- state=STOPPED")
                 return
             }
 
             if (lifecycleController.currentState is SttLifecycleState.FINALISING) {
-                SttLogger.pcm("[STOP] already FINALISING -- returning")
+                SttLogger.pcm("already FINALISING -- returning")
                 return
             }
 
@@ -375,7 +375,7 @@ class SpeechToText internal constructor(
             val finalPcm = captureController.finaliseAndStop()
 
             if (finalPcm.isEmpty()) {
-                SttLogger.pcm("[STOP] no PCM accumulated -- transitioning to STOPPED then READY")
+                SttLogger.pcm("no PCM accumulated -- transitioning to STOPPED then READY")
                 transitionPipelineToIdleLocked("transcribe empty pcm")
                 currentSessionEpoch = 0L
                 lifecycleController.onStop()

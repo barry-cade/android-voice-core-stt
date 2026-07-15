@@ -1,12 +1,10 @@
 package dev.barrycade.voicecore.stt
 
-import android.util.Log
-
 internal object WhisperBridge : WhisperModel {
     private const val FALLBACK_TRANSCRIPT = "When I went to the shop to buy some milk, I also bought a newspaper."
 
         init {
-        safeLogD("WhisperBridge", "Kotlin bridge init start t=${System.currentTimeMillis()}")
+        SttLogger.whisperD("Kotlin bridge init start t=${System.currentTimeMillis()}")
         try {
             System.loadLibrary("c++_shared")
             System.loadLibrary("omp")
@@ -16,9 +14,9 @@ internal object WhisperBridge : WhisperModel {
             System.loadLibrary("whisper")
             System.loadLibrary("whisper_bridge")
         } catch (t: Throwable) {
-            safeLogW("WhisperBridge", "Native Whisper libraries unavailable; using deterministic test fallback", t)
+            SttLogger.whisperE("Native Whisper libraries unavailable; using deterministic test fallback", t)
         }
-        safeLogD("WhisperBridge", "Kotlin bridge init end t=${System.currentTimeMillis()}")
+        SttLogger.whisperD("Kotlin bridge init end t=${System.currentTimeMillis()}")
     }
 
                 override external fun loadModel(modelPath: String)
@@ -38,19 +36,4 @@ internal object WhisperBridge : WhisperModel {
         }
     }
 
-    private fun safeLogD(tag: String, msg: String) {
-        try {
-            Log.d(tag, msg)
-        } catch (_: Throwable) {
-            // android.util.Log not available (unit test environment)
-        }
-    }
-
-    private fun safeLogW(tag: String, msg: String, t: Throwable) {
-        try {
-            Log.w(tag, msg, t)
-        } catch (_: Throwable) {
-            // android.util.Log not available (unit test environment)
-        }
-    }
 }

@@ -206,7 +206,7 @@ internal class ProcessorController(
             }
             drainedCount++
         }
-        SttLogger.pcm("[STOP] drained $drainedCount frames into accumulator")
+        SttLogger.pcm("drained $drainedCount frames into accumulator")
         return drainFinalized
     }
 

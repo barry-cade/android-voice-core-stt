@@ -5,10 +5,9 @@ import android.util.Log
 /**
  * App-module logger matching the STT subsystem logging format.
  *
- * All messages use the single tag "STT" with a mandatory module prefix [APP]
- * and a subsystem category bracket.
+ * All messages embed the module prefix [APP] with a subsystem category bracket.
  *
- * Format: STT  I  [APP] [CATEGORY] CODE: message
+ * Format: APP  I  [APP] [CATEGORY] CODE: message
  *
  * ## Usage
  *
@@ -35,20 +34,23 @@ internal object AppLogger {
      * The [code] provides the category, error code, and message template.
      * [args] are substituted into the template via [String.format].
      *
-     * Output: `STT  I  [APP] [CATEGORY] CODE: formatted message`
+     * Output without args: `APP  I  [APP] [CATEGORY] CODE`
+     * Output with args:   `APP  I  [APP] [CATEGORY] CODE: formatted message`
      */
     fun log(code: AppLogCode, vararg args: Any?) {
-        val message = if (args.isNotEmpty()) {
-            String.format(code.template, *args)
-        } else {
-            code.template
+        safeLog {
+            if (args.isNotEmpty()) {
+                val message = String.format(code.template, *args)
+                Log.i(TAG, "[APP] [${code.category}] ${code.logCode}: $message")
+            } else {
+                Log.i(TAG, "[APP] [${code.category}] ${code.logCode}")
+            }
         }
-        safeLog { Log.i(TAG, "[APP] [${code.category}] ${code.logCode}: $message") }
     }
 
     // ── Internal ─────────────────────────────────────────────────────────
 
-    private const val TAG = "STT"
+    private const val TAG = "APP"
 
     private inline fun safeLog(action: () -> Int) {
         try {
@@ -108,5 +110,10 @@ internal enum class AppLogCode(
     // ── Generic internal error ──────────────────────────────────────
 
     /** Unexpected internal exception. */
-    INTERNAL_ERROR("INTERNAL_ERROR", "Error: %s", "ERROR");
+    INTERNAL_ERROR("INTERNAL_ERROR", "Error: %s", "ERROR"),
+
+    // ── Audio test service ─────────────────────────────────────────
+
+    /** Audio test service started. */
+    AUDIO_TEST_SERVICE_STARTED("AUDIO_TEST_SERVICE_STARTED", "AudioTestService running — direct AudioCapture access removed. Use SpeechToText.init() instead.", "AUDIO");
 }
