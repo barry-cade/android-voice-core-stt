@@ -6,17 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Tests for deterministic error code emissions.
- *
- * Validates that each failure scenario maps to the correct [SttErrorCode]
- * and that no legacy or ad-hoc error codes are emitted.
- *
- * Since [SpeechToText] depends on Android framework classes (AudioRecord, etc.),
- * these tests verify error-code behaviour at the [SttError] construction level
- * using the same code paths as the production pipeline.
+ * Tests for deterministic error code emissions and compile-time category mapping.
  *
  * All tests are PDP-aligned: linear arrange, act, assert.
- * No nested lambdas, no scope-function pyramids, no clever Kotlin.
  */
 class SttErrorCodeTest {
 
@@ -25,28 +17,26 @@ class SttErrorCodeTest {
     @Test
     fun modelLoadFailure_emitsModelLoadFailed() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.MODEL_LOAD_FAILED,
             message = "Failed to load Whisper model: model file not found",
-            context = mapOf("modelPath" to "/data/models/ggml-tiny.en.bin")
+            details = listOf("modelPath=/data/models/ggml-tiny.en.bin")
         )
 
         assertEquals(SttErrorCode.MODEL_LOAD_FAILED, error.code)
-        assertEquals(SttErrorCategory.UNKNOWN, error.category)
+        assertEquals(SttErrorCategory.WHISPER_ERROR, error.category)
         assertTrue(error.message.contains("Failed to load"))
     }
 
     @Test
-    fun modelLoadFailure_containsModelPathInContext() {
+    fun modelLoadFailure_containsModelPathInDetails() {
         val modelPath = "/data/models/ggml-tiny.en.bin"
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.MODEL_LOAD_FAILED,
             message = "Failed to load Whisper model: model file not found",
-            context = mapOf("modelPath" to modelPath)
+            details = listOf("modelPath=$modelPath")
         )
 
-        assertEquals(modelPath, error.context["modelPath"])
+        assertTrue(error.details.any { it.contains(modelPath) })
     }
 
     // ── Inference failure ───────────────────────────────────────────────
@@ -54,14 +44,13 @@ class SttErrorCodeTest {
     @Test
     fun inferenceFailure_emitsInferenceFailed() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INFERENCE_FAILED,
             message = "Whisper inference failed: whisper_full returned -1",
-            context = mapOf("pcmSamples" to 16000)
+            details = listOf("pcmSamples=16000")
         )
 
         assertEquals(SttErrorCode.INFERENCE_FAILED, error.code)
-        assertEquals(SttErrorCategory.UNKNOWN, error.category)
+        assertEquals(SttErrorCategory.WHISPER_ERROR, error.category)
         assertTrue(error.message.contains("whisper_full"))
     }
 
@@ -69,13 +58,12 @@ class SttErrorCodeTest {
     fun inferenceFailure_containsPcmSampleCount() {
         val pcmSamples = 16000
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INFERENCE_FAILED,
             message = "Whisper inference failed",
-            context = mapOf("pcmSamples" to pcmSamples)
+            details = listOf("pcmSamples=$pcmSamples")
         )
 
-        assertEquals(pcmSamples, error.context["pcmSamples"])
+        assertTrue(error.details.any { it.contains(pcmSamples.toString()) })
     }
 
     // ── Capture failure ─────────────────────────────────────────────────
@@ -83,14 +71,13 @@ class SttErrorCodeTest {
     @Test
     fun captureFailure_emitsCaptureFailed() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.CAPTURE_FAILED,
             message = "Audio capture failed to start: AudioRecord error",
             cause = IllegalStateException("AudioRecord not initialized")
         )
 
         assertEquals(SttErrorCode.CAPTURE_FAILED, error.code)
-        assertEquals(SttErrorCategory.UNKNOWN, error.category)
+        assertEquals(SttErrorCategory.CAPTURE_ERROR, error.category)
         assertNotNull("capture failure must carry a cause", error.cause)
     }
 
@@ -99,15 +86,14 @@ class SttErrorCodeTest {
         val exceptionMessage = "AudioRecord failed to initialize"
         val cause = IllegalStateException(exceptionMessage)
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.CAPTURE_FAILED,
             message = "Audio capture failed to start: $exceptionMessage",
             cause = cause,
-            context = mapOf("exception" to "IllegalStateException", "detail" to exceptionMessage)
+            details = listOf("exception=IllegalStateException", "detail=$exceptionMessage")
         )
 
-        assertEquals(exceptionMessage, error.context["detail"])
         assertEquals(cause, error.cause)
+        assertTrue(error.details.any { it.contains(exceptionMessage) })
     }
 
     // ── VAD failure ─────────────────────────────────────────────────────
@@ -115,31 +101,27 @@ class SttErrorCodeTest {
     @Test
     fun vadFailure_emitsVadFailed() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.VAD_FAILED,
             message = "VAD error: frame energy computation failed",
-            lastRms = 0.05f,
-            lastVadState = false
+            details = listOf("lastRms=0.05", "lastVadState=false")
         )
 
         assertEquals(SttErrorCode.VAD_FAILED, error.code)
-        assertEquals(SttErrorCategory.UNKNOWN, error.category)
+        assertEquals(SttErrorCategory.VAD_ERROR, error.category)
     }
 
     @Test
     fun vadFailure_containsRmsAndState() {
-        val lastRms = 0.05f
-        val lastVadState = false
+        val lastRms = "0.05"
+        val lastVadState = "false"
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.VAD_FAILED,
             message = "VAD error",
-            lastRms = lastRms,
-            lastVadState = lastVadState
+            details = listOf("lastRms=$lastRms", "lastVadState=$lastVadState")
         )
 
-        assertEquals(lastRms, error.lastRms!!, 0.001f)
-        assertEquals(lastVadState, error.lastVadState!!)
+        assertTrue(error.details.any { it.contains("lastRms=$lastRms") })
+        assertTrue(error.details.any { it.contains("lastVadState=$lastVadState") })
     }
 
     // ── PIPELINE_ILLEGAL_STATE ──────────────────────────────────────────
@@ -147,10 +129,9 @@ class SttErrorCodeTest {
     @Test
     fun illegalLifecycle_emitsPipelineIllegalState() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
             message = "Illegal lifecycle transition: READY -> FINALISING",
-            context = mapOf("from" to "READY", "to" to "FINALISING")
+            details = listOf("from=READY", "to=FINALISING")
         )
 
         assertEquals(SttErrorCode.PIPELINE_ILLEGAL_STATE, error.code)
@@ -162,14 +143,13 @@ class SttErrorCodeTest {
         val fromState = "RECORDING"
         val toState = "READY"
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
             message = "Illegal lifecycle transition: $fromState -> $toState",
-            context = mapOf("from" to fromState, "to" to toState)
+            details = listOf("from=$fromState", "to=$toState")
         )
 
-        assertEquals(fromState, error.context["from"])
-        assertEquals(toState, error.context["to"])
+        assertTrue(error.details.any { it.contains("from=$fromState") })
+        assertTrue(error.details.any { it.contains("to=$toState") })
     }
 
     // ── INTERNAL_EXCEPTION ──────────────────────────────────────────────
@@ -178,11 +158,10 @@ class SttErrorCodeTest {
     fun internalException_emitsInternalException() {
         val cause = RuntimeException("Unexpected error in pipeline")
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INTERNAL_EXCEPTION,
             message = "Unhandled error during start: ${cause.message}",
             cause = cause,
-            context = mapOf("exception" to "RuntimeException")
+            details = listOf("exception=RuntimeException")
         )
 
         assertEquals(SttErrorCode.INTERNAL_EXCEPTION, error.code)
@@ -193,14 +172,33 @@ class SttErrorCodeTest {
     @Test
     fun internalException_containsExceptionType() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INTERNAL_EXCEPTION,
             message = "Unexpected error",
             cause = NullPointerException("value was null"),
-            context = mapOf("exception" to "NullPointerException")
+            details = listOf("exception=NullPointerException")
         )
 
-        assertEquals("NullPointerException", error.context["exception"])
+        assertTrue(error.details.any { it.contains("NullPointerException") })
+    }
+
+    // ── Category mapping test ───────────────────────────────────────────
+
+    @Test
+    fun everyErrorCodeHasCorrectCategory() {
+        val expected = mapOf(
+            SttErrorCode.MODEL_LOAD_FAILED to SttErrorCategory.WHISPER_ERROR,
+            SttErrorCode.INFERENCE_FAILED to SttErrorCategory.WHISPER_ERROR,
+            SttErrorCode.CAPTURE_FAILED to SttErrorCategory.CAPTURE_ERROR,
+            SttErrorCode.VAD_FAILED to SttErrorCategory.VAD_ERROR,
+            SttErrorCode.PIPELINE_ILLEGAL_STATE to SttErrorCategory.UNKNOWN,
+            SttErrorCode.INTERNAL_EXCEPTION to SttErrorCategory.UNKNOWN
+        )
+        for ((code, expectedCategory) in expected) {
+            assertEquals(
+                "$code must map to $expectedCategory",
+                expectedCategory, code.category
+            )
+        }
     }
 
     // ── No legacy codes ─────────────────────────────────────────────────
@@ -244,28 +242,20 @@ class SttErrorCodeTest {
         )
 
         for (legacyName in legacyNames) {
-            // Verify no enum value has this name
-            val matchingCodes = SttErrorCode.entries.filter {
-                it.name == legacyName
-            }
-            assertTrue(
-                "legacy code $legacyName must not exist in SttErrorCode",
-                matchingCodes.isEmpty()
-            )
+            val matchingCodes = SttErrorCode.entries.filter { it.name == legacyName }
+            assertTrue("legacy code $legacyName must not exist in SttErrorCode", matchingCodes.isEmpty())
         }
     }
 
     // ── SttError construction validation ────────────────────────────────
 
     @Test
-    fun sttErrorRequiresCodeAndCategory() {
+    fun sttErrorRequiresCodeAndMessage() {
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INTERNAL_EXCEPTION,
             message = "test error"
         )
 
-        assertNotNull("error must have a category", error.category)
         assertNotNull("error must have a code", error.code)
         assertNotNull("error must have a message", error.message)
     }

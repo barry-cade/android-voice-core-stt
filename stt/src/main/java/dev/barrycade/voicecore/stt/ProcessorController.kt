@@ -33,7 +33,8 @@ internal class ProcessorController(
     private val listener: UtteranceListener,
     private val sampleRate: Int = 16000,
     private val debugLogging: Boolean = false,
-    private val stopRequestedRef: () -> Boolean
+    private val stopRequestedRef: () -> Boolean,
+    private val sttErrorListener: SttErrorListener? = null
 ) : PollingController {
     private val isRunning = AtomicBoolean(false)
 
@@ -153,6 +154,15 @@ internal class ProcessorController(
             } catch (t: Throwable) {
                 SttLogger.error("code=INTERNAL_EXCEPTION, message=\"${t.message}\"")
                 SttLogger.error("code=INTERNAL_EXCEPTION, trace=${t.stackTraceToString()}")
+                sttErrorListener?.onSttError(SttError(
+                    code = SttErrorCode.INTERNAL_EXCEPTION,
+                    message = "Processing loop failed: ${t.message}",
+                    cause = t,
+                    details = listOf(
+                        "vadActiveMs=$vadActiveMs",
+                        "lastUtteranceMs=$lastUtteranceDurationMs"
+                    )
+                ))
                 isRunning.set(false)
                 break
             }

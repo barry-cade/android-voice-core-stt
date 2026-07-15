@@ -101,11 +101,10 @@ internal class ModelManager(
         } catch (t: Throwable) {
             SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
             val error = SttError(
-                category = SttErrorCategory.UNKNOWN,
                 code = SttErrorCode.MODEL_LOAD_FAILED,
                 message = "Model initialisation failed: ${t.message}",
                 cause = t,
-                context = mapOf("exception" to t::class.java.simpleName)
+                details = listOf("exception=${t::class.java.simpleName}")
             )
             sttErrorListener?.onSttError(error)
             initFailed = true
@@ -121,10 +120,9 @@ internal class ModelManager(
 
         SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.MODEL_LOAD_FAILED,
             message = "Forced test failure: Whisper model load",
-            context = mapOf("forcedFailure" to "forceWhisperLoadFailure")
+            details = listOf("forcedFailure=forceWhisperLoadFailure")
         )
         sttErrorListener?.onSttError(error)
         initFailed = true

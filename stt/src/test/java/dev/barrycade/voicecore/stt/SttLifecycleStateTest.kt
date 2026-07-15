@@ -255,10 +255,9 @@ class SttLifecycleStateTest {
         logCapture("[LIFECYCLE] illegal transition: $fromName -> $toName")
 
         val error = SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
             message = "Illegal lifecycle transition: $fromName -> $toName",
-            context = mapOf("from" to fromName, "to" to toName)
+            details = listOf("from=$fromName", "to=$toName")
         )
         errorListener.onSttError(error)
         return TransitionResult(allowed = false, from = from, to = newState)

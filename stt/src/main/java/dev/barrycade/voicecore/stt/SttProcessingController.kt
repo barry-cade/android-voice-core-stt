@@ -84,7 +84,8 @@ internal class SttProcessingController(
             },
             sampleRate = 16000,
             debugLogging = config.debugLoggingEnabled,
-            stopRequestedRef = stopRequestedRef
+            stopRequestedRef = stopRequestedRef,
+            sttErrorListener = sttErrorListener
         )
     }
 

@@ -29,9 +29,6 @@ internal class SttCallbackDispatcher {
     /** Result-with-timing listener: receives text, return code, and optional timing snapshot. */
     private var onResultWithTiming: ((text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit)? = null
 
-    /** Generic error listener. */
-    private var onError: ((Throwable) -> Unit)? = null
-
     /** Structured STT error listener. */
     private var sttErrorListener: SttErrorListener? = null
 
@@ -75,13 +72,6 @@ internal class SttCallbackDispatcher {
     fun setOnResultWithTimingListener(l: (text: String, code: SttReturnCode, timing: SttTimingSnapshot?) -> Unit) {
         synchronized(listenerLock) {
             onResultWithTiming = l
-        }
-    }
-
-    /** Register a generic error listener. */
-    fun setOnErrorListener(l: (Throwable) -> Unit) {
-        synchronized(listenerLock) {
-            onError = l
         }
     }
 
@@ -144,19 +134,15 @@ internal class SttCallbackDispatcher {
      *              Provides category, code, message, and optional context.
      */
     fun dispatchError(error: SttError) {
-        val errorSnapshot = synchronized(listenerLock) {
-            onError
-        }
         val sttErrorSnapshot = synchronized(listenerLock) {
             sttErrorListener
         }
         val messageSnapshot = synchronized(listenerLock) {
             onMessageListener
         }
-        errorSnapshot?.invoke(error.cause ?: RuntimeException(error.message))
         sttErrorSnapshot?.onSttError(error)
         messageSnapshot?.invoke(
-            SttJsonAdapter.buildErrorJson(error.category.name, error.code.name, error.message)
+            SttJsonAdapter.buildErrorJson(error.code.name, error.message, category = error.category.name)
         )
     }
 
@@ -182,7 +168,6 @@ internal class SttCallbackDispatcher {
         synchronized(listenerLock) {
             onResult = null
             onResultWithTiming = null
-            onError = null
             sttErrorListener = null
             timingListener = null
             onMessageListener = null

@@ -18,7 +18,9 @@ package dev.barrycade.voicecore.stt
  * All other transitions are illegal and return false.
  * Duplicate transitions (same state → same state) are allowed as no-ops.
  */
-internal class SttLifecycleStateMachine {
+internal class SttLifecycleStateMachine(
+    private val sttErrorListener: SttErrorListener? = null
+) {
 
     private val lock = Any()
 
@@ -58,9 +60,14 @@ internal class SttLifecycleStateMachine {
                 return true
             }
 
-            SttLogger.lifecycleE(
-                "illegal transition: ${from.javaClass.simpleName} -> ${newState.javaClass.simpleName}"
-            )
+            val fromName = from.javaClass.simpleName
+            val toName = newState.javaClass.simpleName
+            SttLogger.lifecycleE("illegal transition: $fromName -> $toName")
+            sttErrorListener?.onSttError(SttError(
+                code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
+                message = "Illegal lifecycle transition: $fromName -> $toName",
+                details = listOf("from=$fromName", "to=$toName")
+            ))
             return false
         }
     }

@@ -17,16 +17,15 @@ class SttCallbackDispatcherTest {
         val dispatcher = SttCallbackDispatcher()
         var resultCalls = 0
         var timingCalls = 0
-        var errorCalls = 0
+        var sttErrorCalls = 0
 
         dispatcher.setOnResultListener { resultCalls++ }
         dispatcher.onTimingListener = { _, _, _, _ -> timingCalls++ }
-        dispatcher.setOnErrorListener { errorCalls++ }
+        dispatcher.setSttErrorListener { sttErrorCalls++ }
 
         dispatcher.dispatchResult("before", SttReturnCode.SUCCESS, null)
         dispatcher.dispatchTiming(1, 2, 3, 4)
         dispatcher.dispatchError(SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INTERNAL_EXCEPTION,
             message = "before"
         ))
@@ -36,14 +35,13 @@ class SttCallbackDispatcherTest {
         dispatcher.dispatchResult("after", SttReturnCode.SUCCESS, null)
         dispatcher.dispatchTiming(1, 2, 3, 4)
         dispatcher.dispatchError(SttError(
-            category = SttErrorCategory.UNKNOWN,
             code = SttErrorCode.INTERNAL_EXCEPTION,
             message = "after"
         ))
 
         assertTrue("result listener should be called once before clear", resultCalls == 1)
         assertTrue("timing listener should be called once before clear", timingCalls == 1)
-        assertTrue("error listener should be called once before clear", errorCalls == 1)
+        assertTrue("sttError listener should be called once before clear", sttErrorCalls == 1)
     }
 
     @Test
@@ -59,7 +57,6 @@ class SttCallbackDispatcherTest {
                 repeat(1000) {
                     dispatcher.setOnResultListener { _ -> }
                     dispatcher.setOnResultWithTimingListener { _, _, _ -> }
-                    dispatcher.setOnErrorListener { _ -> }
                     dispatcher.setSttErrorListener { _ -> }
                     dispatcher.onTimingListener = { _, _, _, _ -> }
                     if (it % 7 == 0) {
@@ -91,7 +88,6 @@ class SttCallbackDispatcherTest {
                 startLatch.await()
                 repeat(1000) {
                     dispatcher.dispatchError(SttError(
-                        category = SttErrorCategory.UNKNOWN,
                         code = SttErrorCode.INTERNAL_EXCEPTION,
                         message = "boom"
                     ))

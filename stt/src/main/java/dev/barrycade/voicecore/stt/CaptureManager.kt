@@ -72,7 +72,8 @@ import android.os.Process
 internal class CaptureManager(
     private val sampleRate: Int = 16000,
     private val bufferSizeBytes: Int = 32000,
-    private val bufferSizeSamples: Int = 4000
+    private val bufferSizeSamples: Int = 4000,
+    private val sttErrorListener: SttErrorListener? = null
 ) : SessionManager {
 
     private val stateLock = Any()
@@ -184,6 +185,11 @@ internal class CaptureManager(
                 synchronized(stateLock) {
                     captureStarted = false
                 }
+                sttErrorListener?.onSttError(SttError(
+                    code = SttErrorCode.CAPTURE_FAILED,
+                    message = "AudioCapture failed to start: ${t.message}",
+                    cause = t
+                ))
                 throw t
             }
             SttLogger.pcm("beginPcmCapture() — AudioCapture started")
@@ -389,6 +395,11 @@ internal class CaptureManager(
             synchronized(stateLock) {
                 captureStarted = false
             }
+            sttErrorListener?.onSttError(SttError(
+                code = SttErrorCode.CAPTURE_FAILED,
+                message = "AudioCapture restart failed: ${t.message}",
+                cause = t
+            ))
             throw t
         }
         SttLogger.pcm("restartCapture() — AudioCapture restarted")

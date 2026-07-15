@@ -67,11 +67,9 @@ class SttWarmupTest {
                 if (whisperCancelled) return
                 SttLifecycleStateTest.logCapture("warmup failed: ${t.message}")
                 val error = SttError(
-                    category = SttErrorCategory.UNKNOWN,
                     code = SttErrorCode.INFERENCE_FAILED,
-                    message = "Whisper warm-up failed: ${t.message}",
-                    cause = t,
-                    context = mapOf("exception" to t::class.java.simpleName)
+                    message = "warmup failed: ${t.message}",
+                    cause = t
                 )
                 // Error is emitted but not captured for assertion in this test
             }

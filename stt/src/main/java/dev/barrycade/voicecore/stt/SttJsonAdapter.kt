@@ -183,16 +183,22 @@ internal object SttJsonAdapter {
      *   "type": "error",
      *   "category": "CONFIG_ERROR",
      *   "code": "MODEL_LOAD_FAILED",
-     *   "message": "File not found at /data/app/model.bin"
+     *   "message": "File not found at /data/app/model.bin",
+     *   "details": ["modelPath=/data/app/model.bin"]
      * }
      * ```
      *
-     * @param category High-level error category. One of the [SttErrorCategory] name strings.
-     *   Pass null to omit the field (legacy/untyped callers).
      * @param code Machine-readable error code string.
+     * @param category Human-readable error category (nullable for backward compatibility).
      * @param message Human-readable error description.
+     * @param details Optional human-readable diagnostic bullet points.
      */
-    fun buildErrorJson(category: String?, code: String, message: String): String {
+    fun buildErrorJson(
+        code: String,
+        message: String,
+        category: String? = null,
+        details: List<String> = emptyList()
+    ): String {
         val sb = StringBuilder()
         sb.append("{\"type\":\"error\"")
         if (category != null) {
@@ -204,7 +210,18 @@ internal object SttJsonAdapter {
         sb.append(escapeJson(code))
         sb.append("\",\"message\":\"")
         sb.append(escapeJson(message))
-        sb.append("\"}")
+        sb.append('"')
+        if (details.isNotEmpty()) {
+            sb.append(",\"details\":[")
+            for (i in details.indices) {
+                if (i > 0) sb.append(',')
+                sb.append('"')
+                sb.append(escapeJson(details[i]))
+                sb.append('"')
+            }
+            sb.append(']')
+        }
+        sb.append('}')
         return sb.toString()
     }
 

@@ -65,11 +65,14 @@ class SpeechToText internal constructor(
     /** Capture lifecycle controller, wraps the [SessionManager]. */
     private var captureController: SttCaptureController = SttCaptureController(captureManager)
 
-    internal val lifecycleController = SttLifecycleController()
     private val sessionController = SttSessionController()
     private val modeController = SttModeController()
     private val threadController = SttThreadController()
     private val callbackDispatcher = SttCallbackDispatcher()
+
+    internal val lifecycleController = SttLifecycleController(
+        sttErrorListener = callbackDispatcher.getSttErrorListener()
+    )
 
     // ── Test options ─────────────────────────────────────────────────────
 
@@ -173,7 +176,7 @@ class SpeechToText internal constructor(
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
         } catch (e: IllegalArgumentException) {
-            return             SttJsonAdapter.buildErrorJson(SttErrorCategory.CONFIG_ERROR.name, "INVALID_CONFIG", e.message ?: "Config parse failed")
+            return             SttJsonAdapter.buildErrorJson("INVALID_CONFIG", e.message ?: "Config parse failed", category = SttErrorCategory.CONFIG_ERROR.name)
         }
 
         synchronized(stateLock) {
@@ -192,7 +195,7 @@ class SpeechToText internal constructor(
             modelManager.updateModelPath(sessionCfg.modelPath)
             if (!modelManager.loadModelIfNeeded()) {
                 sessionConfig = null
-                return SttJsonAdapter.buildErrorJson(SttErrorCategory.WHISPER_ERROR.name, "INIT_FAILED", "Model load failed")
+                return SttJsonAdapter.buildErrorJson("INIT_FAILED", "Model load failed", category = SttErrorCategory.WHISPER_ERROR.name)
             }
 
             // ── Step 3: Warm-up (once per app lifetime) ───────────────────────
@@ -204,7 +207,8 @@ class SpeechToText internal constructor(
             val sessionManager: SessionManager
             if (captureController.sessionManager is CaptureManager) {
                 val newManager = CaptureManager(
-                    bufferSizeSamples = sessionCfg.bufferSizeSamples
+                    bufferSizeSamples = sessionCfg.bufferSizeSamples,
+                    sttErrorListener = callbackDispatcher.getSttErrorListener()
                 )
                 captureController = SttCaptureController(newManager)
                 sessionManager = newManager
@@ -260,19 +264,19 @@ class SpeechToText internal constructor(
             val cfg = sessionConfig
             if (cfg == null) {
                 return SttJsonAdapter.buildErrorJson(
-                    SttErrorCategory.CONFIG_ERROR.name,
                     "SESSION_FAILED",
-                    "loadModel() must be called before startSession()"
+                    "loadModel() must be called before startSession()",
+                    category = SttErrorCategory.CONFIG_ERROR.name
                 )
             }
 
             val runtimeCfg = cfg.runtimeConfig
 
             if (!modelManager.isReady) {
-                return SttJsonAdapter.buildErrorJson(SttErrorCategory.WHISPER_ERROR.name, "SESSION_FAILED", "Model not ready")
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Model not ready", category = SttErrorCategory.WHISPER_ERROR.name)
             }
             if (isInferencing.get()) {
-                return SttJsonAdapter.buildErrorJson(SttErrorCategory.UNKNOWN.name, "SESSION_FAILED", "Inference already active")
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Inference already active", category = SttErrorCategory.UNKNOWN.name)
             }
             if (!lifecycleController.canStartSession()) {
                 // If already in a session (RECORDING or CAPTURING), return success
@@ -280,9 +284,9 @@ class SpeechToText internal constructor(
                     return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
                 }
                 return SttJsonAdapter.buildErrorJson(
-                    SttErrorCategory.UNKNOWN.name,
                     "SESSION_FAILED",
-                    "Cannot start session from state ${lifecycleController.currentState}"
+                    "Cannot start session from state ${lifecycleController.currentState}",
+                    category = SttErrorCategory.UNKNOWN.name
                 )
             }
 
@@ -293,7 +297,7 @@ class SpeechToText internal constructor(
 
             currentSessionEpoch = sessionEpoch.incrementAndGet()
             if (!transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "startSession")) {
-                return SttJsonAdapter.buildErrorJson(SttErrorCategory.UNKNOWN.name, "SESSION_FAILED", "Pipeline stage transition failed")
+                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Pipeline stage transition failed", category = SttErrorCategory.UNKNOWN.name)
             }
             sessionController.beginSession()
             captureController.startCapture(modeController.isManualMode())
@@ -461,7 +465,6 @@ class SpeechToText internal constructor(
         if (modelManager.initFailed) {
             callbackDispatcher.dispatchError(
                 SttError(
-                    category = SttErrorCategory.WHISPER_ERROR,
                     code = SttErrorCode.MODEL_LOAD_FAILED,
                     message = "Model initialisation failed"
                 )
@@ -471,7 +474,6 @@ class SpeechToText internal constructor(
         if (forceAudioInitFailure) {
             callbackDispatcher.dispatchError(
                 SttError(
-                    category = SttErrorCategory.CAPTURE_ERROR,
                     code = SttErrorCode.CAPTURE_FAILED,
                     message = "Forced test: AudioCapture init"
                 )
@@ -669,7 +671,6 @@ class SpeechToText internal constructor(
         }
         callbackDispatcher.dispatchError(
             SttError(
-                category = SttErrorCategory.UNKNOWN,
                 code = SttErrorCode.INTERNAL_EXCEPTION,
                 message = t.message ?: "Unknown inference error",
                 cause = t
@@ -760,9 +761,9 @@ class SpeechToText internal constructor(
             val stt = instance
             if (stt == null) {
                 return SttJsonAdapter.buildErrorJson(
-                    SttErrorCategory.CONFIG_ERROR.name,
                     "SESSION_FAILED",
-                    "loadModel() must be called before startSession()"
+                    "loadModel() must be called before startSession()",
+                    category = SttErrorCategory.CONFIG_ERROR.name
                 )
             }
             return stt.startSession()

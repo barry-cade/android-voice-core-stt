@@ -212,12 +212,13 @@ internal class UtteranceAccumulator(
         if (forceTimeout) {
             SttLogger.error("forcedFailure: PIPELINE_ILLEGAL_STATE")
             val error = SttError(
-                category = SttErrorCategory.UNKNOWN,
                 code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
                 message = "Forced test failure: max utterance timeout",
-                lastRms = vad.lastFrameEnergy,
-                lastVadState = true,
-                context = mapOf("forcedFailure" to "forceTimeout")
+                details = listOf(
+                    "forcedFailure=forceTimeout",
+                    "lastRms=${vad.lastFrameEnergy}",
+                    "lastVadState=true"
+                )
             )
             sttErrorListener?.onSttError(error)
             return handleUtteranceReady()
