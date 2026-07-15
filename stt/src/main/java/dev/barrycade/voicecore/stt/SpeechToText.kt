@@ -176,7 +176,13 @@ class SpeechToText internal constructor(
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
         } catch (e: IllegalArgumentException) {
-            return             SttJsonAdapter.buildErrorJson("INVALID_CONFIG", e.message ?: "Config parse failed", category = SttErrorCategory.CONFIG_ERROR.name)
+            callbackDispatcher.dispatchError(SttError(
+                code = SttErrorCode.CONFIG_PARSE_FAILED,
+                message = e.message ?: "Config parse failed",
+                cause = e,
+                details = listOf("configJson=$configJson")
+            ))
+            return SttJsonAdapter.buildErrorJson("INVALID_CONFIG", e.message ?: "Config parse failed", category = SttErrorCategory.CONFIG_ERROR.name)
         }
 
         synchronized(stateLock) {

@@ -142,6 +142,13 @@ internal class ModelManager(
             true
         } catch (t: Throwable) {
             SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
+            val error = SttError(
+                code = SttErrorCode.MODEL_LOAD_FAILED,
+                message = "Whisper model load failed: ${t.message}",
+                cause = t,
+                details = listOf("modelPath=$modelPathSnapshot", "exception=${t::class.java.simpleName}")
+            )
+            sttErrorListener?.onSttError(error)
             initFailed = true
             false
         }
@@ -183,7 +190,14 @@ internal class ModelManager(
             SttLogger.lifecycle("ModelManager: loadModelIfNeeded() — model loaded")
             true
         } catch (t: Throwable) {
-            SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
+            SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
+            val error = SttError(
+                code = SttErrorCode.MODEL_LOAD_FAILED,
+                message = "Model load failed: ${t.message}",
+                cause = t,
+                details = listOf("exception=${t::class.java.simpleName}", "method=loadModelIfNeeded")
+            )
+            sttErrorListener?.onSttError(error)
             initFailed = true
             false
         }
@@ -238,6 +252,13 @@ internal class ModelManager(
                 onResult(inferenceStartMs, text)
             } catch (t: Throwable) {
                 SttLogger.whisperE("inference failed: ${t.message}")
+                val error = SttError(
+                    code = SttErrorCode.INFERENCE_FAILED,
+                    message = "Whisper inference failed: ${t.message}",
+                    cause = t,
+                    details = listOf("pcmSamples=${pcm.size}", "exception=${t::class.java.simpleName}")
+                )
+                sttErrorListener?.onSttError(error)
             } finally {
                 onComplete()
             }

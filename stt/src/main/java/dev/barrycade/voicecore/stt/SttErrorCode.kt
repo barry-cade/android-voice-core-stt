@@ -14,6 +14,8 @@ internal enum class SttErrorCode(val category: SttErrorCategory) {
     INFERENCE_FAILED(SttErrorCategory.WHISPER_ERROR),
     CAPTURE_FAILED(SttErrorCategory.CAPTURE_ERROR),
     VAD_FAILED(SttErrorCategory.VAD_ERROR),
+    CONFIG_PARSE_FAILED(SttErrorCategory.CONFIG_ERROR),
+    INFERENCE_TIMEOUT(SttErrorCategory.TIMEOUT),
     PIPELINE_ILLEGAL_STATE(SttErrorCategory.UNKNOWN),
     INTERNAL_EXCEPTION(SttErrorCategory.UNKNOWN)
 }

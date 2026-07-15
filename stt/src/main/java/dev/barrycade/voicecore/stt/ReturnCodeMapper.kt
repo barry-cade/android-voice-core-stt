@@ -1,45 +1,25 @@
 package dev.barrycade.voicecore.stt
 
 /**
- * Deterministic mapping from legacy pipeline [SttReturnCode] values to the
- * new API codes used by [SessionResult] returned from [SpeechToText.startSession].
+ * ReturnCodeMapper has been removed.
  *
- * This mapping is the single point of translation between the internal
- * pipeline's return codes and the external API's return codes.
- * It must not be replicated anywhere else in the new wrapper path.
+ * The `SttReturnCode` enum previously contained legacy pipeline codes (OK, NO_SPEECH,
+ * SILENCE_TIMEOUT, UTTERANCE_TOO_LONG, ERROR) alongside new API codes (SUCCESS, etc.),
+ * requiring a mapping layer between them. The legacy codes have been removed from
+ * `SttReturnCode`, eliminating the need for this mapper.
  *
- * ## Mapping table
+ * All session outcomes now use the unified set of return codes directly.
+ * See [SttReturnCode] for the complete list.
  *
- * | Legacy code       | New code              |
- * |-------------------|-----------------------|
- * | [SttReturnCode.OK] | [SttReturnCode.SUCCESS] |
- * | [SttReturnCode.SILENCE_TIMEOUT] | [SttReturnCode.ABNORMAL_SILENCE] |
- * | [SttReturnCode.UTTERANCE_TOO_LONG] | [SttReturnCode.MAX_DURATION_REACHED] |
- * | [SttReturnCode.ERROR] | [SttReturnCode.ENGINE_ERROR] |
- * | [SttReturnCode.NO_SPEECH] | [SttReturnCode.SUCCESS] (transcript is null) |
- *
- * Any unrecognised code is mapped to [SttReturnCode.ENGINE_ERROR] as a safe default.
+ * @deprecated This type is retained only to avoid breaking compilation in any
+ *             remaining references. It will be removed in a future cleanup pass.
  */
+@Deprecated("Legacy return code mapping removed. Use SttReturnCode directly.")
 internal object ReturnCodeMapper {
-
-    /**
-     * Map a legacy pipeline [SttReturnCode] to the corresponding new API code.
-     */
+    @Deprecated("Legacy mapping removed. Use SttReturnCode directly.")
     fun map(legacyCode: SttReturnCode): SttReturnCode {
-        return when (legacyCode) {
-            SttReturnCode.OK -> SttReturnCode.SUCCESS
-            SttReturnCode.NO_SPEECH -> SttReturnCode.SUCCESS
-            SttReturnCode.SILENCE_TIMEOUT -> SttReturnCode.ABNORMAL_SILENCE
-            SttReturnCode.UTTERANCE_TOO_LONG -> SttReturnCode.MAX_DURATION_REACHED
-            SttReturnCode.ERROR -> SttReturnCode.ENGINE_ERROR
-            // Pass through codes that are already in the new set.
-            SttReturnCode.SUCCESS -> SttReturnCode.SUCCESS
-            SttReturnCode.CONFIG_NOT_SET -> SttReturnCode.CONFIG_NOT_SET
-            SttReturnCode.INVALID_CONFIG -> SttReturnCode.INVALID_CONFIG
-            SttReturnCode.MAX_DURATION_REACHED -> SttReturnCode.MAX_DURATION_REACHED
-            SttReturnCode.AUTO_SILENCE_TRIGGERED -> SttReturnCode.AUTO_SILENCE_TRIGGERED
-            SttReturnCode.ABNORMAL_SILENCE -> SttReturnCode.ABNORMAL_SILENCE
-            SttReturnCode.ENGINE_ERROR -> SttReturnCode.ENGINE_ERROR
-        }
+        // Legacy codes no longer exist — just pass through.
+        return legacyCode
     }
 }
+
