@@ -182,7 +182,7 @@ class SpeechToText internal constructor(
                 cause = e,
                 details = listOf("configJson=$configJson")
             ))
-            return SttJsonAdapter.buildErrorJson("INVALID_CONFIG", e.message ?: "Config parse failed", category = SttErrorCategory.CONFIG_ERROR.name)
+            return SttJsonAdapter.buildResultJson("", SttReturnCode.INVALID_CONFIG, null)
         }
 
         synchronized(stateLock) {
@@ -212,6 +212,8 @@ class SpeechToText internal constructor(
             // ── Step 4: Reconstruct CaptureManager with runtime buffer size ───
             val sessionManager: SessionManager
             if (captureController.sessionManager is CaptureManager) {
+                val oldManager = captureController.sessionManager as CaptureManager
+                oldManager.shutdown()
                 val newManager = CaptureManager(
                     bufferSizeSamples = sessionCfg.bufferSizeSamples,
                     sttErrorListener = callbackDispatcher.getSttErrorListener()
@@ -334,10 +336,17 @@ class SpeechToText internal constructor(
      */
     fun init(configJson: String): String {
         val loadResult = loadModel(configJson)
-        if (hasJsonError(loadResult)) {
+        if (hasJsonError(loadResult) || hasJsonCode(loadResult, "INVALID_CONFIG")) {
             return loadResult
         }
         return startSession()
+    }
+
+    /**
+     * Check if a JSON string contains a specific code field.
+     */
+    private fun hasJsonCode(json: String, expectedCode: String): Boolean {
+        return json.contains("\"code\":\"$expectedCode\"")
     }
 
     /**
@@ -460,6 +469,9 @@ class SpeechToText internal constructor(
     /**
      * Start the processor for the current session.
      * Must be called from within [stateLock].
+     *
+     * On init failure, the error is dispatched AND the pipeline is reset to
+     * a safe state so subsequent calls do not silently succeed.
      */
     private fun startProcessor() {
         if (isRunning.get()) return
@@ -475,6 +487,10 @@ class SpeechToText internal constructor(
                     message = "Model initialisation failed"
                 )
             )
+            transitionPipelineToIdleLocked("startProcessor initFailed")
+            currentSessionEpoch = 0L
+            lifecycleController.onStop()
+            lifecycleController.onReset()
             return
         }
         if (forceAudioInitFailure) {
@@ -484,6 +500,10 @@ class SpeechToText internal constructor(
                     message = "Forced test: AudioCapture init"
                 )
             )
+            transitionPipelineToIdleLocked("startProcessor forceAudioInitFailure")
+            currentSessionEpoch = 0L
+            lifecycleController.onStop()
+            lifecycleController.onReset()
             return
         }
         if (!lifecycleController.canStartSession()) {

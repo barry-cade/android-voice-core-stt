@@ -104,7 +104,9 @@ class SpeechToTextNewApiTest {
     fun init_withInvalidJson_returnsError() {
         val invalidJson = """{"bad": "config"}"""
         val result = speechToText.init(invalidJson)
-        assertTrue("Result should contain error type", hasJsonType(result, "error"))
+        // loadModel catches the parse failure, dispatches via listener, and returns
+        // a result JSON with INVALID_CONFIG code (the error is on the listener path).
+        assertTrue("Result should contain result type", hasJsonType(result, "result"))
         assertTrue("Result should contain INVALID_CONFIG code", hasJsonCode(result, "INVALID_CONFIG"))
     }
 

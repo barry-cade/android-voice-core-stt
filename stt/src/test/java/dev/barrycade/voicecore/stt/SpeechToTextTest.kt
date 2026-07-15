@@ -71,7 +71,10 @@ class SpeechToTextTest {
     @Test
     fun init_withInvalidConfigJson_returnsError() {
         val result = speechToText.init("{}")
-        assertTrue("Result should contain error type", hasJsonType(result, "error"))
+        // loadModel catches the parse failure and returns a result JSON
+        // with INVALID_CONFIG code (the error is also dispatched via listener).
+        assertTrue("Result should contain result type (error on listener path)", hasJsonType(result, "result"))
+        assertTrue("Result should contain INVALID_CONFIG code", hasJsonCode(result, "INVALID_CONFIG"))
     }
 
     @Test

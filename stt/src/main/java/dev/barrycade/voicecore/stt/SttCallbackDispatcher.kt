@@ -130,8 +130,11 @@ internal class SttCallbackDispatcher {
     /**
      * Dispatch an error to all registered error listeners.
      *
+     * Includes all structured fields — category, code, message, **and details** —
+     * in the JSON serialisation so the app-side router can use them.
+     *
      * @param error The structured [SttError] representing the failure.
-     *              Provides category, code, message, and optional context.
+     *              Provides category, code, message, and optional diagnostic details.
      */
     fun dispatchError(error: SttError) {
         val sttErrorSnapshot = synchronized(listenerLock) {
@@ -142,7 +145,12 @@ internal class SttCallbackDispatcher {
         }
         sttErrorSnapshot?.onSttError(error)
         messageSnapshot?.invoke(
-            SttJsonAdapter.buildErrorJson(error.code.name, error.message, category = error.category.name)
+            SttJsonAdapter.buildErrorJson(
+                code = error.code.name,
+                message = error.message,
+                category = error.category.name,
+                details = error.details
+            )
         )
     }
 
