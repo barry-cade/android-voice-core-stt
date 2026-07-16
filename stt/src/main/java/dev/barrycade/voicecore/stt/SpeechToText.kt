@@ -72,6 +72,7 @@ class SpeechToText internal constructor(
 
     internal val lifecycleController = SttLifecycleController(
         sttErrorListener = callbackDispatcher.getSttErrorListener()
+            ?: SttErrorListener { _ -> }
     )
 
     // ── Test options ─────────────────────────────────────────────────────
