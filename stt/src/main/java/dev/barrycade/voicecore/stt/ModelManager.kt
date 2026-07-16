@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal class ModelManager(
     private var modelPath: String,
-    private val sttErrorListener: SttErrorListener?,
+    private val sttErrorListener: SttErrorListener,
     private val whisperModel: WhisperModel = WhisperBridge
 ) {
     private val stateLock = Any()
@@ -103,7 +103,7 @@ internal class ModelManager(
                 cause = t,
                 details = listOf("exception=${t::class.java.simpleName}")
             )
-            sttErrorListener?.onSttError(error)
+            sttErrorListener.onSttError(error)
             initFailed = true
         }
     }
@@ -121,7 +121,7 @@ internal class ModelManager(
             message = "Forced test failure: Whisper model load",
             details = listOf("forcedFailure=forceWhisperLoadFailure")
         )
-        sttErrorListener?.onSttError(error)
+        sttErrorListener.onSttError(error)
         initFailed = true
         return true
     }
@@ -145,7 +145,7 @@ internal class ModelManager(
                 cause = t,
                 details = listOf("modelPath=$modelPathSnapshot", "exception=${t::class.java.simpleName}")
             )
-            sttErrorListener?.onSttError(error)
+            sttErrorListener.onSttError(error)
             initFailed = true
             false
         }
@@ -194,7 +194,7 @@ internal class ModelManager(
                 cause = t,
                 details = listOf("exception=${t::class.java.simpleName}", "method=loadModelIfNeeded")
             )
-            sttErrorListener?.onSttError(error)
+            sttErrorListener.onSttError(error)
             initFailed = true
             false
         }
@@ -255,7 +255,7 @@ internal class ModelManager(
                     cause = t,
                     details = listOf("pcmSamples=${pcm.size}", "exception=${t::class.java.simpleName}")
                 )
-                sttErrorListener?.onSttError(error)
+                sttErrorListener.onSttError(error)
             } finally {
                 onComplete()
             }

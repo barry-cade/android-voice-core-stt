@@ -21,7 +21,7 @@ class SttInferenceControllerTest {
         val dispatcher = SttCallbackDispatcher()
                 val modelManager = ModelManager(
             modelPath = "/dummy/model.bin",
-            sttErrorListener = null,
+            sttErrorListener = SttErrorListener { },
             whisperModel = fakeModel
         )
         val controller = SttInferenceController(modelManager, dispatcher)
@@ -72,7 +72,7 @@ class SttInferenceControllerTest {
         val dispatcher = SttCallbackDispatcher()
                 val modelManager = ModelManager(
             modelPath = "/dummy/model.bin",
-            sttErrorListener = null,
+            sttErrorListener = SttErrorListener { },
             whisperModel = fakeModel
         )
         val controller = SttInferenceController(modelManager, dispatcher)
@@ -126,7 +126,7 @@ class SttInferenceControllerTest {
         val dispatcher = SttCallbackDispatcher()
                 val modelManager = ModelManager(
             modelPath = "/dummy/model.bin",
-            sttErrorListener = null,
+            sttErrorListener = SttErrorListener { },
             whisperModel = fakeModel
         )
         val controller = SttInferenceController(modelManager, dispatcher)

@@ -114,8 +114,8 @@ class SpeechToText internal constructor(
     /** Deterministic pipeline stage holder for runtime flow control. */
     private val pipelineState = SttPipelineState()
 
-    /** Model manager — created once, persists across utterances. */
-    private val modelManager: ModelManager
+    /** Model manager — reconstructed inside loadModel() once listener is registered. */
+    private var modelManager: ModelManager
 
     /** Dedicated inference adapter controller. */
     private val inferenceController: SttInferenceController
@@ -146,9 +146,13 @@ class SpeechToText internal constructor(
     private val stopRequest = StopRequest()
 
     init {
+        // Temporary ModelManager — reconstructed inside loadModel() with the real listener.
+        val placeholderListener = SttErrorListener { error ->
+            SttLogger.error("code=${error.code.name}, message=\"${error.message}\" [placeholder listener]")
+        }
         modelManager = ModelManager(
             modelPath = "",
-            sttErrorListener = null,
+            sttErrorListener = placeholderListener,
             whisperModel = whisperModel
         )
         inferenceController = SttInferenceController(modelManager, callbackDispatcher)
@@ -198,8 +202,17 @@ class SpeechToText internal constructor(
             sessionConfig = sessionCfg
             val runtimeCfg = sessionCfg.runtimeConfig
 
-            // ── Step 2: Update model path and load model ──────────────────────
-            modelManager.updateModelPath(sessionCfg.modelPath)
+            // ── Step 2: Reconstruct ModelManager with the real listener and load model ──
+            val listener = callbackDispatcher.getSttErrorListener()
+            if (listener != null) {
+                modelManager = ModelManager(
+                    modelPath = sessionCfg.modelPath,
+                    sttErrorListener = listener,
+                    whisperModel = whisperModel
+                )
+            } else {
+                modelManager.updateModelPath(sessionCfg.modelPath)
+            }
             if (!modelManager.loadModelIfNeeded()) {
                 sessionConfig = null
                 val error = SttError(
