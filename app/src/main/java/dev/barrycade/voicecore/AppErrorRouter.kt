@@ -51,15 +51,28 @@ internal object AppErrorRouter {
         val message = errorJson.optString("message", "Unknown error")
         val category = errorJson.optString("category", "UNKNOWN")
 
+        val details = if (errorJson.has("details")) {
+            val arr = errorJson.getJSONArray("details")
+            (0 until arr.length()).map { arr.getString(it) }
+        } else {
+            emptyList()
+        }
+
         val logCode = logCodeForErrorCode(code)
         val (showBanner, outputText) = uiForCategory(category, code, message)
+
+        val outputWithDetails = if (details.isNotEmpty()) {
+            "$outputText\n\nDetails:\n${details.joinToString("\n")}"
+        } else {
+            outputText
+        }
 
         return ErrorUiAction(
             showBanner = showBanner,
             bannerText = if (showBanner) "STT configuration error: $message\nCheck config and restart the app." else null,
-            outputText = outputText,
+            outputText = outputWithDetails,
             logCode = logCode,
-            logArgs = arrayOf("$code: $message")
+            logArgs = arrayOf("$code: $message", *details.toTypedArray())
         )
     }
 
@@ -92,10 +105,12 @@ internal object AppErrorRouter {
      */
     private fun logCodeForErrorCode(code: String): AppLogCode {
         return when (code) {
-            "INVALID_CONFIG" -> AppLogCode.CONFIG_INVALID
-            "INIT_FAILED" -> AppLogCode.INIT_FAILED
-            "SESSION_FAILED" -> AppLogCode.SESSION_ERROR
+            "CONFIG_PARSE_FAILED" -> AppLogCode.CONFIG_INVALID
             "MODEL_LOAD_FAILED" -> AppLogCode.INIT_FAILED
+            "INFERENCE_FAILED" -> AppLogCode.ASYNC_ERROR
+            "INFERENCE_TIMEOUT" -> AppLogCode.ASYNC_ERROR
+            "CAPTURE_FAILED" -> AppLogCode.SESSION_ERROR
+            "VAD_FAILED" -> AppLogCode.INTERNAL_ERROR
             "PIPELINE_ILLEGAL_STATE" -> AppLogCode.INTERNAL_ERROR
             "INTERNAL_EXCEPTION" -> AppLogCode.INTERNAL_ERROR
             else -> AppLogCode.ASYNC_ERROR
