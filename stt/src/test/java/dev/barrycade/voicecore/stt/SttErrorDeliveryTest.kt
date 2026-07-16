@@ -124,13 +124,13 @@ class SttErrorDeliveryTest {
 
             assertNotNull("startSession without loadModel must return error", result)
             assertEquals(
-                "error code must be CONFIG_PARSE_FAILED",
-                SttErrorCode.CONFIG_PARSE_FAILED, result!!.code
+                "error code must be CONFIG_NOT_SET",
+                SttErrorCode.CONFIG_NOT_SET, result!!.code
             )
 
             val message = lastMessage()
             assertNotNull("message listener must have received JSON", message)
-            assertTrue("JSON must contain code=CONFIG_PARSE_FAILED", message!!.contains("\"code\":\"CONFIG_PARSE_FAILED\""))
+            assertTrue("JSON must contain code=CONFIG_NOT_SET", message!!.contains("\"code\":\"CONFIG_NOT_SET\""))
         }
     }
 

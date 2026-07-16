@@ -292,7 +292,7 @@ class SpeechToText internal constructor(
             val cfg = sessionConfig
             if (cfg == null) {
                 val error = SttError(
-                    code = SttErrorCode.CONFIG_PARSE_FAILED,
+                    code = SttErrorCode.CONFIG_NOT_SET,
                     message = "loadModel() must be called before startSession()"
                 )
                 callbackDispatcher.dispatchError(error)
@@ -317,11 +317,10 @@ class SpeechToText internal constructor(
                 callbackDispatcher.dispatchError(error)
                 return error
             }
+            if (lifecycleController.isRecording() || pipelineState.currentStage == SttPipelineStage.CAPTURING) {
+                return null
+            }
             if (!lifecycleController.canStartSession()) {
-                // If already in a session (RECORDING or CAPTURING), return success
-                if (lifecycleController.isRecording() || pipelineState.currentStage == SttPipelineStage.CAPTURING) {
-                    return null
-                }
                 val error = SttError(
                     code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
                     message = "Cannot start session from state ${lifecycleController.currentState}"
@@ -820,11 +819,11 @@ class SpeechToText internal constructor(
             val stt = instance
             if (stt == null) {
                 val error = SttError(
-                    code = SttErrorCode.CONFIG_PARSE_FAILED,
+                    code = SttErrorCode.CONFIG_NOT_SET,
                     message = "loadModel() must be called before startSession()"
                 )
                 // No dispatcher available outside instance; log the error
-                SttLogger.error("code=CONFIG_PARSE_FAILED, message=\"loadModel() must be called before startSession()\"")
+                SttLogger.error("code=CONFIG_NOT_SET, message=\"loadModel() must be called before startSession()\"")
                 return error
             }
             return stt.startSession()

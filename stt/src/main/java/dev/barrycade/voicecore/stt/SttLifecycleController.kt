@@ -38,7 +38,7 @@ package dev.barrycade.voicecore.stt
  * No PCM, no threading, no mode branching — only lifecycle state.
  */
 internal class SttLifecycleController(
-    private val sttErrorListener: SttErrorListener = SttErrorListener { _ -> }
+    private val sttErrorListener: SttErrorListener
 ) {
 
     private val stateMachine = SttLifecycleStateMachine(

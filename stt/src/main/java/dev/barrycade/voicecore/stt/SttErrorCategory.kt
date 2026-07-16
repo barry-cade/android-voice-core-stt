@@ -7,8 +7,7 @@ package dev.barrycade.voicecore.stt
 enum class SttErrorCategory {
     CAPTURE_ERROR,
     WHISPER_ERROR,
-    VAD_ERROR,
-    TIMEOUT,
     CONFIG_ERROR,
     UNKNOWN
 }
+

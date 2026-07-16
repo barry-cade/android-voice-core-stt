@@ -25,8 +25,6 @@ import org.json.JSONObject
  * | CONFIG_ERROR   | Show   | Descriptive message             |
  * | CAPTURE_ERROR  | Hide   | "Capture error: {message}"      |
  * | WHISPER_ERROR  | Hide   | "Inference error: {message}"    |
- * | VAD_ERROR      | Hide   | "VAD error: {message}"         |
- * | TIMEOUT        | Hide   | "Session timed out"             |
  * | UNKNOWN        | Hide   | "Error: {message}"              |
  *
  * ## Error code → AppLogCode mapping
@@ -92,8 +90,6 @@ internal object AppErrorRouter {
             "CONFIG_ERROR" -> Pair(true, message)
             "CAPTURE_ERROR" -> Pair(false, "Capture error: $message")
             "WHISPER_ERROR" -> Pair(false, "Inference error: $message")
-            "VAD_ERROR" -> Pair(false, "VAD error: $message")
-            "TIMEOUT" -> Pair(false, "Session timed out")
             else -> Pair(false, "Error: $message")
         }
     }
@@ -106,11 +102,10 @@ internal object AppErrorRouter {
     private fun logCodeForErrorCode(code: String): AppLogCode {
         return when (code) {
             "CONFIG_PARSE_FAILED" -> AppLogCode.CONFIG_INVALID
+            "CONFIG_NOT_SET" -> AppLogCode.CONFIG_INVALID
             "MODEL_LOAD_FAILED" -> AppLogCode.INIT_FAILED
             "INFERENCE_FAILED" -> AppLogCode.ASYNC_ERROR
-            "INFERENCE_TIMEOUT" -> AppLogCode.ASYNC_ERROR
             "CAPTURE_FAILED" -> AppLogCode.SESSION_ERROR
-            "VAD_FAILED" -> AppLogCode.INTERNAL_ERROR
             "PIPELINE_ILLEGAL_STATE" -> AppLogCode.INTERNAL_ERROR
             "INTERNAL_EXCEPTION" -> AppLogCode.INTERNAL_ERROR
             else -> AppLogCode.ASYNC_ERROR

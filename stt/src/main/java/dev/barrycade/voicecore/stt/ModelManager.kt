@@ -34,6 +34,26 @@ internal class ModelManager(
     }
 
     /**
+     * Core init sequence executed on [whisperExecutor].
+     * Loads model and sets [isReady] or [initFailed].
+     * After completion, invokes [onReady] callback.
+     */
+    private fun runInitSequence(onReady: () -> Unit = {}) {
+        try {
+            if (handleForcedFailure()) return
+
+            if (!loadModel()) return
+
+            isReady = true
+            SttLogger.lifecycle("ModelManager: model loaded, isReady=true")
+            onReady()
+        } catch (t: Throwable) {
+            SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
+            initFailed = true
+        }
+    }
+
+    /**
      * True when model is loaded AND warm-up has completed.
      * Checked by LifecycleController before starting capture.
      */
@@ -82,33 +102,6 @@ internal class ModelManager(
     }
 
     /**
-     * Core init sequence executed on [whisperExecutor].
-     * Loads model, runs warm-up, and sets [isReady] or [initFailed].
-     * After completion, invokes [onReady] callback.
-     */
-    private fun runInitSequence(onReady: () -> Unit = {}) {
-        try {
-            if (handleForcedFailure()) return
-
-            if (!loadModel()) return
-
-            isReady = true
-            SttLogger.lifecycle("ModelManager: model loaded, isReady=true")
-            onReady()
-        } catch (t: Throwable) {
-            SttLogger.error("code=INIT_FAILED, message=\"${t.message}\"")
-            val error = SttError(
-                code = SttErrorCode.MODEL_LOAD_FAILED,
-                message = "Model initialisation failed: ${t.message}",
-                cause = t,
-                details = listOf("exception=${t::class.java.simpleName}")
-            )
-            sttErrorListener.onSttError(error)
-            initFailed = true
-        }
-    }
-
-    /**
      * If [forceWhisperLoadFailure] is set, report error and return true.
      * Otherwise return false.
      */
@@ -116,12 +109,6 @@ internal class ModelManager(
         if (!forceWhisperLoadFailure) return false
 
         SttLogger.error("forcedFailure: MODEL_LOAD_FAILED")
-        val error = SttError(
-            code = SttErrorCode.MODEL_LOAD_FAILED,
-            message = "Forced test failure: Whisper model load",
-            details = listOf("forcedFailure=forceWhisperLoadFailure")
-        )
-        sttErrorListener.onSttError(error)
         initFailed = true
         return true
     }
@@ -139,13 +126,6 @@ internal class ModelManager(
             true
         } catch (t: Throwable) {
             SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
-            val error = SttError(
-                code = SttErrorCode.MODEL_LOAD_FAILED,
-                message = "Whisper model load failed: ${t.message}",
-                cause = t,
-                details = listOf("modelPath=$modelPathSnapshot", "exception=${t::class.java.simpleName}")
-            )
-            sttErrorListener.onSttError(error)
             initFailed = true
             false
         }
@@ -188,13 +168,6 @@ internal class ModelManager(
             true
         } catch (t: Throwable) {
             SttLogger.error("code=MODEL_LOAD_FAILED, message=\"${t.message}\"")
-            val error = SttError(
-                code = SttErrorCode.MODEL_LOAD_FAILED,
-                message = "Model load failed: ${t.message}",
-                cause = t,
-                details = listOf("exception=${t::class.java.simpleName}", "method=loadModelIfNeeded")
-            )
-            sttErrorListener.onSttError(error)
             initFailed = true
             false
         }

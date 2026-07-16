@@ -96,32 +96,18 @@ class SttErrorCodeTest {
         assertTrue(error.details.any { it.contains(exceptionMessage) })
     }
 
-    // ── VAD failure ─────────────────────────────────────────────────────
+    // ── CONFIG_NOT_SET ────────────────────────────────────────────────
 
     @Test
-    fun vadFailure_emitsVadFailed() {
+    fun configNotSet_emitsConfigNotSet() {
         val error = SttError(
-            code = SttErrorCode.VAD_FAILED,
-            message = "VAD error: frame energy computation failed",
-            details = listOf("lastRms=0.05", "lastVadState=false")
+            code = SttErrorCode.CONFIG_NOT_SET,
+            message = "loadModel() must be called before startSession()"
         )
 
-        assertEquals(SttErrorCode.VAD_FAILED, error.code)
-        assertEquals(SttErrorCategory.VAD_ERROR, error.category)
-    }
-
-    @Test
-    fun vadFailure_containsRmsAndState() {
-        val lastRms = "0.05"
-        val lastVadState = "false"
-        val error = SttError(
-            code = SttErrorCode.VAD_FAILED,
-            message = "VAD error",
-            details = listOf("lastRms=$lastRms", "lastVadState=$lastVadState")
-        )
-
-        assertTrue(error.details.any { it.contains("lastRms=$lastRms") })
-        assertTrue(error.details.any { it.contains("lastVadState=$lastVadState") })
+        assertEquals(SttErrorCode.CONFIG_NOT_SET, error.code)
+        assertEquals(SttErrorCategory.CONFIG_ERROR, error.category)
+        assertTrue(error.message.contains("loadModel()"))
     }
 
     // ── PIPELINE_ILLEGAL_STATE ──────────────────────────────────────────
@@ -196,21 +182,6 @@ class SttErrorCodeTest {
         assertTrue(error.message.contains("Invalid JSON config"))
     }
 
-    // ── INFERENCE_TIMEOUT ─────────────────────────────────────────────
-
-    @Test
-    fun inferenceTimeout_emitsInferenceTimeout() {
-        val error = SttError(
-            code = SttErrorCode.INFERENCE_TIMEOUT,
-            message = "Whisper inference timed out after 30000ms",
-            details = listOf("timeoutMs=30000")
-        )
-
-        assertEquals(SttErrorCode.INFERENCE_TIMEOUT, error.code)
-        assertEquals(SttErrorCategory.TIMEOUT, error.category)
-        assertTrue(error.message.contains("timed out"))
-    }
-
     // ── Category mapping test ───────────────────────────────────────────
 
     @Test
@@ -219,9 +190,8 @@ class SttErrorCodeTest {
             SttErrorCode.MODEL_LOAD_FAILED to SttErrorCategory.WHISPER_ERROR,
             SttErrorCode.INFERENCE_FAILED to SttErrorCategory.WHISPER_ERROR,
             SttErrorCode.CAPTURE_FAILED to SttErrorCategory.CAPTURE_ERROR,
-            SttErrorCode.VAD_FAILED to SttErrorCategory.VAD_ERROR,
             SttErrorCode.CONFIG_PARSE_FAILED to SttErrorCategory.CONFIG_ERROR,
-            SttErrorCode.INFERENCE_TIMEOUT to SttErrorCategory.TIMEOUT,
+            SttErrorCode.CONFIG_NOT_SET to SttErrorCategory.CONFIG_ERROR,
             SttErrorCode.PIPELINE_ILLEGAL_STATE to SttErrorCategory.UNKNOWN,
             SttErrorCode.INTERNAL_EXCEPTION to SttErrorCategory.UNKNOWN
         )
@@ -240,13 +210,12 @@ class SttErrorCodeTest {
         val codes = SttErrorCode.entries.toSet()
         val allCodes = SttErrorCode.entries.toList()
 
-        assertEquals("SttErrorCode must have exactly 8 values", 8, codes.size)
+        assertEquals("SttErrorCode must have exactly 7 values", 7, codes.size)
         assertTrue("must contain MODEL_LOAD_FAILED", codes.contains(SttErrorCode.MODEL_LOAD_FAILED))
         assertTrue("must contain INFERENCE_FAILED", codes.contains(SttErrorCode.INFERENCE_FAILED))
         assertTrue("must contain CAPTURE_FAILED", codes.contains(SttErrorCode.CAPTURE_FAILED))
-        assertTrue("must contain VAD_FAILED", codes.contains(SttErrorCode.VAD_FAILED))
         assertTrue("must contain CONFIG_PARSE_FAILED", codes.contains(SttErrorCode.CONFIG_PARSE_FAILED))
-        assertTrue("must contain INFERENCE_TIMEOUT", codes.contains(SttErrorCode.INFERENCE_TIMEOUT))
+        assertTrue("must contain CONFIG_NOT_SET", codes.contains(SttErrorCode.CONFIG_NOT_SET))
         assertTrue("must contain PIPELINE_ILLEGAL_STATE", codes.contains(SttErrorCode.PIPELINE_ILLEGAL_STATE))
         assertTrue("must contain INTERNAL_EXCEPTION", codes.contains(SttErrorCode.INTERNAL_EXCEPTION))
     }
@@ -271,8 +240,7 @@ class SttErrorCodeTest {
             "LIFECYCLE_VIOLATION",
             "UNKNOWN_ERROR",
             "WHISPER_ERROR",
-            "CAPTURE_ERROR",
-            "VAD_ERROR"
+            "CAPTURE_ERROR"
         )
 
         for (legacyName in legacyNames) {

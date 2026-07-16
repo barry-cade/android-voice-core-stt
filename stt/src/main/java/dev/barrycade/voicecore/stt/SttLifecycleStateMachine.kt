@@ -19,7 +19,7 @@ package dev.barrycade.voicecore.stt
  * Duplicate transitions (same state → same state) are allowed as no-ops.
  */
 internal class SttLifecycleStateMachine(
-    private val sttErrorListener: SttErrorListener = SttErrorListener { _ -> }
+    private val sttErrorListener: SttErrorListener
 ) {
 
     private val lock = Any()
