@@ -1,7 +1,6 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -11,7 +10,11 @@ import org.junit.Test
 /**
  * Tests for [ProcessorController].
  *
- * Validates lifecycle, error handling, and idempotency.
+ * Validates initial value contracts, idempotency, and accessor behaviour.
+ *
+ * NOTE: Sleep-based pipeline tests and no-assertion tests removed per audit plan.
+ * The pipeline integration path is covered by SttPipelineBehaviourTest
+ * and SttPipelineSequencingTest (merged).
  *
  * Uses [FakeCaptureManager] which implements [AudioSource].
  */
@@ -136,15 +139,6 @@ class ProcessorControllerTest {
     }
 
     @Test
-    fun drainRemainingFrames_withFrames_drainsSuccessfully() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(10, 320)
-        val controller = createController()
-        val result = controller.drainRemainingFrames()
-        // No crash is the assertion
-    }
-
-    @Test
     fun rmsSampler_isInitialized() {
         val controller = createController()
         assertNotNull("rmsSampler must be initialized", controller.rmsSampler)
@@ -170,118 +164,5 @@ class ProcessorControllerTest {
         val controller = createController()
         controller.start()
         controller.stop()
-    }
-
-    // -- Pipeline tests with FakeCaptureController ---------------------------
-
-    @Test
-    fun process_speechFrame_triggersListener() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(30, 320)
-        fakeAudioSource.addSilenceFrames(15, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(500)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull("stopAndFinalize must return PCM after speech", pcm)
-    }
-
-    @Test
-    fun process_multipleSpeechFrames_producesUtterance() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(40, 320)
-        fakeAudioSource.addSilenceFrames(15, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(600)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull(pcm)
-        assertTrue(pcm!!.isNotEmpty())
-    }
-
-    @Test
-    fun process_silenceOnly_noUtterance() {
-        fakeAudioSource.addSilenceFrames(60, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(500)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull(pcm)
-    }
-
-    @Test
-    fun process_speechThenSilence_accumulatesThenFinalizes() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(30, 320)
-        fakeAudioSource.addSilenceFrames(15, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(600)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull(pcm)
-    }
-
-    @Test
-    fun stopAndFinalize_withFrame_returnsPcm() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(30, 320)
-        fakeAudioSource.addSilenceFrames(15, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(500)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull(pcm)
-        assertTrue(pcm!!.isNotEmpty())
-    }
-
-    @Test
-    fun process_stopRequestedDuringProcessing_skipsFrame() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(10, 320)
-        val controller = createController()
-        controller.start()
-        stopRequested = true
-        Thread.sleep(100)
-        fakeAudioSource.addSpeechFrames(15, 320)
-        Thread.sleep(200)
-        controller.stop()
-    }
-
-    @Test
-    fun process_failOnStart_startCaptureReturnsFalse() {
-        fakeAudioSource.failOnStart = true
-        val controller = createController()
-        controller.start()
-        controller.stop()
-    }
-
-    @Test
-    fun process_rapidFrameInjection_noCrash() {
-        fakeAudioSource.addSilenceFrames(5, 320)
-        fakeAudioSource.addSpeechFrames(60, 320)
-        fakeAudioSource.addSilenceFrames(15, 320)
-        val controller = createController()
-        controller.start()
-        Thread.sleep(800)
-        stopRequested = true
-        Thread.sleep(200)
-        controller.stop()
-        val pcm = controller.stopAndFinalize()
-        assertNotNull(pcm)
     }
 }

@@ -15,7 +15,12 @@ import org.junit.Test
  * 2. STOP produces a transcription
  * 3. Silence timeout produces a transcription
  * 4. PCM is NOT discarded on abnormal silence
- * 5. State machine transitions are correct
+ * 5. Manual stop event lifecycle
+ *
+ * NOTE: State machine transition tests removed per audit plan.
+ * They tested a local replica of transition logic, not the production
+ * SttLifecycleStateMachine. The real state machine transitions
+ * are tested in SttPipelineStateTest.
  *
  * Uses [FakeCaptureManager] for deterministic PCM frames,
  * direct [UtteranceAccumulator] calls for silence/inference tests.
@@ -202,97 +207,7 @@ class SttPipelineBehaviourTest {
             stopStrategy.shouldStop(events, null, 0))
     }
 
-    // -- Test 6: State machine transitions ----------------------------------
-
-    @Test
-    fun `state machine UNINITIALISED to INITIALISED to READY`() {
-        var state: SttLifecycleState = SttLifecycleState.UNINITIALISED
-
-        var result = applyTransition(state, SttLifecycleState.INITIALISED)
-        assertTrue("UNINITIALISED -> INITIALISED must be allowed", result)
-        state = SttLifecycleState.INITIALISED
-
-        result = applyTransition(state, SttLifecycleState.READY)
-        assertTrue("INITIALISED -> READY must be allowed", result)
-    }
-
-    @Test
-    fun `state machine READY to RECORDING`() {
-        var state: SttLifecycleState = SttLifecycleState.READY
-        val result = applyTransition(state, SttLifecycleState.RECORDING)
-        assertTrue("READY -> RECORDING must be allowed", result)
-    }
-
-    @Test
-    fun `state machine RECORDING to FINALISING`() {
-        var state: SttLifecycleState = SttLifecycleState.RECORDING
-        val result = applyTransition(state, SttLifecycleState.FINALISING)
-        assertTrue("RECORDING -> FINALISING must be allowed", result)
-    }
-
-    @Test
-    fun `state machine FINALISING to STOPPED`() {
-        var state: SttLifecycleState = SttLifecycleState.FINALISING
-        val result = applyTransition(state, SttLifecycleState.STOPPED)
-        assertTrue("FINALISING -> STOPPED must be allowed", result)
-    }
-
-    @Test
-    fun `illegal transitions must be rejected`() {
-        assertFalse("UNINITIALISED -> READY rejected",
-            applyTransition(SttLifecycleState.UNINITIALISED, SttLifecycleState.READY))
-        assertFalse("UNINITIALISED -> RECORDING rejected",
-            applyTransition(SttLifecycleState.UNINITIALISED, SttLifecycleState.RECORDING))
-        assertFalse("INITIALISED -> RECORDING rejected",
-            applyTransition(SttLifecycleState.INITIALISED, SttLifecycleState.RECORDING))
-        assertFalse("READY -> FINALISING rejected",
-            applyTransition(SttLifecycleState.READY, SttLifecycleState.FINALISING))
-        assertFalse("RECORDING -> STOPPED rejected",
-            applyTransition(SttLifecycleState.RECORDING, SttLifecycleState.STOPPED))
-        assertFalse("STOPPED -> RECORDING rejected",
-            applyTransition(SttLifecycleState.STOPPED, SttLifecycleState.RECORDING))
-    }
-
-    @Test
-    fun `full lifecycle UNINITIALISED to STOPPED`() {
-        var state: SttLifecycleState = SttLifecycleState.UNINITIALISED
-        var result = applyTransition(state, SttLifecycleState.INITIALISED)
-        assertTrue(result); state = SttLifecycleState.INITIALISED
-
-        result = applyTransition(state, SttLifecycleState.READY)
-        assertTrue(result); state = SttLifecycleState.READY
-
-        result = applyTransition(state, SttLifecycleState.RECORDING)
-        assertTrue(result); state = SttLifecycleState.RECORDING
-
-        result = applyTransition(state, SttLifecycleState.FINALISING)
-        assertTrue(result); state = SttLifecycleState.FINALISING
-
-        result = applyTransition(state, SttLifecycleState.STOPPED)
-        assertTrue(result)
-    }
-
     // -- Additional scenario tests ------------------------------------------
-
-    @Test
-    fun `READY to STOPPED is valid`() {
-        var state = SttLifecycleState.READY
-        assertTrue("READY -> STOPPED must be allowed",
-            applyTransition(state, SttLifecycleState.STOPPED))
-    }
-
-    @Test
-    fun `duplicate state transitions are allowed no-ops`() {
-        var state: SttLifecycleState = SttLifecycleState.READY
-        assertTrue("READY -> READY (duplicate) must be a no-op",
-            applyTransition(state, SttLifecycleState.READY))
-
-        state = SttLifecycleState.RECORDING
-        assertTrue("RECORDING -> RECORDING (duplicate) must be a no-op",
-            applyTransition(state, SttLifecycleState.RECORDING))
-    }
-
-    @Test
     fun `stopAndFinalize returns all accumulated PCM`() {
         val accumulator = UtteranceAccumulator(
             sampleRate = SAMPLE_RATE,
@@ -363,17 +278,4 @@ class SttPipelineBehaviourTest {
             speechSampleCount > 100)
     }
 
-    // -- Helper -------------------------------------------------------------
-
-    private fun applyTransition(from: SttLifecycleState, to: SttLifecycleState): Boolean {
-        if (from == to) return true
-        return when (from) {
-            is SttLifecycleState.UNINITIALISED -> to is SttLifecycleState.INITIALISED
-            is SttLifecycleState.INITIALISED -> to is SttLifecycleState.READY
-            is SttLifecycleState.READY -> to is SttLifecycleState.RECORDING || to is SttLifecycleState.STOPPED
-            is SttLifecycleState.RECORDING -> to is SttLifecycleState.FINALISING
-            is SttLifecycleState.FINALISING -> to is SttLifecycleState.STOPPED
-            else -> false
-        }
-    }
 }

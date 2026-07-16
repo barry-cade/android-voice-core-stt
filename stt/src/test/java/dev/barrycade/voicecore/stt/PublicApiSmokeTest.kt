@@ -1,1 +1,0 @@
-﻿// File deleted — tested deprecated types removed in legacy-type sweep.
