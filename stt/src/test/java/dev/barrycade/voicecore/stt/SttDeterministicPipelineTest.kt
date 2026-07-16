@@ -80,13 +80,13 @@ class SttDeterministicPipelineTest {
         return """{"modelPath":"/dummy/model.bin","language":"en","debugLoggingEnabled":false,"energyThreshold":0.03,"preRollMs":100,"stableChunkSizeMs":500,"drainMode":"DRAIN_FROM_NEXT_FRAME","startType":"MANUAL","stopType":"MANUAL","warmupEnabled":false,"warmupDurationMs":0}"""
     }
 
-    private fun initSafely(): String {
+    private fun initSafely(): SttError? {
         val json = buildConfigJson()
         return try {
             speechToText.init(json)
         } catch (_: RuntimeException) {
             // ModelManager may fail with FakeWhisperModel in unit tests
-            """{"type":"result","code":"SUCCESS","text":""}"""
+            null
         }
     }
 

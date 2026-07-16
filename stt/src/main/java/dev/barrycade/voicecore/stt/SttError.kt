@@ -14,7 +14,7 @@ package dev.barrycade.voicecore.stt
  *   (e.g. "modelPath=/data/models/ggml.bin", "pcmSamples=16000").
  *   This replaces the old freeform `context` map.
  */
-internal data class SttError(
+data class SttError(
     val code: SttErrorCode,
     val message: String,
     val utteranceId: Int? = null,

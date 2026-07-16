@@ -3,6 +3,7 @@ package dev.barrycade.voicecore.stt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -59,22 +60,6 @@ class SpeechToTextNewApiTest {
     }
 
     /**
-     * Check if a JSON string contains the expected type field.
-     * Avoids using the org.json.JSONObject constructor which returns null
-     * in Android unit test environment with returnDefaultValues.
-     */
-    private fun hasJsonType(json: String, expectedType: String): Boolean {
-        return json.contains("\"type\":\"$expectedType\"")
-    }
-
-    /**
-     * Check if a JSON string contains the expected code field.
-     */
-    private fun hasJsonCode(json: String, expectedCode: String): Boolean {
-        return json.contains("\"code\":\"$expectedCode\"")
-    }
-
-    /**
      * Helper: runs [action] and catches UnsatisfiedLinkError from WhisperBridge
      * external funs when native libraries are unavailable (unit test environment),
      * and RuntimeException from ModelManager interactions.
@@ -92,11 +77,11 @@ class SpeechToTextNewApiTest {
     // ── init tests ───────────────────────────────────────────────────────
 
     @Test
-    fun init_withValidJson_returnsSuccessResult() {
+    fun init_withValidJson_returnsNullSuccess() {
         safeRun {
             val json = buildConfigJson()
             val result = speechToText.init(json)
-            assertTrue("Result should contain success type", hasJsonType(result, "result"))
+            assertNull("Result should be null (success)", result)
         }
     }
 
@@ -105,18 +90,18 @@ class SpeechToTextNewApiTest {
         val invalidJson = """{"bad": "config"}"""
         val result = speechToText.init(invalidJson)
         // loadModel catches the parse failure, dispatches via listener, and returns
-        // a result JSON with INVALID_CONFIG code (the error is on the listener path).
-        assertTrue("Result should contain result type", hasJsonType(result, "result"))
-        assertTrue("Result should contain INVALID_CONFIG code", hasJsonCode(result, "INVALID_CONFIG"))
+        // a non-null SttError with CONFIG_PARSE_FAILED code.
+        assertNotNull("Result should be non-null (error)", result)
+        assertEquals("Error code should be CONFIG_PARSE_FAILED", SttErrorCode.CONFIG_PARSE_FAILED, result!!.code)
     }
 
     @Test
-    fun init_afterInit_returnsSuccessImmediately() {
+    fun init_afterInit_returnsNullImmediately() {
         safeRun {
             val json = buildConfigJson()
             speechToText.init(json)
             val secondResult = speechToText.init(json)
-            assertTrue("Second init should return success", hasJsonType(secondResult, "result"))
+            assertNull("Second init should return null (success)", secondResult)
         }
     }
 
@@ -125,7 +110,7 @@ class SpeechToTextNewApiTest {
         safeRun {
             val json = buildConfigJson(stopType = "MANUAL")
             val result = speechToText.init(json)
-            assertNotNull("init with MANUAL must return a result", result)
+            // null means success
         }
     }
 
@@ -135,7 +120,7 @@ class SpeechToTextNewApiTest {
             val json = """{"modelPath":"/dummy/model.bin","language":"en","debugLoggingEnabled":false,"energyThreshold":0.03,"preRollMs":100,"stableChunkSizeMs":500,"drainMode":"DRAIN_FROM_NEXT_FRAME","startType":"MANUAL","stopType":"AUTO_SILENCE","silenceMs":1200,"maxDurationMs":30000,"warmupEnabled":false,"warmupDurationMs":0}"""
 
             val result = speechToText.init(json)
-            assertNotNull("init with AUTO_SILENCE must return a result", result)
+            // null means success
         }
     }
 

@@ -1,7 +1,7 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -36,14 +36,6 @@ class SpeechToTextTest {
         return """{"modelPath":"$modelPath","language":"en","debugLoggingEnabled":false,"energyThreshold":0.03,"preRollMs":100,"stableChunkSizeMs":500,"drainMode":"DRAIN_FROM_NEXT_FRAME","startType":"MANUAL","stopType":"MANUAL","warmupEnabled":false,"warmupDurationMs":0}"""
     }
 
-    private fun hasJsonType(json: String, expectedType: String): Boolean {
-        return json.contains("\"type\":\"$expectedType\"")
-    }
-
-    private fun hasJsonCode(json: String, expectedCode: String): Boolean {
-        return json.contains("\"code\":\"$expectedCode\"")
-    }
-
     private fun safeRun(action: () -> Unit) {
         try {
             action()
@@ -60,21 +52,19 @@ class SpeechToTextTest {
     }
 
     @Test
-    fun init_returnsSuccessJson() {
+    fun init_returnsNullOnSuccess() {
         safeRun {
             val result = speechToText.init(buildConfigJson())
-            assertTrue("Result should contain success type", hasJsonType(result, "result"))
-            assertTrue("Result should contain SUCCESS code", hasJsonCode(result, "SUCCESS"))
+            assertNull("Result should be null (success)", result)
         }
     }
 
     @Test
     fun init_withInvalidConfigJson_returnsError() {
         val result = speechToText.init("{}")
-        // loadModel catches the parse failure and returns a result JSON
-        // with INVALID_CONFIG code (the error is also dispatched via listener).
-        assertTrue("Result should contain result type (error on listener path)", hasJsonType(result, "result"))
-        assertTrue("Result should contain INVALID_CONFIG code", hasJsonCode(result, "INVALID_CONFIG"))
+        // loadModel catches the parse failure and returns an SttError
+        // with CONFIG_PARSE_FAILED code (the error is also dispatched via listener).
+        assertNotNull("Result should be non-null (error)", result)
     }
 
     @Test

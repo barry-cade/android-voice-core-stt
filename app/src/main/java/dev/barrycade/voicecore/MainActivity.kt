@@ -207,11 +207,11 @@ class MainActivity : ComponentActivity() {
         Thread({
             try {
                 val configJson = loadConfigForStopType(selectedStopType)
-                val resultJson = SpeechToText.loadModel(this, configJson)
+                val error = SpeechToText.loadModel(this, configJson)
                 postToUi {
-                    if (resultJson.contains("\"type\":\"error\"")) {
-                        AppLogger.log(AppLogCode.PRELOAD_FAILED, "STT returned error JSON")
-                        txtOutput.text = "Model preload error"
+                    if (error != null) {
+                        AppLogger.log(AppLogCode.PRELOAD_FAILED, "STT error: ${error.message}")
+                        txtOutput.text = "Model preload error: ${error.message}"
                     } else {
                         txtOutput.text = "Model loaded. Tap Start to record."
                     }
@@ -266,12 +266,10 @@ class MainActivity : ComponentActivity() {
             // The message listener was already registered in onCreate().
             // startSession() starts the capture — the singleton and model
             // were already loaded at app startup via loadModel().
-            val sessionResultJson = SpeechToText.startSession()
-            val sessionObj = JSONObject(sessionResultJson)
-            if (sessionObj.optString("type") == "error") {
-                val errorCode = sessionObj.optString("code", "")
-                val message = sessionObj.optString("message", "")
-                AppLogger.log(AppLogCode.SESSION_ERROR, "$errorCode: $message")
+            val sessionError = SpeechToText.startSession()
+            if (sessionError != null) {
+                val message = sessionError.message
+                AppLogger.log(AppLogCode.SESSION_ERROR, "${sessionError.code.name}: $message")
                 postToUi { txtOutput.text = "Session error: $message" }
                 return
             }

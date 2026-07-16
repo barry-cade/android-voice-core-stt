@@ -84,6 +84,7 @@ Now no `SttError(...)` construction site can forget to set category — they can
 **File:** `stt/.../SttError.kt`
 
 Remove these fields:
+
 - `timingSnapshotMs`
 - `lastRms`
 - `lastVadState`
@@ -94,9 +95,11 @@ Remove these fields:
 - `motionModeActive`
 
 Replace `context: Map<String, Any?>` with:
+
 - `details: List<String>` — empty by default
 
 Keep everything else:
+
 - `category` → use `code.category` at call sites
 - `code`
 - `message`
@@ -161,6 +164,7 @@ catch (t: Throwable) {
 ```
 
 **Propagation path:**
+
 - `CaptureManager` → throws → `SttCaptureController.startCapture()` → throws → `SpeechToText.startProcessor()` → needs try/catch around `controller.start()` → emits `SttError` and transitions to safe state.
 
 **Dependency:** 2.2 must be done first (new `SttError` signature).
@@ -289,6 +293,7 @@ Include `details` in the `outputText` and log output.
 **File:** `stt/.../SttJsonAdapter.kt`
 
 In `buildErrorJson()`:
+
 - Category is now accessed from `code` parameter — `category` can be derived from `SttErrorCode`.
 - Add `details` array serialization.
 

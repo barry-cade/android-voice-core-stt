@@ -188,35 +188,29 @@ internal object SttJsonAdapter {
      * }
      * ```
      *
-     * @param code Machine-readable error code string.
-     * @param category Human-readable error category (nullable for backward compatibility).
+     * @param code Machine-readable error code.
      * @param message Human-readable error description.
      * @param details Optional human-readable diagnostic bullet points.
      */
     fun buildErrorJson(
-        code: String,
+        code: SttErrorCode,
         message: String,
-        category: String? = null,
         details: List<String> = emptyList()
     ): String {
         val sb = StringBuilder()
-        sb.append("{\"type\":\"error\"")
-        if (category != null) {
-            sb.append(",\"category\":\"")
-            sb.append(escapeJson(category))
-            sb.append('"')
-        }
-        sb.append(",\"code\":\"")
-        sb.append(escapeJson(code))
+        sb.append("{\"type\":\"error\",\"category\":\"")
+        sb.append(code.category.name)
+        sb.append("\",\"code\":\"")
+        sb.append(code.name)
         sb.append("\",\"message\":\"")
         sb.append(escapeJson(message))
         sb.append('"')
         if (details.isNotEmpty()) {
             sb.append(",\"details\":[")
-            for (i in details.indices) {
-                if (i > 0) sb.append(',')
+            details.forEachIndexed { index, detail ->
+                if (index > 0) sb.append(',')
                 sb.append('"')
-                sb.append(escapeJson(details[i]))
+                sb.append(escapeJson(detail))
                 sb.append('"')
             }
             sb.append(']')

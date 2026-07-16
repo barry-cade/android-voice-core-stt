@@ -10,10 +10,12 @@
 
 - [ ] Current session has read `ERROR_SUBSYSTEM_PHASE2_PLAN.md` for architectural context
 - [ ] `ERROR_SUBSYSTEM_REWORK_PLAN.md` Phase 1 is fully [DONE] — confirm by running:
+
   ```
   ./gradlew :stt:compileDebugKotlin :app:compileDebugKotlin
   ./gradlew :stt:testDebugUnitTest :app:testDebugUnitTest
   ```
+
 - [ ] Baseline tests pass before starting Phase 2 changes
 
 ---

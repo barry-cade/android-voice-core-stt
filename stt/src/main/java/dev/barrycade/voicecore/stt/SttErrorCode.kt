@@ -9,7 +9,7 @@ package dev.barrycade.voicecore.stt
  *        Every [SttError] construction site uses `code.category` rather than
  *        hardcoding a category value.
  */
-internal enum class SttErrorCode(val category: SttErrorCategory) {
+enum class SttErrorCode(val category: SttErrorCategory) {
     MODEL_LOAD_FAILED(SttErrorCategory.WHISPER_ERROR),
     INFERENCE_FAILED(SttErrorCategory.WHISPER_ERROR),
     CAPTURE_FAILED(SttErrorCategory.CAPTURE_ERROR),

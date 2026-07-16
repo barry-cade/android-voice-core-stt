@@ -146,9 +146,8 @@ internal class SttCallbackDispatcher {
         sttErrorSnapshot?.onSttError(error)
         messageSnapshot?.invoke(
             SttJsonAdapter.buildErrorJson(
-                code = error.code.name,
+                code = error.code,
                 message = error.message,
-                category = error.category.name,
                 details = error.details
             )
         )

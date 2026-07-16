@@ -172,24 +172,25 @@ class SpeechToText internal constructor(
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
      * @return A JSON result string on success, or a JSON error string on failure.
      */
-    fun loadModel(configJson: String): String {
+    fun loadModel(configJson: String): SttError? {
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
         } catch (e: IllegalArgumentException) {
-            callbackDispatcher.dispatchError(SttError(
+            val error = SttError(
                 code = SttErrorCode.CONFIG_PARSE_FAILED,
                 message = e.message ?: "Config parse failed",
                 cause = e,
                 details = listOf("configJson=$configJson")
-            ))
-            return SttJsonAdapter.buildResultJson("", SttReturnCode.INVALID_CONFIG, null)
+            )
+            callbackDispatcher.dispatchError(error)
+            return error
         }
 
         synchronized(stateLock) {
             // ── Idempotency guard ─────────────────────────────────────────────
             if (sessionConfig != null || lifecycleController.currentState is SttLifecycleState.READY) {
                 SttLogger.lifecycle("loadModel: already initialised — returning SUCCESS")
-                return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+                return null
             }
 
             // ── Step 1: Build immutable session config ────────────────────────
@@ -201,7 +202,12 @@ class SpeechToText internal constructor(
             modelManager.updateModelPath(sessionCfg.modelPath)
             if (!modelManager.loadModelIfNeeded()) {
                 sessionConfig = null
-                return SttJsonAdapter.buildErrorJson("INIT_FAILED", "Model load failed", category = SttErrorCategory.WHISPER_ERROR.name)
+                val error = SttError(
+                    code = SttErrorCode.MODEL_LOAD_FAILED,
+                    message = "Model load failed"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
 
             // ── Step 3: Warm-up (once per app lifetime) ───────────────────────
@@ -250,7 +256,7 @@ class SpeechToText internal constructor(
             lifecycleController.onReady()
             SttLogger.lifecycle("loadModel: model loaded, pipeline configured — call startSession() to begin capture")
 
-            return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+            return null
         }
     }
 
@@ -266,46 +272,63 @@ class SpeechToText internal constructor(
      * @return A JSON result string on success, or a JSON error string
      *         on failure (e.g. model not loaded).
      */
-    fun startSession(): String {
+    fun startSession(): SttError? {
         synchronized(stateLock) {
             // ── Guard: must have loaded a model ───────────────────────────────
             val cfg = sessionConfig
             if (cfg == null) {
-                return SttJsonAdapter.buildErrorJson(
-                    "SESSION_FAILED",
-                    "loadModel() must be called before startSession()",
-                    category = SttErrorCategory.CONFIG_ERROR.name
+                val error = SttError(
+                    code = SttErrorCode.CONFIG_PARSE_FAILED,
+                    message = "loadModel() must be called before startSession()"
                 )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
 
             val runtimeCfg = cfg.runtimeConfig
 
             if (!modelManager.isReady) {
-                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Model not ready", category = SttErrorCategory.WHISPER_ERROR.name)
+                val error = SttError(
+                    code = SttErrorCode.MODEL_LOAD_FAILED,
+                    message = "Model not ready"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
             if (isInferencing.get()) {
-                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Inference already active", category = SttErrorCategory.UNKNOWN.name)
+                val error = SttError(
+                    code = SttErrorCode.INFERENCE_FAILED,
+                    message = "Inference already active"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
             if (!lifecycleController.canStartSession()) {
                 // If already in a session (RECORDING or CAPTURING), return success
                 if (lifecycleController.isRecording() || pipelineState.currentStage == SttPipelineStage.CAPTURING) {
-                    return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+                    return null
                 }
-                return SttJsonAdapter.buildErrorJson(
-                    "SESSION_FAILED",
-                    "Cannot start session from state ${lifecycleController.currentState}",
-                    category = SttErrorCategory.UNKNOWN.name
+                val error = SttError(
+                    code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
+                    message = "Cannot start session from state ${lifecycleController.currentState}"
                 )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
 
             events.manualStartPressed.raise()
             if (!runtimeCfg.startStrategy.shouldStart(events, vad)) {
-                return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+                return null
             }
 
             currentSessionEpoch = sessionEpoch.incrementAndGet()
             if (!transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "startSession")) {
-                return SttJsonAdapter.buildErrorJson("SESSION_FAILED", "Pipeline stage transition failed", category = SttErrorCategory.UNKNOWN.name)
+                val error = SttError(
+                    code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
+                    message = "Pipeline stage transition failed"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
             }
             sessionController.beginSession()
             captureController.startCapture(modeController.isManualMode())
@@ -319,7 +342,7 @@ class SpeechToText internal constructor(
             }
 
             SttLogger.lifecycle("startSession: capture started")
-            return SttJsonAdapter.buildResultJson("", SttReturnCode.SUCCESS, null)
+            return null
         }
     }
 
@@ -334,19 +357,10 @@ class SpeechToText internal constructor(
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
      * @return A JSON result string on success, or a JSON error string on failure.
      */
-    fun init(configJson: String): String {
-        val loadResult = loadModel(configJson)
-        if (hasJsonError(loadResult) || hasJsonCode(loadResult, "INVALID_CONFIG")) {
-            return loadResult
-        }
+    fun init(configJson: String): SttError? {
+        val loadError = loadModel(configJson)
+        if (loadError != null) return loadError
         return startSession()
-    }
-
-    /**
-     * Check if a JSON string contains a specific code field.
-     */
-    private fun hasJsonCode(json: String, expectedCode: String): Boolean {
-        return json.contains("\"code\":\"$expectedCode\"")
     }
 
     /**
@@ -729,13 +743,6 @@ class SpeechToText internal constructor(
         }
     }
 
-    /**
-     * Returns true if the given JSON result string represents an error.
-     */
-    private fun hasJsonError(json: String): Boolean {
-        return json.contains("\"type\":\"error\"")
-    }
-
     companion object {
         @Volatile
         var instance: SpeechToText? = null
@@ -758,7 +765,7 @@ class SpeechToText internal constructor(
          * @param configJson A JSON string conforming to the input config schema.
          * @return A JSON result string on success, or a JSON error string on failure.
          */
-        fun loadModel(context: Context, configJson: String): String {
+        fun loadModel(context: Context, configJson: String): SttError? {
             val appCtx = context.applicationContext
 
             val stt = instance ?: synchronized(this) {
@@ -781,16 +788,18 @@ class SpeechToText internal constructor(
          * Delegates to the singleton instance's [startSession].
          * [loadModel] must have been called first.
          *
-         * @return A JSON result string on success, or a JSON error string on failure.
+         * @return An [SttError] on failure, or null on success.
          */
-        fun startSession(): String {
+        fun startSession(): SttError? {
             val stt = instance
             if (stt == null) {
-                return SttJsonAdapter.buildErrorJson(
-                    "SESSION_FAILED",
-                    "loadModel() must be called before startSession()",
-                    category = SttErrorCategory.CONFIG_ERROR.name
+                val error = SttError(
+                    code = SttErrorCode.CONFIG_PARSE_FAILED,
+                    message = "loadModel() must be called before startSession()"
                 )
+                // No dispatcher available outside instance; log the error
+                SttLogger.error("code=CONFIG_PARSE_FAILED, message=\"loadModel() must be called before startSession()\"")
+                return error
             }
             return stt.startSession()
         }
@@ -807,9 +816,9 @@ class SpeechToText internal constructor(
          *
          * @param context Application or Activity context (applicationContext is used internally).
          * @param configJson A JSON string conforming to the input config schema.
-         * @return A JSON result string on success, or a JSON error string on failure.
+         * @return An [SttError] on failure, or null on success.
          */
-        fun init(context: Context, configJson: String): String {
+        fun init(context: Context, configJson: String): SttError? {
             val appCtx = context.applicationContext
 
             val stt = instance ?: synchronized(this) {
