@@ -110,7 +110,7 @@ Java_dev_barrycade_voicecore_stt_WhisperBridge_transcribe(JNIEnv *env, jobject /
     wparams.print_progress = false;
     wparams.print_realtime = false;
     wparams.translate = false;
-    wparams.no_context = false;     // enable context for streaming
+    wparams.no_context = true;      // standalone utterance — no context accumulation across calls
     wparams.max_tokens = 128;       // or -1 for full decode
 
     LOGD("Starting whisper_full");
