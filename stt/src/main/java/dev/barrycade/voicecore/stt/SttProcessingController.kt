@@ -63,8 +63,10 @@ internal class SttProcessingController(
         vad = Vad(config)
         vad.debugLogging = config.debugLoggingEnabled
 
-        utteranceAccumulator = UtteranceAccumulator(config)
-        utteranceAccumulator.sttErrorListener = sttErrorListener
+        utteranceAccumulator = UtteranceAccumulator(
+            config = config,
+            sttErrorListener = sttErrorListener
+        )
         if (forceTimeout) {
             utteranceAccumulator.forceTimeout = true
         }

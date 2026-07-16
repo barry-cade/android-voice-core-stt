@@ -45,23 +45,23 @@ internal class UtteranceAccumulator(
     private val vad: Vad = Vad(),
     private val utteranceMaxDurationMs: Int = 30000,
     private val utteranceSilenceTimeoutMs: Int = 5000,
-    private val debugLoggingEnabled: Boolean = false
+    private val debugLoggingEnabled: Boolean = false,
+    private val sttErrorListener: SttErrorListener? = null
 ) {
     constructor(
         config: RuntimeSttConfig,
         sampleRate: Int = 16000,
-        vad: Vad = Vad(config)
+        vad: Vad = Vad(config),
+        sttErrorListener: SttErrorListener? = null
     ) : this(
         sampleRate = sampleRate,
         preRollMs = config.preRollMs,
         vad = vad,
         utteranceMaxDurationMs = config.autoMaxDurationMs,
         utteranceSilenceTimeoutMs = config.stableChunkSizeMs,
-        debugLoggingEnabled = config.debugLoggingEnabled
+        debugLoggingEnabled = config.debugLoggingEnabled,
+        sttErrorListener = sttErrorListener
     )
-
-    /** Error listener forwarded from SpeechToText for structured error reporting. */
-    internal var sttErrorListener: SttErrorListener? = null
 
     /** Testing hook: when true, simulates max-utterance timeout on first speech frame. */
     internal var forceTimeout: Boolean = false
