@@ -335,6 +335,7 @@ class SpeechToText internal constructor(
             }
 
             currentSessionEpoch = sessionEpoch.incrementAndGet()
+            stopRequest.clear()
             if (!transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "startSession")) {
                 val error = SttError(
                     code = SttErrorCode.PIPELINE_ILLEGAL_STATE,

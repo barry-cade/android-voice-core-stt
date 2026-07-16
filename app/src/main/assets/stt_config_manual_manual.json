@@ -4,7 +4,9 @@
     "debugLoggingEnabled": false
   },
   "vadConfig": {
-    "energyThreshold": 0.002
+    "energyThreshold": 0.0015,
+    "preRollMs": 0,
+    "stableChunkSizeMs": 500
   },
   "drainMode": "DRAIN_FROM_HEAD",
   "startStrategy": {
