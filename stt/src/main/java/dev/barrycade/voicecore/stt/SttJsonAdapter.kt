@@ -105,6 +105,9 @@ internal object SttJsonAdapter {
         val warmupEnabled = resolveBoolean(json, "warmupEnabled") ?: false
         val warmupDurationMs = resolveInt(json, "warmupDurationMs") ?: 0
 
+        // ── Session timeout (optional, 0 = no timeout) ───────────────────
+        val sessionTimeoutMs = resolveInt(json, "sessionTimeoutMs") ?: 0
+
         // ── Buffer size (optional) ───────────────────────────────────────
         val bufferSizeSamples = resolveInt(json, "bufferSizeSamples") ?: 4000
 
@@ -118,6 +121,7 @@ internal object SttJsonAdapter {
             drainMode = drainMode,
             startTrigger = startTrigger,
             stopTrigger = stopTrigger,
+            sessionTimeoutMs = sessionTimeoutMs,
             warmupEnabled = warmupEnabled,
             warmupDurationMs = warmupDurationMs,
             bufferSizeSamples = bufferSizeSamples

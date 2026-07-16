@@ -52,6 +52,7 @@ internal data class SttConfig(
     val drainMode: DrainMode,
     val startTrigger: StartTrigger,
     val stopTrigger: StopTrigger,
+    val sessionTimeoutMs: Int = 0,
     val warmupEnabled: Boolean = false,
     val warmupDurationMs: Int = 0,
     val bufferSizeSamples: Int = 4000
@@ -65,6 +66,9 @@ internal data class SttConfig(
         }
         require(stableChunkSizeMs in 50..2000) {
             "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
+        }
+        require(sessionTimeoutMs >= 0) {
+            "sessionTimeoutMs=$sessionTimeoutMs must be >= 0"
         }
         require(bufferSizeSamples in 1024..16000) {
             "bufferSizeSamples=$bufferSizeSamples must be in [1024, 16000]"

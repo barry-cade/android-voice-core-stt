@@ -14,5 +14,6 @@
   },
   "stopStrategy": {
     "type": "MANUAL"
-  }
+  },
+  "sessionTimeoutMs": 60000
 }

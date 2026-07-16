@@ -408,9 +408,18 @@ class SpeechToText internal constructor(
 
             SttLogger.pcm("entered -- isRunning=${isRunning.get()}, state=${lifecycleController.currentState}")
 
+            // ── Session timeout check (safety limit) ────────────────────────
+            // Checked before the stop strategy so the timeout can force-stop
+            // even when the user never pressed Stop (abandoned session).
+            val sessionTimeoutMs = runtimeCfg.sessionTimeoutMs
+            val timedOut = sessionTimeoutMs > 0 && elapsedMs >= sessionTimeoutMs
+            if (timedOut) {
+                SttLogger.lifecycle("session timeout: ${elapsedMs}ms >= ${sessionTimeoutMs}ms — forcing finalisation")
+            }
+
             events.manualStopPressed.raise()
 
-            if (!runtimeCfg.stopStrategy.shouldStop(events, vad, elapsedMs)) {
+            if (!timedOut && !runtimeCfg.stopStrategy.shouldStop(events, vad, elapsedMs)) {
                 return
             }
 
@@ -464,9 +473,10 @@ class SpeechToText internal constructor(
 
             val vadMs = processingController?.vadActiveMs ?: 0L
             val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
+            val returnCode = if (timedOut) SttReturnCode.SESSION_TIMEOUT else SttReturnCode.SUCCESS
             val submitted = submitInferenceAndDispatch(
                 pcm = finalPcm,
-                code = SttReturnCode.SUCCESS,
+                code = returnCode,
                 vadActiveMs = vadMs,
                 utteranceMs = utterMs,
                 captureMs = timingMs,

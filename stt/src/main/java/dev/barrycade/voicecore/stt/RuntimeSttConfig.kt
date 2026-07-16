@@ -18,6 +18,8 @@ package dev.barrycade.voicecore.stt
  * @property autoSilenceMs Silence threshold used by StopStrategy for auto-silence mode (ms).
  * @property autoMaxDurationMs Max utterance duration (ms). Mapped to UtteranceAccumulator's
  *         utteranceMaxDurationMs. Also used by StopStrategy for auto-silence and duration modes.
+ * @property sessionTimeoutMs Safety timeout for session duration (ms). 0 = no timeout.
+ *         Checked in [SpeechToText.transcribe] before the stop strategy gate.
  * @property warmupEnabled Whether Whisper warm-up is enabled.
  * @property warmupDurationMs Duration of warm-up inference (ms).
  */
@@ -35,6 +37,9 @@ internal data class RuntimeSttConfig(
     // ── Utterance-accumulator fields ─────────────────────────────────────
     val autoSilenceMs: Int = 1200,
     val autoMaxDurationMs: Int = 30000,
+
+    // ── Session safety timeout (0 = no timeout) ──────────────────────────
+    val sessionTimeoutMs: Int = 0,
 
     // ── Warm-up fields ───────────────────────────────────────────────────
     val warmupEnabled: Boolean = false,
@@ -62,6 +67,7 @@ internal data class RuntimeSttConfig(
                 stopStrategy = stopStrategy,
                 autoSilenceMs = autoSilenceMs,
                 autoMaxDurationMs = autoMaxDurationMs,
+                sessionTimeoutMs = sttCfg.sessionTimeoutMs,
                 warmupEnabled = sttCfg.warmupEnabled,
                 warmupDurationMs = sttCfg.warmupDurationMs
             )

@@ -13,6 +13,7 @@ package dev.barrycade.voicecore.stt
  * - [MAX_DURATION_REACHED] — max utterance duration exceeded.
  * - [AUTO_SILENCE_TRIGGERED] — auto-silence threshold reached (manual/auto mode).
  * - [ABNORMAL_SILENCE] — abnormal silence detected (manual/manual mode).
+ * - [SESSION_TIMEOUT] — session safety timeout reached (manual/manual mode).
  * - [ENGINE_ERROR] — internal pipeline error.
  */
 internal enum class SttReturnCode {
@@ -33,6 +34,9 @@ internal enum class SttReturnCode {
 
     /** Abnormal silence detected in MANUAL_MANUAL mode. */
     ABNORMAL_SILENCE,
+
+    /** Session safety timeout reached (sessionTimeoutMs exceeded). */
+    SESSION_TIMEOUT,
 
     /** Internal pipeline error occurred during the session. */
     ENGINE_ERROR
