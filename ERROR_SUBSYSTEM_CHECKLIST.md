@@ -1,3 +1,7 @@
+--------------------------------------------------------------
+SUPERSEDED: See ERROR_SUBSYSTEM_CONSOLIDATED_PLAN.md
+--------------------------------------------------------------
+
 # Error Subsystem — Session-Persistent Task Checklist
 
 **Instructions for CATO:** This file tracks task progress across sessions.  
@@ -230,3 +234,4 @@
 | `ProcessorController.kt` | Processing loop errors (NEEDS FIX) |
 | `SttLifecycleStateMachine.kt` | Lifecycle invariant enforcement (NEEDS FIX) |
 | `UtteranceAccumulator.kt` | Force-timeout error emission |
+

@@ -1,3 +1,7 @@
+--------------------------------------------------------------
+SUPERSEDED: See ERROR_SUBSYSTEM_CONSOLIDATED_PLAN.md
+--------------------------------------------------------------
+
 # Error Subsystem Phase 2 — Semantic Filling Plan
 
 **Status:** Proposed  
@@ -352,3 +356,4 @@ Since backward compatibility is not required, we make these changes in one pass:
 | `stt/.../SttErrorCodeTest.kt` | Add category-mapping test |
 | `stt/.../SttErrorDeliveryTest.kt` | NEW — integration test |
 | `ERROR_SUBSYSTEM_REWORK_PLAN.md` | Mark Phase 1 complete; reference Phase 2 |
+

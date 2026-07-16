@@ -1,3 +1,7 @@
+--------------------------------------------------------------
+SUPERSEDED: See ERROR_SUBSYSTEM_CONSOLIDATED_PLAN.md
+--------------------------------------------------------------
+
 # Error Subsystem Rework — CATO Execution Plan
 
 ## State: IN PROGRESS
@@ -166,3 +170,4 @@ Status markers: [DONE] = complete, [WIP] = in progress, [TODO] = not started
 | `app/.../NewApiSmokeTest.kt` | [DONE] | Passes unchanged (old error JSON format still works with optional `category`). |
 | `app/.../AppErrorRouterTest.kt` | [TODO] | Future — unit test the router in isolation. |
 | `stt/.../SttCallbackDispatcherTest.kt` | [DONE] | Updated 3 `dispatchError` calls to use `SttError`. |
+
