@@ -51,19 +51,26 @@ Only the following top-level type is exposed:
 
 - `SpeechToText` — main entry point
 
-All other types are internal.
+All other types are `internal`.
 
-### Factory function
+### Constructor
 
 ```kotlin
-fun SpeechToText(context: Context?): SpeechToText
+class SpeechToText internal constructor(...)
+```
+
+The constructor is `internal`. Create instances using the public constructor
+(which accepts optional test doubles via named parameters):
+
+```kotlin
+val stt = SpeechToText(context = applicationContext)
 ```
 
 ### Methods
 
 | Method | Description |
 |--------|-------------|
-| `init(configJson: String): String` | Initialise STT from a JSON config string. Returns JSON result or error. Starts capture. |
+| `init(configJson: String): SttError?` | Initialise STT from a JSON config string. Returns `null` on success, or an `SttError` on failure. Starts capture. |
 | `transcribe()` | Stop capture, run inference, deliver result via `setOnMessageListener`. |
 | `setOnMessageListener(l: (String) -> Unit)` | Unified message listener. Receives JSON result or error strings. |
 
@@ -180,11 +187,11 @@ For `startType = "WAKEWORD"`, also include:
 ## Lifecycle
 
 ```
-UNINITIALISED → INITIALISED → READY → CAPTURING → INFERENCING → DISPATCHING → IDLE → ...
+UNINITIALISED → INITIALISED → READY → RECORDING → FINALISING → READY → ...
 ```
 
 - `init()` transitions to `READY` and automatically starts capture
-- `transcribe()` transitions to `FINALISING`, runs inference, then returns to `READY`
+- `transcribe()` transitions through RECORDING → FINALISING → READY
 - Construction creates the object but does NOT load the model — call `init()` first
 
 ## Stale Callback Rejection (Epoch Model)
@@ -194,17 +201,23 @@ UNINITIALISED → INITIALISED → READY → CAPTURING → INFERENCING → DISPAT
 - Callbacks whose epoch does not match the current active epoch are dropped
 - This prevents stale results from out-of-order sessions
 
-## Manual vs Auto Modes
+## Start/Stop Strategies
 
-- **Manual mode** (`startType: "MANUAL"`, `stopType: "MANUAL"`):
+Configured via JSON fields `startType` and `stopType`:
+
+- **Manual start / Manual stop** (`startType: "MANUAL"`, `stopType: "MANUAL"`):
   - Start and stop on explicit caller request
   - No VAD processing during capture
   - PCM buffered until `transcribe()` is called
 
-- **Auto mode** (`stopType: "AUTO_SILENCE"`):
+- **Manual start / Auto silence stop** (`stopType: "AUTO_SILENCE"`):
   - Capture stops automatically after sustained silence
   - VAD is active during capture
   - UtteranceAccumulator manages utterance boundaries
+
+- **VAD start** (`startType: "VAD_START"`):
+  - Recording starts automatically when speech crosses the VAD threshold
+  - Requires `vadStartThreshold` and `minSpeechMs` in the JSON config
 
 ## Installation
 
@@ -249,13 +262,18 @@ Early-close logic (Auto mode):
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| `SUCCESS` | Operation completed successfully |
-| `INVALID_CONFIG` | JSON config parsing failed |
-| `MODEL_LOAD_FAILED` | Whisper model failed to load |
-| `INIT_FAILED` | Initialisation failed |
-| `INTERNAL_EXCEPTION` | Unexpected internal error |
+| Code | Category | Description |
+|------|----------|-------------|
+| `MODEL_LOAD_FAILED` | WHISPER_ERROR | Whisper model failed to load |
+| `INFERENCE_FAILED` | WHISPER_ERROR | Whisper inference returned an error |
+| `CAPTURE_FAILED` | CAPTURE_ERROR | Audio capture failed to start |
+| `CONFIG_PARSE_FAILED` | CONFIG_ERROR | JSON config parsing failed |
+| `CONFIG_NOT_SET` | CONFIG_ERROR | Config not provided before session |
+| `PIPELINE_ILLEGAL_STATE` | UNKNOWN | Illegal lifecycle transition |
+| `INTERNAL_EXCEPTION` | UNKNOWN | Unexpected internal error |
+
+Errors are delivered via `setOnMessageListener` as JSON, or returned directly
+from `init()` as `SttError?`.
 
 ## Testing
 
