@@ -245,10 +245,19 @@ class SpeechToText internal constructor(
             }
 
             // ── Step 5: Construct STT scaffolding via mode controller ─────────
+            // The onTimeoutRef is a reference to transcribe() so that session
+            // timeout fires on the MinimalPollingController worker thread.
+            val sessionTimeoutMs = runtimeCfg.sessionTimeoutMs
+            val onTimeoutRef: () -> Unit = if (sessionTimeoutMs > 0) {
+                { this@SpeechToText.transcribe() }
+            } else {
+                {}
+            }
             modeController.selectController(
                 config = runtimeCfg,
                 captureManager = sessionManager,
-                stopRequestedRef = stopRequest.asSupplier()
+                stopRequestedRef = stopRequest.asSupplier(),
+                onTimeoutRef = onTimeoutRef
             )
 
             if (!modeController.isManualMode()) {

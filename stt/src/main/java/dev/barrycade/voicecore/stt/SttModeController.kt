@@ -63,17 +63,24 @@ internal class SttModeController {
      * when [config.energyThreshold] is positive. The [VadGate] filters out silence
      * frames so only speech-level PCM enters the session buffer.
      *
+     * When [config.sessionTimeoutMs] > 0, a session timeout is set on the
+     * [MinimalPollingController]. [onTimeoutRef] is invoked on the worker thread
+     * when the timeout fires.
+     *
      * In Auto mode: no controller is constructed here — [ProcessorController] is
      * owned by [SttProcessingController] and constructed separately.
      *
      * @param config The runtime config to use for component construction.
      * @param captureManager The session manager for PCM sourcing.
      * @param stopRequestedRef Supplier that returns true when stop has been requested.
+     * @param onTimeoutRef Called on the worker thread when session timeout fires.
+     *        No-op by default.
      */
     fun selectController(
         config: RuntimeSttConfig,
         captureManager: SessionManager,
-        stopRequestedRef: () -> Boolean
+        stopRequestedRef: () -> Boolean,
+        onTimeoutRef: () -> Unit = {}
     ) {
         synchronized(lock) {
             manualMode = isManualModeByConfig(config)
@@ -87,11 +94,14 @@ internal class SttModeController {
                 minimalProcessorController = MinimalPollingController(
                     audioSource = captureManager,
                     stopRequestedRef = stopRequestedRef,
+                    sessionTimeoutMs = config.sessionTimeoutMs,
+                    onTimeout = onTimeoutRef,
                     vadGate = vadGate
                 )
                 SttLogger.lifecycle(
                     "SttModeController: Manual mode — MinimalPollingController constructed " +
-                    "(vadGate=${vadGate != null}, energyThreshold=${config.energyThreshold})"
+                    "(vadGate=${vadGate != null}, energyThreshold=${config.energyThreshold}, " +
+                    "sessionTimeoutMs=${config.sessionTimeoutMs})"
                 )
             } else {
                 SttLogger.lifecycle("SttModeController: Auto mode — processor owned by SttProcessingController")
@@ -152,6 +162,16 @@ internal class SttModeController {
  * Polls PCM frames from [AudioSource] in a loop, discarding them
  * from the AudioCapture queue to prevent unbounded growth.
  *
+ * ## Session timeout (optional)
+ *
+ * When [sessionTimeoutMs] > 0, the polling loop tracks elapsed time from
+ * [start]. If the session duration exceeds the threshold, [onTimeout] is
+ * invoked and the loop exits. This prevents abandoned sessions from
+ * holding the microphone indefinitely.
+ *
+ * [onTimeout] is invoked on the worker thread. Callers must post to their
+ * own Handler or Dispatchers.Main if main-thread delivery is required.
+ *
  * ## VAD gating (optional)
  *
  * When a [vadGate] is provided, the controller uses [AudioSource.pollFrameWithoutAppend]
@@ -169,6 +189,8 @@ internal class SttModeController {
  *
  * @param audioSource PCM frame source.
  * @param stopRequestedRef Supplier that returns true when stop has been requested.
+ * @param sessionTimeoutMs Session duration safety limit (ms). 0 = no timeout.
+ * @param onTimeout Called on the worker thread when [sessionTimeoutMs] is exceeded.
  * @param vadGate Optional VAD gate for energy-based frame filtering. When non-null,
  *        only frames with speech-level RMS energy are accumulated. When null,
  *        all frames are accumulated (original behaviour).
@@ -176,6 +198,10 @@ internal class SttModeController {
 internal class MinimalPollingController(
     private val audioSource: AudioSource,
     private val stopRequestedRef: () -> Boolean,
+    /** Session duration safety limit (ms). 0 = no timeout. */
+    private val sessionTimeoutMs: Int = 0,
+    /** Called on the worker thread when [sessionTimeoutMs] is exceeded. */
+    private val onTimeout: (() -> Unit)? = null,
     /**
      * Optional VAD gate for energy-based frame filtering.
      * Exposed as [vadGate] for the [SttCaptureController.finaliseAndStop] path —
@@ -208,9 +234,25 @@ internal class MinimalPollingController(
         isRunning = true
 
         val useVadGate = vadGate != null
+        val hasTimeout = sessionTimeoutMs > 0
+        val sessionStartMs = System.currentTimeMillis()
 
         val runnable = Runnable {
             while (isRunning) {
+                // ── Session timeout check ────────────────────────────────────
+                if (hasTimeout) {
+                    val elapsedMs = System.currentTimeMillis() - sessionStartMs
+                    if (elapsedMs >= sessionTimeoutMs) {
+                        SttLogger.lifecycle(
+                            "MinimalPollingController: session timeout " +
+                            "(${elapsedMs}ms >= ${sessionTimeoutMs}ms)"
+                        )
+                        isRunning = false
+                        onTimeout?.invoke()
+                        break
+                    }
+                }
+
                 if (stopRequestedRef()) {
                     try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
                     continue
