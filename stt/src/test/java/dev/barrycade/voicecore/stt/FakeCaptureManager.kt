@@ -99,7 +99,7 @@ internal class FakeCaptureManager(
      * Temporary placeholder — matches real CaptureManager.beginPcmCapture().
      * Phase 2 will refine the split.
      */
-    override fun beginPcmCapture() {
+    override fun beginPcmCapture(): Boolean {
         sessionBuffer.clear()
         sttActive = false
         sessionActive = true
@@ -108,6 +108,7 @@ internal class FakeCaptureManager(
             isStarted = true
         }
         SttLogger.pcm("FakeCaptureManager.beginPcmCapture() — capture started")
+        return true
     }
 
     /**
@@ -188,9 +189,10 @@ internal class FakeCaptureManager(
     /**
      * Restart capture after a prior [finalize] stopped it.
      */
-    override fun restartCapture() {
-        if (isStarted) return
+    override fun restartCapture(): Boolean {
+        if (isStarted) return true
         isStarted = true
+        return true
     }
 
     // ── Frame injection helpers ─────────────────────────────────────────

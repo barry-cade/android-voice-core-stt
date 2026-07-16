@@ -162,7 +162,7 @@ internal class CaptureManager(
      * AudioCapture synchronously. Capture begins immediately so frames
      * are available before the drain thread starts.
      */
-    override fun beginPcmCapture() {
+    override fun beginPcmCapture(): Boolean {
         clearSessionBuffer()
 
         var shouldStartCapture = false
@@ -175,24 +175,24 @@ internal class CaptureManager(
             }
         }
 
+        if (!shouldStartCapture) return true
+
         // Start AudioCapture synchronously — capture begins immediately.
-        // This must complete before the drain thread starts.
-        if (shouldStartCapture) {
-            SttLogger.pcm("beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
-            try {
-                audioCapture.start()
-            } catch (t: Throwable) {
-                synchronized(stateLock) {
-                    captureStarted = false
-                }
-                sttErrorListener?.onSttError(SttError(
-                    code = SttErrorCode.CAPTURE_FAILED,
-                    message = "AudioCapture failed to start: ${t.message}",
-                    cause = t
-                ))
-                throw t
-            }
+        SttLogger.pcm("beginPcmCapture() — starting AudioRecord synchronously (bufferSizeSamples=$bufferSizeSamples)")
+        return try {
+            audioCapture.start()
             SttLogger.pcm("beginPcmCapture() — AudioCapture started")
+            true
+        } catch (t: Throwable) {
+            synchronized(stateLock) {
+                captureStarted = false
+            }
+            sttErrorListener?.onSttError(SttError(
+                code = SttErrorCode.CAPTURE_FAILED,
+                message = "AudioCapture failed to start: ${t.message}",
+                cause = t
+            ))
+            false
         }
     }
 
@@ -380,17 +380,19 @@ internal class CaptureManager(
      *
      * Idempotent: safe to call multiple times; no-op if capture is already running.
      */
-    override fun restartCapture() {
+    override fun restartCapture(): Boolean {
         synchronized(stateLock) {
             if (captureStarted) {
                 SttLogger.pcm("restartCapture() — already running, skipping")
-                return
+                return true
             }
             captureStarted = true
         }
 
-        try {
+        return try {
             audioCapture.start()
+            SttLogger.pcm("restartCapture() — AudioCapture restarted")
+            true
         } catch (t: Throwable) {
             synchronized(stateLock) {
                 captureStarted = false
@@ -400,9 +402,8 @@ internal class CaptureManager(
                 message = "AudioCapture restart failed: ${t.message}",
                 cause = t
             ))
-            throw t
+            false
         }
-        SttLogger.pcm("restartCapture() — AudioCapture restarted")
     }
 
     /**

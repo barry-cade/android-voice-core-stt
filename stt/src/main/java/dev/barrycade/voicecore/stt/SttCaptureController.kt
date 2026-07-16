@@ -45,12 +45,15 @@ internal class SttCaptureController(
      *
      * @param manualMode When true, only [beginPcmCapture] is called.
      *        When false, [beginSttProcessing] is also called.
+     * @return true if capture started successfully, false on failure.
      */
-    fun startCapture(manualMode: Boolean) {
-        sessionManager.beginPcmCapture()
+    fun startCapture(manualMode: Boolean): Boolean {
+        val pcmStarted = sessionManager.beginPcmCapture()
+        if (!pcmStarted) return false
         if (!manualMode) {
             sessionManager.beginSttProcessing()
         }
+        return true
     }
 
     /**

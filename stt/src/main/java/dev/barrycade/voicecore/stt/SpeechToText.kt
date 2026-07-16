@@ -344,7 +344,19 @@ class SpeechToText internal constructor(
                 return error
             }
             sessionController.beginSession()
-            captureController.startCapture(modeController.isManualMode())
+            val captureStarted = captureController.startCapture(modeController.isManualMode())
+            if (!captureStarted) {
+                val error = SttError(
+                    code = SttErrorCode.CAPTURE_FAILED,
+                    message = "Audio capture failed to start"
+                )
+                callbackDispatcher.dispatchError(error)
+                transitionPipelineToIdleLocked("capture start failed")
+                currentSessionEpoch = 0L
+                lifecycleController.onStop()
+                lifecycleController.onReset()
+                return error
+            }
 
             if (modeController.isManualMode()) {
                 captureController.activatePcmCapture()

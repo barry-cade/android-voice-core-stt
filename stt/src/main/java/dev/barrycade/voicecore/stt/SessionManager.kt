@@ -29,10 +29,9 @@ internal interface SessionManager : AudioSource {
      * Start PCM capture synchronously. Capture must begin before any
      * frames can be buffered into the session.
      *
-     * Temporary placeholder — delegates to [begin] for now.
-     * Phase 2 will move AudioCapture.start() logic into this method.
+     * @return true if PCM capture started successfully, false on failure.
      */
-    fun beginPcmCapture()
+    fun beginPcmCapture(): Boolean
 
     /**
      * Start STT processing (drain thread / processor hand-off).
@@ -77,14 +76,14 @@ internal interface SessionManager : AudioSource {
     /**
      * Restart the underlying audio capture after a prior [finalize] stopped it.
      *
-
-
      * Called to prepare for the next utterance.
      * After this call, [begin] can start a new session.
      *
      * Safe to call multiple times — idempotent if capture is already running.
      * Must NOT be called after [shutdown].
+     *
+     * @return true if capture was restarted successfully, false on failure.
      */
-    fun restartCapture()
+    fun restartCapture(): Boolean
 }
     
