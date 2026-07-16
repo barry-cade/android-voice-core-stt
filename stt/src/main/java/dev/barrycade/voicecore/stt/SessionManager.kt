@@ -58,9 +58,13 @@ internal interface SessionManager : AudioSource {
      * Finalize the session: return all accumulated PCM as raw concatenated
      * FloatArray. After this call, the session buffer is cleared.
      *
+     * If a [vadGate] is provided, only frames with speech-level energy are
+     * accumulated during the final drain. This prevents ambient silence
+     * frames from contaminating the session buffer in manual mode.
+     *
      * Returns an empty FloatArray if no frames were accumulated since [begin].
      */
-    fun finalize(): FloatArray
+    fun finalize(vadGate: VadGate? = null): FloatArray
 
     /**
      * Reset session state: clear the session buffer and queue.

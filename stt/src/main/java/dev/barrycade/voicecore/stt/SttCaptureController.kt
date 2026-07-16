@@ -73,10 +73,16 @@ internal class SttCaptureController(
      * returns all accumulated raw PCM samples. After this call,
      * [resetForNextSession] must be called before a new session.
      *
+     * If a [vadGate] is provided, only frames with speech-level energy
+     * are accumulated during the final drain. This prevents ambient
+     * silence enqueued after the last poll from contaminating the buffer.
+     *
+     * @param vadGate Optional VAD gate for energy-based frame filtering
+     *        during the final drain. Typically provided in manual mode.
      * @return All raw PCM samples accumulated since [startCapture].
      */
-    fun finaliseAndStop(): FloatArray {
-        val pcm = sessionManager.finalize()
+    fun finaliseAndStop(vadGate: VadGate? = null): FloatArray {
+        val pcm = sessionManager.finalize(vadGate)
         sessionManager.stopCapture()
         return pcm
     }

@@ -432,7 +432,8 @@ class SpeechToText internal constructor(
             stopRequest.raise()
             modeController.stopController()
 
-            val finalPcm = captureController.finaliseAndStop()
+            val vadGate = modeController.minimalProcessorController?.vadGate
+            val finalPcm = captureController.finaliseAndStop(vadGate)
 
             if (finalPcm.isEmpty()) {
                 SttLogger.pcm("no PCM accumulated -- transitioning to STOPPED then READY")

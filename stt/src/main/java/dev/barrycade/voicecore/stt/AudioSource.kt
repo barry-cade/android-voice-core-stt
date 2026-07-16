@@ -28,6 +28,24 @@ internal interface AudioSource {
     fun pollFrame(): FloatArray?
 
     /**
+     * Poll the next PCM frame WITHOUT appending it to the session buffer.
+     *
+     * Used by [MinimalPollingController] when VAD gating is active.
+     * Default implementation delegates to [pollFrame] for consumers that
+     * do not separate poll from append (e.g. [ProcessorController]).
+     */
+    fun pollFrameWithoutAppend(): FloatArray? = pollFrame()
+
+    /**
+     * Append a pre-polled PCM frame to the session buffer.
+     *
+     * Used together with [pollFrameWithoutAppend] to conditionally
+     * accumulate frames after VAD gating.
+     * Default is a no-op for consumers that don't use the split pattern.
+     */
+    fun appendFrameToSession(frame: FloatArray) { /* no-op by default */ }
+
+    /**
      * Discard all pending frames from the internal queue.
      * Called before starting the processor to clear frames accumulated
      * during warm-up (ambient noise, not intentional speech).

@@ -59,7 +59,10 @@ internal class SttModeController {
     /**
      * Determine the mode from [config] and construct the appropriate controller.
      *
-     * In Manual mode: constructs [MinimalPollingController] only (no VAD, no accumulator).
+     * In Manual mode: constructs [MinimalPollingController] with optional [VadGate]
+     * when [config.energyThreshold] is positive. The [VadGate] filters out silence
+     * frames so only speech-level PCM enters the session buffer.
+     *
      * In Auto mode: no controller is constructed here — [ProcessorController] is
      * owned by [SttProcessingController] and constructed separately.
      *
@@ -76,11 +79,20 @@ internal class SttModeController {
             manualMode = isManualModeByConfig(config)
 
             if (manualMode) {
+                val vadGate = if (config.energyThreshold > 0f) {
+                    VadGate(energyThreshold = config.energyThreshold)
+                } else {
+                    null
+                }
                 minimalProcessorController = MinimalPollingController(
                     audioSource = captureManager,
-                    stopRequestedRef = stopRequestedRef
+                    stopRequestedRef = stopRequestedRef,
+                    vadGate = vadGate
                 )
-                SttLogger.lifecycle("SttModeController: Manual mode — MinimalPollingController constructed")
+                SttLogger.lifecycle(
+                    "SttModeController: Manual mode — MinimalPollingController constructed " +
+                    "(vadGate=${vadGate != null}, energyThreshold=${config.energyThreshold})"
+                )
             } else {
                 SttLogger.lifecycle("SttModeController: Auto mode — processor owned by SttProcessingController")
             }
@@ -138,19 +150,39 @@ internal class SttModeController {
  * reference is cleared without joining.
  *
  * Polls PCM frames from [AudioSource] in a loop, discarding them
- * from the AudioCapture queue to prevent unbounded growth. No VAD,
- * no accumulator, no utterance lifecycle — frames are buffered into
- * the session by [CaptureManager.pollFrame] and returned via
- * [CaptureManager.finalize] when stop is requested.
+ * from the AudioCapture queue to prevent unbounded growth.
+ *
+ * ## VAD gating (optional)
+ *
+ * When a [vadGate] is provided, the controller uses [AudioSource.pollFrameWithoutAppend]
+ * to obtain raw frames, checks energy via [VadGate.isSpeech], and only calls
+ * [AudioSource.appendFrameToSession] for frames above the energy threshold.
+ * Silence frames are polled but discarded — they never enter the session buffer.
+ *
+ * When [vadGate] is null (default), the controller uses [AudioSource.pollFrame]
+ * directly, preserving the original behaviour (all frames accumulated).
  *
  * VAD-related getters (vadActiveMs, vadConfidence, lastUtteranceDurationMs)
  * return null to indicate "not applicable" rather than "silence" or
  * "no speech". Callers should check [supportsVadMetrics] before using
  * VAD data.
+ *
+ * @param audioSource PCM frame source.
+ * @param stopRequestedRef Supplier that returns true when stop has been requested.
+ * @param vadGate Optional VAD gate for energy-based frame filtering. When non-null,
+ *        only frames with speech-level RMS energy are accumulated. When null,
+ *        all frames are accumulated (original behaviour).
  */
 internal class MinimalPollingController(
     private val audioSource: AudioSource,
-    private val stopRequestedRef: () -> Boolean
+    private val stopRequestedRef: () -> Boolean,
+    /**
+     * Optional VAD gate for energy-based frame filtering.
+     * Exposed as [vadGate] for the [SttCaptureController.finaliseAndStop] path —
+     * the same gate is applied during the final drain to exclude silence frames
+     * enqueued after the last poll.
+     */
+    val vadGate: VadGate? = null
 ) : PollingController {
 
     @Volatile
@@ -175,15 +207,31 @@ internal class MinimalPollingController(
         if (isRunning) return
         isRunning = true
 
+        val useVadGate = vadGate != null
+
         val runnable = Runnable {
             while (isRunning) {
                 if (stopRequestedRef()) {
                     try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
                     continue
                 }
-                val frame = audioSource.pollFrame()
-                if (frame == null) {
-                    try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
+
+                if (useVadGate) {
+                    // VAD-gated path: poll without append, check energy, then conditionally append.
+                    val rawFrame = audioSource.pollFrameWithoutAppend()
+                    if (rawFrame == null) {
+                        try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
+                        continue
+                    }
+                    if (vadGate!!.isSpeech(rawFrame)) {
+                        audioSource.appendFrameToSession(rawFrame)
+                    }
+                } else {
+                    // Original path: poll and append unconditionally.
+                    val frame = audioSource.pollFrame()
+                    if (frame == null) {
+                        try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
+                    }
                 }
             }
         }

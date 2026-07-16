@@ -77,6 +77,27 @@ internal class FakeCaptureManager(
         frameQueue.clear()
     }
 
+    /**
+     * Poll the next frame WITHOUT appending to the session buffer.
+     * Used by [MinimalPollingController] when VAD gating is active.
+     */
+    override fun pollFrameWithoutAppend(): FloatArray? {
+        if (!isStarted) return null
+        return frameQueue.poll()
+    }
+
+    /**
+     * Append a pre-polled PCM frame to the session buffer.
+     * Used together with [pollFrameWithoutAppend] for VAD-gated accumulation.
+     */
+    override fun appendFrameToSession(frame: FloatArray) {
+        if (sessionActive) {
+            for (sample in frame) {
+                sessionBuffer.add(sample)
+            }
+        }
+    }
+
     // ── CaptureManager session methods ─────────────────────────────────
 
     /**
@@ -152,15 +173,21 @@ internal class FakeCaptureManager(
     /**
      * Finalize the session: drain remaining queue frames and return raw PCM.
      * After this call, the session buffer is cleared and capture is stopped.
+     *
+     * If a [vadGate] is provided, only frames with speech-level energy are
+     * accumulated during the final drain. This matches [CaptureManager.finalize].
      */
-    override fun finalize(): FloatArray {
+    override fun finalize(vadGate: VadGate?): FloatArray {
         sessionActive = false
         while (true) {
             val frame = frameQueue.poll() ?: break
-            for (sample in frame) {
-                sessionBuffer.add(sample)
+            val passesGate = vadGate == null || vadGate.isSpeech(frame)
+            if (passesGate) {
+                for (sample in frame) {
+                    sessionBuffer.add(sample)
+                }
+            }
         }
-}
         val result = sessionBuffer.toFloatArray()
         sessionBuffer.clear()
         isStarted = false

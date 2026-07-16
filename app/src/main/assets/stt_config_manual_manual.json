@@ -1,12 +1,10 @@
 {
   "ttsEngineConfig": {
     "language": "en",
-    "debugLoggingEnabled": true
+    "debugLoggingEnabled": false
   },
   "vadConfig": {
-    "energyThreshold": 0.03,
-    "preRollMs": 0,
-    "stableChunkSizeMs": 500
+    "energyThreshold": 0.002
   },
   "drainMode": "DRAIN_FROM_HEAD",
   "startStrategy": {

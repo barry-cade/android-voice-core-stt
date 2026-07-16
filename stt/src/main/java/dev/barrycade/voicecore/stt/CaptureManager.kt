@@ -330,17 +330,18 @@ internal class CaptureManager(
      * the AudioCapture queue into the session buffer, stops AudioCapture
      * (microphone off), and returns the raw concatenation as a single FloatArray.
      *
-     * Does NOT use VAD or UtteranceAccumulator. Returns raw PCM regardless
-     * of whether the engine is ready.
+     * If a [vadGate] is provided, only frames with speech-level energy are
+     * accumulated into the session buffer during the final drain. This is used
+     * in ManualStart+ManualStop mode to exclude ambient silence frames that
+     * were enqueued after the last poll but before [finalize] is called.
      *
      * After this call, [restartCapture] must be called before a new session
-
      * can be started.
      *
      * Returns an empty FloatArray if no frames were accumulated since [begin].
      * Idempotent: after the first call, subsequent calls return empty array.
      */
-    override fun finalize(): FloatArray {
+    override fun finalize(vadGate: VadGate?): FloatArray {
         val threadToJoin = synchronized(stateLock) {
             draining = false
             sttActive = false
@@ -358,9 +359,12 @@ internal class CaptureManager(
         }
 
         // Drain remaining frames from the queue into the buffer.
+        // Apply VAD gate if provided (manual mode with gating enabled).
         while (true) {
             val frame = audioCapture.frameQueue.poll() ?: break
-            appendFrameToSession(frame)
+            if (vadGate == null || vadGate.isSpeech(frame)) {
+                appendFrameToSession(frame)
+            }
         }
 
         val result = snapshotAndClearSessionBuffer()
@@ -447,6 +451,40 @@ internal class CaptureManager(
     }
 
     /**
+     * Poll the next frame from the queue WITHOUT appending to the session buffer.
+     *
+     * Used by [MinimalPollingController] when VAD gating is active. The controller
+     * calls this method to obtain the raw frame, checks energy via [VadGate],
+     * and only calls [appendFrameToSession] if the frame contains speech.
+     *
+     * Does NOT stop the drain thread — the drain thread is only used in auto-mode
+     * and [pollFrameWithoutAppend] is only called in manual mode where no drain
+     * thread is running.
+     *
+     * @return The next PCM frame, or null if the queue is empty.
+     */
+    override fun pollFrameWithoutAppend(): FloatArray? {
+        return audioCapture.frameQueue.poll()
+    }
+
+    /**
+     * Append a pre-polled PCM frame to the session buffer.
+     *
+     * Used together with [pollFrameWithoutAppend] for VAD-gated accumulation.
+     * Must be called after [pollFrameWithoutAppend] returns a non-null frame
+     * that has passed VAD gating.
+     *
+     * Thread-safe: serialized via [sessionBufferLock].
+     */
+    override fun appendFrameToSession(frame: FloatArray) {
+        synchronized(sessionBufferLock) {
+            for (sample in frame) {
+                sessionBuffer.add(sample)
+            }
+        }
+    }
+
+    /**
      * Stop the drain thread (if running) and clear session state.
      *
      * Does NOT stop AudioCapture — only clears the session buffer and
@@ -530,14 +568,6 @@ internal class CaptureManager(
      */
     override fun clearQueue() {
         audioCapture.frameQueue.clear()
-    }
-
-    private fun appendFrameToSession(frame: FloatArray) {
-        synchronized(sessionBufferLock) {
-            for (sample in frame) {
-                sessionBuffer.add(sample)
-            }
-        }
     }
 
     private fun clearSessionBuffer() {
