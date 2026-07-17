@@ -15,5 +15,5 @@
   "stopStrategy": {
     "type": "MANUAL"
   },
-  "sessionTimeoutMs": 60000
+  "sessionTimeoutMs": 30000
 }
