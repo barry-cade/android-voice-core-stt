@@ -21,16 +21,15 @@
 
 ---
 
-## Stage 2 — Build the pre-processing stage
+## Stage 2 — Build the pre-processing stage ✅
 
 **Goal:** New `AudioPreProcessor` class that applies HPF and ZCR on individual PCM frames.
 
 **Files:**
-
-- [ ] New `AudioPreProcessor.kt` (internal)
-  - [ ] 1st-order IIR high-pass filter (in-place, no allocation, pre-allocated state)
-  - [ ] Zero-crossing rate computation for servo whine rejection
-  - [ ] `process(frame: FloatArray): Boolean` — returns true if frame should be rejected
+- [x] New `AudioPreProcessor.kt` (internal)
+  - [x] 1st-order IIR high-pass filter (in-place, no allocation, pre-allocated state)
+  - [x] Zero-crossing rate computation for servo whine rejection
+  - [x] `process(frame: FloatArray): Boolean` — returns true if frame should be rejected
 
 **Test:** Unit tests with known waveforms (50 Hz sine → filtered, 400 Hz sine → passes, white noise → ZCR rejects).
 
