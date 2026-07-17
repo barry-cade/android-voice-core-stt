@@ -71,7 +71,7 @@ val stt = SpeechToText(context = applicationContext)
 ### Methods
 
 | Method | Description |
-|--------|-------------|
+|------- -|- ------------|
 | `loadModel(context, configJson): SttError?` | Load model from JSON config, configure pipeline, run warm-up. Returns `null` on success, or an `SttError` on failure. Does NOT start capture. Safe at app startup. |
 | `startSession(): SttError?` | Begin audio capture and transcription session. Must be called after `loadModel`. |
 | `init(context, configJson): SttError?` | Convenience: `loadModel` + `startSession` in one call. |
@@ -105,7 +105,7 @@ val stt = SpeechToText(context = applicationContext)
 #### Input fields
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+|------ -|- ---- -|- -------- -|- ------------|
 | `modelPath` | `string` | Yes | Absolute path to the Whisper model binary |
 | `language` | `string` | No (default: `"en"`) | Language code |
 | `debugLoggingEnabled` | `boolean` | No (default: `false`) | Enable detailed debug logging |
@@ -123,21 +123,21 @@ val stt = SpeechToText(context = applicationContext)
 For `stopType = "AUTO_SILENCE"`, also include:
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+|------ -|- ---- -|- -------- -|- ------------|
 | `silenceMs` | `integer` | Yes | Silence duration that triggers stop (ms) |
 | `maxDurationMs` | `integer` | Yes | Maximum allowed session duration (ms) |
 
 For `startType = "VAD_START"`, also include:
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+|------ -|- ---- -|- -------- -|- ------------|
 | `vadStartThreshold` | `number` | Yes | Energy threshold for VAD-based start |
 | `minSpeechMs` | `integer` | Yes | Minimum consecutive speech ms for VAD-based start |
 
 For `startType = "WAKEWORD"`, also include:
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+|------ -|- ---- -|- -------- -|- ------------|
 | `wakeWord` | `string` | Yes | Wake word phrase |
 | `confidenceThreshold` | `number` | Yes | Detection confidence threshold |
 
@@ -200,7 +200,7 @@ For `startType = "WAKEWORD"`, also include:
 
 ## Lifecycle
 
-```
+``` text
 UNINITIALISED → INITIALISED → READY → RECORDING → FINALISING → STOPPED → READY → ...
 ```
 
@@ -294,7 +294,7 @@ Early-close logic (Auto mode):
 ## Error Codes
 
 | Code | Category | Description |
-|------|----------|-------------|
+|------|----------|- -----------|
 | `MODEL_LOAD_FAILED` | WHISPER_ERROR | Whisper model failed to load |
 | `INFERENCE_FAILED` | WHISPER_ERROR | Whisper inference returned an error |
 | `CAPTURE_FAILED` | CAPTURE_ERROR | Audio capture failed to start |
