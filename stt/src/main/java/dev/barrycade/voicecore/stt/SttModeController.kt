@@ -91,12 +91,22 @@ internal class SttModeController {
                 } else {
                     null
                 }
+                val preProcessor = if (config.highPassCutoffHz > 0 || config.zcrEnabled) {
+                    AudioPreProcessor(
+                        highPassCutoffHz = config.highPassCutoffHz,
+                        zcrEnabled = config.zcrEnabled,
+                        sampleRate = 16000
+                    )
+                } else {
+                    null
+                }
                 minimalProcessorController = MinimalPollingController(
                     audioSource = captureManager,
                     stopRequestedRef = stopRequestedRef,
                     sessionTimeoutMs = config.sessionTimeoutMs,
                     onTimeout = onTimeoutRef,
-                    vadGate = vadGate
+                    vadGate = vadGate,
+                    preProcessor = preProcessor
                 )
                 SttLogger.lifecycle(
                     "SttModeController: Manual mode — MinimalPollingController constructed " +
@@ -208,7 +218,9 @@ internal class MinimalPollingController(
      * the same gate is applied during the final drain to exclude silence frames
      * enqueued after the last poll.
      */
-    val vadGate: VadGate? = null
+    val vadGate: VadGate? = null,
+    /** Optional pre-processor for noise resilience (HPF, ZCR). */
+    private val preProcessor: AudioPreProcessor? = null
 ) : PollingController {
 
     @Volatile
@@ -259,13 +271,16 @@ internal class MinimalPollingController(
                 }
 
                 if (useVadGate) {
-                    // VAD-gated path: poll without append, check energy, then conditionally append.
+                    // VAD-gated path: poll without append, pre-process, check
+                    // energy, then conditionally append.
                     val rawFrame = audioSource.pollFrameWithoutAppend()
                     if (rawFrame == null) {
                         try { Thread.sleep(10L) } catch (_: InterruptedException) { break }
                         continue
                     }
-                    if (vadGate!!.isSpeech(rawFrame)) {
+                    // Apply noise resilience pre-processing first (HPF in-place, ZCR check).
+                    val isNoise = preProcessor?.process(rawFrame) ?: false
+                    if (!isNoise && vadGate!!.isSpeech(rawFrame)) {
                         audioSource.appendFrameToSession(rawFrame)
                     }
                 } else {

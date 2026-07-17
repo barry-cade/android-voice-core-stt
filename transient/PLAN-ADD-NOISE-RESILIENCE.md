@@ -37,15 +37,14 @@
 
 ---
 
-## Stage 3 — Wire processor into the pipeline
+## Stage 3 — Wire processor into the pipeline ✅
 
 **Goal:** Pre-processor runs on every frame before VAD classification.
 
 **Files:**
-
-- [ ] `SttProcessingController.kt` — construct `AudioPreProcessor` when non-default config detected
-- [ ] Processor loop — call `preProcessor.process(frame)` before `Vad.isSpeech(frame)`
-- [ ] If ZCR rejects frame, treat as silence (skip VAD)
+- [x] `ProcessorController.kt` — add `preProcessor` parameter, call `process()` before `vad.isSpeech()` in both `runProcessingLoop()` and `drainRemainingFrames()`
+- [x] `SttProcessingController.kt` — construct `AudioPreProcessor` from config, pass to `ProcessorController`
+- [x] `SttModeController.kt` — construct `AudioPreProcessor` for Manual mode, pass to `MinimalPollingController`; add `preProcessor` parameter to `MinimalPollingController` and apply in VAD-gated path (pre-process before VadGate check)
 
 **Test:** Integration test: 50 Hz sine → VAD does not trigger with HPF on. Regression: standard speech frames → VAD triggers normally. Default config (HPF=0, ZCR=false) → identical behaviour to before.
 

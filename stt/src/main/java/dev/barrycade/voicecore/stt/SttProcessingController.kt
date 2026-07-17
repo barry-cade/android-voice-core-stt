@@ -63,6 +63,17 @@ internal class SttProcessingController(
         vad = Vad(config)
         vad.debugLogging = config.debugLoggingEnabled
 
+        // Construct the audio pre-processor if noise resilience is configured.
+        val preProcessor = if (config.highPassCutoffHz > 0 || config.zcrEnabled) {
+            AudioPreProcessor(
+                highPassCutoffHz = config.highPassCutoffHz,
+                zcrEnabled = config.zcrEnabled,
+                sampleRate = 16000
+            )
+        } else {
+            null
+        }
+
         utteranceAccumulator = UtteranceAccumulator(
             config = config,
             sttErrorListener = sttErrorListener
@@ -87,7 +98,8 @@ internal class SttProcessingController(
             sampleRate = 16000,
             debugLogging = config.debugLoggingEnabled,
             stopRequestedRef = stopRequestedRef,
-            sttErrorListener = sttErrorListener
+            sttErrorListener = sttErrorListener,
+            preProcessor = preProcessor
         )
     }
 

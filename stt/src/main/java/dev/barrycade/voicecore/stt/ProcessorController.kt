@@ -34,7 +34,9 @@ internal class ProcessorController(
     private val sampleRate: Int = 16000,
     private val debugLogging: Boolean = false,
     private val stopRequestedRef: () -> Boolean,
-    private val sttErrorListener: SttErrorListener? = null
+    private val sttErrorListener: SttErrorListener? = null,
+    /** Optional audio pre-processor for noise resilience (HPF, ZCR). */
+    private val preProcessor: AudioPreProcessor? = null
 ) : PollingController {
     private val isRunning = AtomicBoolean(false)
 
@@ -119,7 +121,10 @@ internal class ProcessorController(
 
                 SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
 
-                val isSpeechFrame = vad.isSpeech(frame)
+                // Run noise resilience pre-processing (HPF, ZCR) before VAD.
+                val isNoise = preProcessor?.process(frame) ?: false
+
+                val isSpeechFrame = if (isNoise) false else vad.isSpeech(frame)
                 val confidence = vad.vadConfidence
                 vadConfidence = confidence
                 if (debugLogging) {
@@ -209,7 +214,8 @@ internal class ProcessorController(
         while (true) {
             val frame = audioSource.pollFrame()
             if (frame == null) break
-            val isSpeech = vad.isSpeech(frame)
+            val isNoise = preProcessor?.process(frame) ?: false
+            val isSpeech = if (isNoise) false else vad.isSpeech(frame)
             val result = utteranceAccumulator.processChunk(frame, isSpeech)
             if (result is FrameResult.UtteranceReady) {
                 drainFinalized = result.pcm
