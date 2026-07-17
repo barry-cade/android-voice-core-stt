@@ -26,7 +26,6 @@ class SpeechToTextNewApiTest {
 
         SpeechToText.resetForTest()
         speechToText = SpeechToText(
-            context = null,
             whisperModel = FakeWhisperModel(),
             captureManager = FakeCaptureManager()
         )

@@ -37,7 +37,6 @@ class SttErrorDeliveryTest {
 
         SpeechToText.resetForTest()
         speechToText = SpeechToText(
-            context = null,
             whisperModel = FakeWhisperModel(),
             captureManager = captureManager
         )
@@ -93,7 +92,6 @@ class SttErrorDeliveryTest {
     fun modelLoadFailure_returnsError_andDispatchesJson() {
         safeRun {
             val stt = SpeechToText(
-                context = null,
                 whisperModel = FakeWhisperModel().apply { failOnLoad = true },
                 captureManager = FakeCaptureManager()
             )

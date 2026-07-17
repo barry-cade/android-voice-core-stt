@@ -39,7 +39,6 @@ class WarmupInvocationTest {
         val fakeModel = FakeWhisperModel()
         SpeechToText.resetForTest()
         val stt = SpeechToText(
-            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
@@ -57,7 +56,6 @@ class WarmupInvocationTest {
         val fakeModel = FakeWhisperModel()
         SpeechToText.resetForTest()
         val stt = SpeechToText(
-            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
@@ -73,7 +71,6 @@ class WarmupInvocationTest {
         val fakeModel = FakeWhisperModel()
         SpeechToText.resetForTest()
         val stt = SpeechToText(
-            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
@@ -92,7 +89,6 @@ class WarmupInvocationTest {
         val fakeModel = FakeWhisperModel()
         SpeechToText.resetForTest()
         val stt = SpeechToText(
-            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )
@@ -115,7 +111,6 @@ class WarmupInvocationTest {
         val fakeModel = FakeWhisperModel()
         SpeechToText.resetForTest()
         val stt = SpeechToText(
-            context = null,
             whisperModel = fakeModel,
             captureManager = FakeCaptureManager()
         )

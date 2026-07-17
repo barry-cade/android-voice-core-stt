@@ -78,7 +78,6 @@ class SttPipelineSequencingTest {
 
         SpeechToText.resetForTest()
         speechToText = SpeechToText(
-            context = null,
             whisperModel = blockingModel,
             captureManager = captureManager
         )

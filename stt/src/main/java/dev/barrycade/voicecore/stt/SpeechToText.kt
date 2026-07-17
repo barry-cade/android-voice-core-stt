@@ -56,7 +56,6 @@ import java.util.concurrent.atomic.AtomicLong
  * will produce undefined behavior (potential deadlock or re-entrancy).
  */
 class SpeechToText internal constructor(
-    @Suppress("UNUSED_PARAMETER") context: Context?,
     private val whisperModel: WhisperModel = WhisperBridge,
     private val captureManager: SessionManager = CaptureManager()
 ) {
@@ -812,11 +811,8 @@ class SpeechToText internal constructor(
          * @return A JSON result string on success, or a JSON error string on failure.
          */
         fun loadModel(context: Context, configJson: String): SttError? {
-            val appCtx = context.applicationContext
-
             val stt = instance ?: synchronized(this) {
                 instance ?: SpeechToText(
-                    appCtx,
                     WhisperBridge,
                     CaptureManager()
                 ).also { newInstance ->
@@ -865,11 +861,8 @@ class SpeechToText internal constructor(
          * @return An [SttError] on failure, or null on success.
          */
         fun init(context: Context, configJson: String): SttError? {
-            val appCtx = context.applicationContext
-
             val stt = instance ?: synchronized(this) {
                 instance ?: SpeechToText(
-                    appCtx,
                     WhisperBridge,
                     CaptureManager()
                 ).also { newInstance ->
