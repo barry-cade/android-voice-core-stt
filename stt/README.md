@@ -40,8 +40,10 @@ Energy‑based voice activity detection with configurable parameters:
 
 All inter-module communication uses JSON strings:
 
-- `init(configJson: String): String` — accepts JSON config, returns JSON result
-- `transcribe()` — stops capture, runs inference, delivers JSON via listener
+- `loadModel(context, configJson): SttError?` — accepts JSON config, returns null on success or SttError? on failure. Does NOT start capture.
+- `startSession(): SttError?` — begins audio capture and transcription session. Must follow `loadModel`.
+- `init(context, configJson): SttError?` — convenience: `loadModel` + `startSession` in one call.
+- `transcribe()` — stops current utterance, runs inference, delivers JSON via listener
 - `setOnMessageListener(l: (String) -> Unit)` — receives JSON result/error messages
 
 ## Public API
@@ -70,8 +72,10 @@ val stt = SpeechToText(context = applicationContext)
 
 | Method | Description |
 |--------|-------------|
-| `init(configJson: String): SttError?` | Initialise STT from a JSON config string. Returns `null` on success, or an `SttError` on failure. Starts capture. |
-| `transcribe()` | Stop capture, run inference, deliver result via `setOnMessageListener`. |
+| `loadModel(context, configJson): SttError?` | Load model from JSON config, configure pipeline, run warm-up. Returns `null` on success, or an `SttError` on failure. Does NOT start capture. Safe at app startup. |
+| `startSession(): SttError?` | Begin audio capture and transcription session. Must be called after `loadModel`. |
+| `init(context, configJson): SttError?` | Convenience: `loadModel` + `startSession` in one call. |
+| `transcribe()` | Stop current utterance, run inference, deliver result via `setOnMessageListener`. |
 | `setOnMessageListener(l: (String) -> Unit)` | Unified message listener. Receives JSON result or error strings. |
 
 ## JSON Schemas
@@ -89,8 +93,12 @@ val stt = SpeechToText(context = applicationContext)
   "drainMode": "DRAIN_FROM_NEXT_FRAME",
   "startType": "MANUAL",
   "stopType": "MANUAL",
+  "silenceMs": 1200,
+  "maxDurationMs": 30000,
   "warmupEnabled": true,
-  "warmupDurationMs": 3000
+  "warmupDurationMs": 3000,
+  "sessionTimeoutMs": 0,
+  "bufferSizeSamples": 4000
 }
 ```
 
@@ -109,6 +117,8 @@ val stt = SpeechToText(context = applicationContext)
 | `stopType` | `string` | No (default: `"MANUAL"`) | `"MANUAL"`, `"AUTO_SILENCE"`, or `"DURATION"` |
 | `warmupEnabled` | `boolean` | No (default: `false`) | Enable Whisper warm-up |
 | `warmupDurationMs` | `integer` | No (default: `0`) | Warm-up duration (ms) |
+| `sessionTimeoutMs` | `integer` | No (default: `0`) | Max session duration before auto-finalise (0 = no timeout) |
+| `bufferSizeSamples` | `integer` | No (default: `4000`) | PCM capture buffer size in samples |
 
 For `stopType = "AUTO_SILENCE"`, also include:
 
@@ -185,18 +195,20 @@ For `startType = "WAKEWORD"`, also include:
 - **Whisper inference** runs on a dedicated single-thread executor (`WhisperExecutor`)
 - **Callbacks** (via `setOnMessageListener`) are delivered on the inference thread, **not** on the main thread
 - Callers must post to their own `Handler` or `Dispatchers.Main` for UI updates
-- **Lifecycle methods** (`init`, `transcribe`) are serialised internally via `stateLock`
+- **Lifecycle methods** (`loadModel`, `startSession`, `init`, `transcribe`) are serialised internally via `stateLock`
 - **Do not call lifecycle methods from within callbacks** — this produces undefined behaviour
 
 ## Lifecycle
 
 ```
-UNINITIALISED → INITIALISED → READY → RECORDING → FINALISING → READY → ...
+UNINITIALISED → INITIALISED → READY → RECORDING → FINALISING → STOPPED → READY → ...
 ```
 
-- `init()` transitions to `READY` and automatically starts capture
-- `transcribe()` transitions through RECORDING → FINALISING → READY
-- Construction creates the object but does NOT load the model — call `init()` first
+- `loadModel()` transitions to `READY`. Does NOT start capture.
+- `startSession()` transitions to `RECORDING`. Starts PCM capture and processor.
+- `transcribe()` transitions through FINALISING → STOPPED → READY.
+- `init()` does both `loadModel()` + `startSession()` in one call.
+- Construction creates the object but does NOT load the model or start capture.
 
 ## Stale Callback Rejection (Epoch Model)
 
@@ -236,9 +248,8 @@ implementation(project(":stt"))
 ## Basic Usage Example
 
 ```kotlin
-val stt = SpeechToText(applicationContext)
-
-stt.setOnMessageListener { json ->
+// Register listener before loadModel (it is buffered by the companion)
+SpeechToText.setOnMessageListener { json ->
     // json is a JSON string — inspect "type" field
     // "result": successful transcription
     // "error": an error occurred
@@ -247,12 +258,27 @@ stt.setOnMessageListener { json ->
     }
 }
 
+// Phase 1: load model at app startup
 val configJson = buildConfigJson(modelPath, "en", "MANUAL")
-val initResult = stt.init(configJson)
-// initResult is a JSON string — check for errors
+val loadError = SpeechToText.loadModel(applicationContext, configJson)
+if (loadError != null) {
+    // handle config/model error
+    return
+}
 
-// To stop and transcribe:
-stt.transcribe()
+// Phase 2: start session on user action
+val sessionError = SpeechToText.startSession()
+if (sessionError != null) {
+    // handle session error
+    return
+}
+
+// On Stop button:
+SpeechToText.transcribe()
+// Result arrives asynchronously via the message listener
+
+// Or use the convenience method (loadModel + startSession in one call):
+// val initError = SpeechToText.init(applicationContext, configJson)
 ```
 
 ## VAD Behaviour
@@ -278,19 +304,26 @@ Early-close logic (Auto mode):
 | `INTERNAL_EXCEPTION` | UNKNOWN | Unexpected internal error |
 
 Errors are delivered via `setOnMessageListener` as JSON, or returned directly
-from `init()` as `SttError?`.
+from `loadModel()` / `init()` as `SttError?`.
 
 ## Testing
-
-The demo app in the root project demonstrates:
-
-- JSON config construction
-- Manual and auto-silence stop modes
-- Whisper inference timing
-- Configuration tuning
-
-Run the unit tests:
 
 ```bash
 ./gradlew :stt:test
 ```
+
+Unit tests (JUnit 4, no Android dependency) cover:
+
+- Two-phase lifecycle (loadModel + startSession)
+- Pipeline stage transitions and legal/illegal transitions
+- Epoch-based stale callback rejection
+- JSON boundary parsing and serialisation
+- VAD energy threshold, hysteresis, silence timeout
+- UtteranceAccumulator pre-roll, speech detection, force timeout
+- Start/stop strategy combination and mode detection
+- Inference submission, dispatch, timing snapshot
+- Error dispatch through all listener types
+- Model lifecycle, forced failure, executor shutdown
+- Callback dispatch and listener safety
+
+Test doubles: `FakeWhisperModel`, `FakeCaptureManager`, `FakeAudioCapture`

@@ -22,12 +22,12 @@ android-voice-core-stt/
 ├── stt/                          # Reusable STT library module
 │   ├── src/main/java/.../stt/    # PCM capture, VAD, Whisper JNI, public API
 │   ├── src/main/cpp/             # Whisper C++ bindings (JNI)
-│   ├── README.md                 # Full API documentation
+│   ├── ARCHITECTURE.md           # Internal architecture documentation
+│   ├── README.md                 # Module-level documentation
 │   └── build.gradle.kts
 ├── app/                          # Demo Android application
 │   ├── src/main/java/.../        # UI + integration with :stt module
 │   ├── src/main/res/             # Layouts and UI resources
-│   ├── README.md                 # Demo usage instructions
 │   └── build.gradle.kts
 ├── README.md                     # This file
 └── settings.gradle.kts           # Includes :app and :stt
@@ -67,8 +67,10 @@ The `:stt` module exposes a strictly enforced public API surface:
 - `SpeechToText` — the single public entry point
 
 All configuration and results flow through a **pure JSON boundary**:
-- `init(configJson: String)` — accepts JSON config, returns JSON result/error
-- `transcribe()` — stops capture, runs inference, delivers result as JSON
+- `loadModel(context, configJson)` — loads model, configures pipeline, runs warm-up. Does NOT start capture. Safe at app startup.
+- `startSession()` — begins audio capture and transcription. Must be called after `loadModel`.
+- `transcribe()` — stops current utterance, runs inference, delivers result as JSON via listener.
+- `init(context, configJson)` — convenience: `loadModel` + `startSession` in one call.
 - `setOnMessageListener(l: (String) -> Unit)` — receives JSON result/error messages
 
 Everything else in the module is `internal`. The build includes an automated
@@ -80,8 +82,10 @@ Shows:
 
 - Live transcription output
 - Timing diagnostics (PCM, VAD, Whisper inference)
-- Structured error display
-- Config display (loaded from `stt_config.json`)
+- Structured error display via error banner
+- Config display (loaded from config assets)
+- Radio button strategy selector (Manual/Manual vs Manual/Auto)
+- Model preload at startup with background copying from assets
 
 ## Architecture
 
@@ -116,19 +120,34 @@ Whisper tiny_en is loaded via JNI:
 ### STT Flow
 
 ``` text
-SpeechToText(context)
-  → setOnMessageListener(...)
-  → init(configJson)
-      → model loads (async)
-      → audio capture thread starts
-      → VAD monitors speech
+SpeechToText.setOnMessageListener(...)
+
+Phase 1 (app startup):
+  → loadModel(context, configJson)
+      → parse config JSON
+      → load Whisper model (synchronous)
+      → run warm‑up inference (optional)
+      → build pipeline scaffolding
+      → state: READY
+
+Phase 2 (user action):
+  → startSession()
+      → increment session epoch
+      → start AudioCapture (T1)
+      → start processor (T3: VAD + accumulator)
+      → state: RECORDING / pipeline: CAPTURING
+
+Transcribe (user action or auto-silence):
   → transcribe()
-      → drains remaining audio
-      → Whisper inference
-      → JSON result delivered via listener
+      → stop capture and drain PCM
+      → submit inference on Whisper executor (T4)
+      → decideDispatch() → epoch check + pipeline stage check
+      → build result JSON → dispatch via listener
+      → state: READY
 ```
 
-The lifecycle follows: `UNINITIALISED → READY → RECORDING → FINALISING → READY → ...`
+The lifecycle follows:
+`UNINITIALISED → INITIALISED → READY → RECORDING → FINALISING → STOPPED → READY → ...`
 
 ## Quick Start
 
@@ -153,9 +172,11 @@ Open the project in Android Studio and build normally.
 Install the demo app on an Android device:
 
 1. Grant microphone permission
-2. Tap **Start** to begin recording
-3. Tap **Stop** to transcribe
-4. View logs in Logcat under `STT_*` tags
+2. Model loads automatically at app startup (background copy from assets)
+3. Select strategy: **Manual/Manual** or **Manual/Auto** via radio buttons
+4. Tap **Start** to begin recording
+5. Tap **Stop** to transcribe (Manual mode) or wait for auto-silence (Auto mode)
+6. View logs in Logcat under `APP` and `STT_*` tags
 
 ## Integration Guide
 
@@ -164,12 +185,10 @@ To use the STT module in your own Android app:
 1. Copy the `stt` folder into your project.
 2. Add `include(":stt")` to `settings.gradle.kts`.
 3. Add `implementation(project(":stt"))` in your app's `build.gradle.kts`.
-4. Instantiate and use:
+4. Register the message listener **before** calling `loadModel` (it is buffered):
 
 ```kotlin
-val stt = SpeechToText(applicationContext)
-
-stt.setOnMessageListener { json ->
+SpeechToText.setOnMessageListener { json ->
     // json is a JSON string — inspect "type" field
     // "result": successful transcription
     // "error": an error occurred
@@ -177,33 +196,38 @@ stt.setOnMessageListener { json ->
         // update UI
     }
 }
+```
 
-val configJson = buildConfigJson(modelPath, "en", "MANUAL")
-val initResult = stt.init(configJson)
-// initResult is a JSON string — check for errors
+5. Call `loadModel` at app startup (e.g. Application.onCreate or Activity.onCreate):
 
-// To stop and transcribe:
-stt.transcribe()
+```kotlin
+val configJson = buildConfigJson(modelPath, ...)
+val error = SpeechToText.loadModel(context, configJson)
+// error is null on success, non-null on failure
+```
+
+6. Call `startSession` on the Start button:
+
+```kotlin
+val error = SpeechToText.startSession()
+if (error == null) {
+    // session active, PCM capture running
+}
+```
+
+7. Call `transcribe` on the Stop button:
+
+```kotlin
+SpeechToText.transcribe()
+// Result arrives asynchronously via the message listener
 ```
 
 Full API documentation is available in [`stt/README.md`](stt/README.md).
 
-## JSON Config
-
-The `init()` method accepts a JSON string. See [`stt/README.md`](stt/README.md#json-schemas) for the full schema.
-
-## Return Codes
+## Output JSON
 
 Results and errors are delivered as JSON strings via `setOnMessageListener`.
 See [`stt/README.md`](stt/README.md#output-result) for the output format.
-
-## Roadmap
-
-- Add wake‑word integration examples
-- Add Vosk grammar example for command recognition
-- Add dual‑pipeline demo (Rex vs Zip)
-- Add unit tests for VAD
-- Add benchmark mode for Whisper inference
 
 ## License
 
