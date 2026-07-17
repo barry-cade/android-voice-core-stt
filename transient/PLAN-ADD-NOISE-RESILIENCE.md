@@ -70,3 +70,26 @@
 3. Default values (HPF=0, ZCR=false) produce identical behaviour to today
 4. The app layer still manages session timing relative to movement commands — the STT module owns pre-processing, not motion awareness
 5. Each stage is independently revertable
+
+---
+
+## Known design debt — config schema categorisation
+
+The JSON config schema currently treats all fields uniformly — validation runs on every
+field regardless of whether it is relevant to the user's chosen start/stop strategy
+combination. This means:
+
+- `silenceMs` is validated even when `stopType` is `MANUAL` (field is ignored)
+- `maxDurationMs` is validated even when `stopType` is `MANUAL` (field is ignored)
+- `preRollMs` and `stableChunkSizeMs` are validated even in MANUAL/MANUAL mode (no accumulator)
+- `highPassCutoffHz` and `zcrEnabled` are validated even in MANUAL/MANUAL mode (no processor
+  that would use them; only the VadGate path which does run pre-processing)
+
+**Future enhancement:** Redesign the schema to categorise each field by which strategy
+combo(s) it applies to. At `loadModel` time, report:
+- **Required & present** — all good
+- **Required & absent** — error
+- **Optional & absent** — DEFAULTS_USED (current behaviour)
+- **Irrelevant & set** — warning via `"type":"config","code":"UNUSED_FIELD"`
+
+This would eliminate dead config and make the schema self-documenting.
