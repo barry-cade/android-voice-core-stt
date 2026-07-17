@@ -154,6 +154,17 @@ internal class SttCallbackDispatcher {
     }
 
     /**
+     * Dispatch a JSON message directly to the message listener.
+     * Used for supplementary messages such as config feedback (DEFAULTS_USED).
+     */
+    fun dispatchMessage(json: String) {
+        val messageSnapshot = synchronized(listenerLock) {
+            onMessageListener
+        }
+        messageSnapshot?.invoke(json)
+    }
+
+    /**
      * Dispatch timing notification to the [onTimingListener].
      *
      * @param captureMs PCM capture wall-clock duration (ms).

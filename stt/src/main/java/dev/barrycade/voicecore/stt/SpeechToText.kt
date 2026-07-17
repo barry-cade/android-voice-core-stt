@@ -190,6 +190,12 @@ class SpeechToText internal constructor(
             return error
         }
 
+        // ── Report which optional fields defaulted ──────────────────────
+        val configFeedback = buildConfigAppliedFeedback(configJson)
+        if (configFeedback != null) {
+            callbackDispatcher.dispatchMessage(configFeedback)
+        }
+
         synchronized(stateLock) {
             // ── Idempotency guard ─────────────────────────────────────────────
             if (sessionConfig != null || lifecycleController.currentState is SttLifecycleState.READY) {
@@ -786,6 +792,64 @@ class SpeechToText internal constructor(
         return synchronized(stateLock) {
             pipelineState.currentStage
         }
+    }
+
+    /**
+     * Build a "config applied" feedback message reporting which optional fields
+     * were absent from the input JSON and received defaults.
+     *
+     * Output shape:
+     * ```json
+     * {
+     *   "type": "config",
+     *   "code": "DEFAULTS_USED",
+     *   "fields": ["highPassCutoffHz"],
+     *   "defaults": {
+     *     "highPassCutoffHz": 0
+     *   }
+     * }
+     * ```
+     *
+     * Returns null when no fields defaulted (all optional fields were explicit).
+     */
+    private fun buildConfigAppliedFeedback(json: String): String? {
+        val knownOptionalKeys = listOf(
+            "highPassCutoffHz" to "0",
+            "zcrEnabled" to "false",
+            "warmupEnabled" to "false",
+            "warmupDurationMs" to "0",
+            "sessionTimeoutMs" to "0",
+            "bufferSizeSamples" to "4000"
+        )
+
+        val defaultedFields = mutableListOf<String>()
+        val defaultValues = mutableMapOf<String, String>()
+
+        for ((key, defaultVal) in knownOptionalKeys) {
+            val keyRegex = Regex("\"$key\"\\s*:")
+            if (!keyRegex.containsMatchIn(json)) {
+                defaultedFields.add(key)
+                defaultValues[key] = defaultVal
+            }
+        }
+
+        if (defaultedFields.isEmpty()) return null
+
+        val sb = StringBuilder()
+        sb.append("{\"type\":\"config\",\"code\":\"DEFAULTS_USED\",\"fields\":[")
+        defaultedFields.forEachIndexed { index, field ->
+            if (index > 0) sb.append(',')
+            sb.append('"').append(field).append('"')
+        }
+        sb.append("],\"defaults\":{")
+        var first = true
+        for (field in defaultedFields) {
+            if (!first) sb.append(',')
+            first = false
+            sb.append('"').append(field).append("\":").append(defaultValues[field])
+        }
+        sb.append("}}")
+        return sb.toString()
     }
 
     companion object {
