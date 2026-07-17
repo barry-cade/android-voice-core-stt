@@ -134,6 +134,7 @@ For `startType = "WAKEWORD"`, also include:
 ### Output result (from `init()` return value and `setOnMessageListener`)
 
 **Success:**
+
 ```json
 {
   "type": "result",
@@ -148,6 +149,7 @@ For `startType = "WAKEWORD"`, also include:
 ```
 
 **Error:**
+
 ```json
 {
   "type": "error",
@@ -157,6 +159,7 @@ For `startType = "WAKEWORD"`, also include:
 ```
 
 **Init result (success):**
+
 ```json
 {
   "type": "result",
@@ -167,6 +170,7 @@ For `startType = "WAKEWORD"`, also include:
 ```
 
 **Init result (error):**
+
 ```json
 {
   "type": "error",
@@ -256,6 +260,7 @@ stt.transcribe()
 The VAD pipeline classifies each PCM frame as speech or silence.
 
 Early-close logic (Auto mode):
+
 - When speech transitions to silence for the configured `silenceMs` duration
 - The command window closes immediately
 - Whisper receives only the relevant PCM
@@ -278,12 +283,14 @@ from `init()` as `SttError?`.
 ## Testing
 
 The demo app in the root project demonstrates:
+
 - JSON config construction
 - Manual and auto-silence stop modes
 - Whisper inference timing
 - Configuration tuning
 
 Run the unit tests:
+
 ```bash
 ./gradlew :stt:test
 ```
