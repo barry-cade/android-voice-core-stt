@@ -32,6 +32,9 @@ class MainActivity : ComponentActivity() {
     // Track strategy from active config for UI visibility.
     private var activeStopType: String = "MANUAL"
 
+    // Last DEFAULTS_USED feedback from the STT module, shown in Active Config.
+    private var configDefaultsMessage: String? = null
+
     // Guard: consecutive blank-audio hints.
     private var blankAudioCount: Int = 0
     private val blankAudioThreshold: Int = 3
@@ -108,6 +111,17 @@ class MainActivity : ComponentActivity() {
                                 }
                             } else {
                                 blankAudioCount = 0
+                            }
+                        }
+                        "config" -> {
+                            val code = obj.optString("code", "")
+                            when (code) {
+                                "DEFAULTS_USED" -> {
+                                    configDefaultsMessage = json
+                                    // Refresh the config display immediately so the
+                                    // defaults info appears alongside the raw JSON.
+                                    displayConfigForStopType(activeStopType)
+                                }
                             }
                         }
                         "error" -> {
@@ -188,6 +202,26 @@ class MainActivity : ComponentActivity() {
             appendLine("Model:  ${getModelPath()}")
             appendLine("")
             append(configJson)
+            // Append DEFAULTS_USED feedback if available.
+            val defaultsMsg = configDefaultsMessage
+            if (defaultsMsg != null) {
+                appendLine("")
+                appendLine("--- Config Defaults Applied ---")
+                try {
+                    val obj = JSONObject(defaultsMsg)
+                    val fields = obj.optJSONArray("fields")
+                    val defaults = obj.optJSONObject("defaults")
+                    if (fields != null && defaults != null) {
+                        for (i in 0 until fields.length()) {
+                            val field = fields.optString(i, "")
+                            val value = defaults.opt(field)
+                            appendLine("  $field = $value (default)")
+                        }
+                    }
+                } catch (_: Exception) {
+                    appendLine("  (parse error)")
+                }
+            }
         }
     }
 

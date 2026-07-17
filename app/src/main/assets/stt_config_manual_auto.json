@@ -16,5 +16,7 @@
     "type": "AUTO_SILENCE",
     "silenceMs": 1200,
     "maxDurationMs": 30000
-  }
+  },
+  "highPassCutoffHz": 0,
+  "zcrEnabled": false
 }
