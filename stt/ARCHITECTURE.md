@@ -15,16 +15,17 @@
 3. [Boundary Layer: SttJsonAdapter](#3-boundary-layer-sttjsonadapter)
 4. [Two-Phase Lifecycle](#4-two-phase-lifecycle)
 5. [Pipeline: End-to-End Data Flow](#5-pipeline-end-to-end-data-flow)
-6. [Mode-Dependent Paths](#6-mode-dependent-paths)
-7. [Threading Model](#7-threading-model)
-8. [Lock Model](#8-lock-model)
-9. [Epoch Model (Stale Callback Rejection)](#9-epoch-model-stale-callback-rejection)
-10. [Controller Architecture](#10-controller-architecture)
-11. [Strategy Model](#11-strategy-model)
-12. [Error and Callback Architecture](#12-error-and-callback-architecture)
-13. [Internal Type Inventory](#13-internal-type-inventory)
-14. [Build-Time API Governance](#14-build-time-api-governance)
-15. [Testing Strategy](#15-testing-strategy)
+6. [Noise Resilience](#6-noise-resilience)
+7. [Mode-Dependent Paths](#7-mode-dependent-paths)
+8. [Threading Model](#8-threading-model)
+9. [Lock Model](#9-lock-model)
+10. [Epoch Model (Stale Callback Rejection)](#10-epoch-model-stale-callback-rejection)
+11. [Controller Architecture](#11-controller-architecture)
+12. [Strategy Model](#12-strategy-model)
+13. [Error and Callback Architecture](#13-error-and-callback-architecture)
+14. [Internal Type Inventory](#14-internal-type-inventory)
+15. [Build-Time API Governance](#15-build-time-api-governance)
+16. [Testing Strategy](#16-testing-strategy)
 
 ---
 
@@ -156,8 +157,10 @@ Internal types --> SttJsonAdapter.buildResultJson()
   "maxDurationMs": 30000,
   "warmupEnabled": true,
   "warmupDurationMs": 3000,
-  "sessionTimeoutMs": 0,
-  "bufferSizeSamples": 4000
+    "sessionTimeoutMs": 0,
+  "bufferSizeSamples": 4000,
+  "highPassCutoffHz": 0,
+  "zcrEnabled": false
 }
 ```
 
@@ -302,7 +305,8 @@ Legal transitions:
    `FloatArray` --> `ConcurrentLinkedQueue.offer()`
 2. **T2 (DrainThread) or T3 (ProcessorThread):** `CaptureManager.pollFrame()` --> dequeue
    frame, append to session buffer, return frame
-3. **T3 (ProcessorThread):** `Vad.isSpeech(frame)` -->
+3. **T3 (ProcessorThread):** `AudioPreProcessor.process(frame)` --> (optional) HPF + ZCR
+   check; if ZCR rejects the frame it is treated as silence --> `Vad.isSpeech(frame)` -->
    `UtteranceAccumulator.processChunk(frame, isSpeech)`
 4. **T3 --> T4 handoff:** `FrameResult.UtteranceReady` --> `handleUtteranceReady()` -->
    `submitInferenceAndDispatch()`
@@ -320,7 +324,86 @@ Legal transitions:
 3. **Caller thread (transcribe):** `CaptureManager.finalize(vadGate)` --> returns raw PCM -->
    `submitInferenceAndDispatch()` --> same T4 path as auto mode
 
-## 6) Mode-Dependent Paths
+## 6) Noise Resilience
+
+The module supports **optional noise resilience** for environments with motor rumble
+and servo whine (e.g. robot chassis). Both features are opt-in via JSON config fields
+and produce no behavioural change when set to defaults (HPF=0, ZCR=false).
+
+### 6a) High-Pass Filter (HPF)
+
+A 1st-order IIR high-pass filter removes low-frequency rumble (e.g. motor hum below
+200 Hz) from PCM frames **before** VAD energy computation. This prevents the VAD from
+classifying motor vibration as speech.
+
+- Config field: `highPassCutoffHz` (integer, default 0 = disabled)
+- Typical value: 200 (blocks frequencies below 200 Hz)
+- Implementation: `AudioPreProcessor` applies the filter in-place on each frame
+  with pre-allocated state (no per-frame allocation)
+- Applied in both **Auto mode** (before `Vad.isSpeech()`) and **Manual mode**
+  (before `VadGate.isSpeech()`)
+
+### 6b) Zero-Crossing Rate (ZCR)
+
+A ZCR check rejects frames with abnormally high zero-crossing rates, which
+characterises servo whine and high-frequency electronic noise.
+
+- Config field: `zcrEnabled` (boolean, default false = disabled)
+- When enabled, `AudioPreProcessor.process()` returns `true` (reject) if the
+  frame's ZCR exceeds a fixed threshold (empirically calibrated for 16 kHz PCM)
+- Rejected frames are treated as silence — they skip VAD entirely and are not
+  accumulated into the session buffer
+
+### 6c) Implementation
+
+`AudioPreProcessor` is an `internal` class with a single public method:
+
+```
+fun process(frame: FloatArray): Boolean
+```
+
+Returns `true` if the frame should be **rejected** (ZCR-based noise detection).
+HPF is applied in-place regardless of return value.
+
+### 6d) Pipeline integration
+
+```
+                   +---------------------+
+frame -----------> | AudioPreProcessor   |
+                   |  1. HPF (in-place)  |
+                   |  2. ZCR check       |
+                   +---------------------+
+                        |           |
+              ZCR pass? |           | ZCR reject?
+                        v           v
+                   +---------+    (skip — treated as silence)
+                   | VAD     |
+                   +---------+
+                        |
+                   (normal VAD path)
+```
+
+### 6e) Config feedback
+
+When `loadModel()` parses the JSON config, the STT module checks which optional
+fields were absent (and therefore received defaults). If any defaulted, a
+supplementary JSON message is dispatched to the message listener:
+
+```json
+{
+  "type": "config",
+  "code": "DEFAULTS_USED",
+  "fields": ["highPassCutoffHz", "zcrEnabled"],
+  "defaults": {
+    "highPassCutoffHz": 0,
+    "zcrEnabled": false
+  }
+}
+```
+
+The caller can inspect this to verify their config was applied as expected.
+
+## 7) Mode-Dependent Paths
 
 The module supports two operating modes, determined by the combination of
 start and stop strategy types.
@@ -355,7 +438,7 @@ Both modes support `sessionTimeoutMs` (default 0 = no timeout). When set,
 `transcribe()` is called automatically if the session exceeds the limit,
 preventing abandoned sessions from holding the microphone indefinitely.
 
-## 7) Threading Model
+## 8) Threading Model
 
 | Thread | Owns | Notes |
 |--------|------|-------|
@@ -380,7 +463,7 @@ All thread joins (`MinimalPollingController.stop`, `ProcessorController.stop`,
 `thread !== Thread.currentThread()` before calling `join()`. This prevents a worker
 thread from joining itself (which would hang forever).
 
-## 8) Lock Model
+## 9) Lock Model
 
 | Lock | Held By | Protects | Notes |
 |------|---------|----------|-------|
@@ -403,7 +486,7 @@ The critical ordering invariant: **Never hold `CaptureManager.stateLock` and
 without `stateLock`, and the caller thread acquires `stateLock` before calling
 methods that may touch the session buffer.
 
-## 9) Epoch Model (Stale Callback Rejection)
+## 10) Epoch Model (Stale Callback Rejection)
 
 - `sessionEpoch` is an `AtomicLong` incremented on each `startSession()` call
 - `currentSessionEpoch` is snapshotted at inference submission time
@@ -425,7 +508,7 @@ task) ensures that `isInferencing` is reset and the pipeline transitions to IDLE
 even if the task throws. The `createOnPostDispatch` callback handles the **auto-mode
 loop-back**: after dispatching, the pipeline returns to CAPTURING so recording continues.
 
-## 10) Controller Architecture
+## 11) Controller Architecture
 
 The module uses layered controller decomposition. Each controller has a single
 responsibility and delegates to the next layer.
@@ -501,7 +584,7 @@ for all native calls.
 - `start()`: creates AudioRecord, calls `startRecording()`, starts worker thread
 - `stop()`: signals stop (outside lock), joins worker thread (outside lock), releases AudioRecord (under lock)
 
-## 11) Strategy Model
+## 12) Strategy Model
 
 Start and stop strategies are **fully orthogonal** interfaces. They are
 instantiated by `RuntimeSttConfig.from()` which maps sealed `StartTrigger` /
@@ -561,7 +644,7 @@ raised until explicitly cleared.
 in `transcribe()`, cleared on `sessionEpoch` increment and full teardown.
 Read by polling controllers to know when to stop looping.
 
-## 12) Error and Callback Architecture
+## 13) Error and Callback Architecture
 
 ### SttCallbackDispatcher
 
@@ -606,7 +689,7 @@ Immutable per-utterance timing data class serialised into result JSON:
   "totalPipelineMs": 5200 }
 ```
 
-## 13) Internal Type Inventory
+## 14) Internal Type Inventory
 
 All types listed here are `internal` (Kotlin visibility). They must never be
 imported by the app module.
@@ -661,6 +744,7 @@ imported by the app module.
 - `UtteranceListener` (interface) -- utterance-ready event contract
 - `FrameResult` (sealed) -- `Continue`, `UtteranceReady`
 - `RmsSampler` -- RMS computation and logging utility
+- `AudioPreProcessor` -- noise resilience: HPF + ZCR filtering
 
 ### Callback and error
 
@@ -688,7 +772,7 @@ imported by the app module.
 - `SttLogger` -- module-level logging utility
 - `SttReturnCode` (enum) -- return codes for utterance status
 
-## 14) Build-Time API Governance
+## 15) Build-Time API Governance
 
 A custom Gradle task `checkSttApiSurface` runs as part of the `check` lifecycle.
 It enforces:
@@ -715,7 +799,7 @@ Gradle check task
         +-- Verify WhisperBridge source content
 ```
 
-## 15) Testing Strategy
+## 16) Testing Strategy
 
 ### Unit tests (JUnit 4, no Android dependency)
 
@@ -753,4 +837,4 @@ Gradle check task
 - Timing-sensitive tests use controlled wall-clock simulation rather than real time
 - Epoch-based tests verify stale callback rejection by creating overlapping sessions
 
----
+---n

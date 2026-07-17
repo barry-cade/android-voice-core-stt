@@ -52,13 +52,12 @@
 
 ---
 
-## Stage 4 — Documentation
+## Stage 5 — Documentation ✅
 
 **Files:**
 
-- [ ] `stt/README.md` — add `highPassCutoffHz` and `zcrEnabled` to the JSON schema table
-- [ ] `stt/ARCHITECTURE.md` — add "Noise Resilience" subsection describing the pre-processing stage
-- [ ] `transient/PLAN-ADD-NOISE-RESILIENCE.md` — mark this plan as complete
+- [x] `stt/ARCHITECTURE.md` — add "Noise Resilience" section (6) with HPF, ZCR, pipeline integration diagram, config feedback subsection; add `AudioPreProcessor` to internal type inventory; update JSON schema to include `highPassCutoffHz` and `zcrEnabled`; renumber TOC and section headers
+- [x] `transient/PLAN-ADD-NOISE-RESILIENCE.md` — mark all stages complete
 
 **Risk:** None.
 
