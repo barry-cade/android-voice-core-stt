@@ -204,8 +204,21 @@ class MainActivity : ComponentActivity() {
      * singleton is initialised before the user presses Start.
      */
     private fun preloadModelAsync() {
+        val modelFile = File(filesDir, "model.bin")
+        if (!modelFile.exists()) {
+            postToUi { txtOutput.text = "Copying speech model… (one-time setup)" }
+        }
+
         Thread({
             try {
+                // Copy model from assets if not already present (first launch).
+                if (!modelFile.exists()) {
+                    modelFile.parentFile?.mkdirs()
+                    assets.open("models/ggml-tiny.en.bin").use { input ->
+                        FileOutputStream(modelFile).use { output -> input.copyTo(output) }
+                    }
+                }
+
                 val configJson = loadConfigForStopType(selectedStopType)
                 val error = SpeechToText.loadModel(this, configJson)
                 postToUi {
@@ -328,13 +341,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun getModelPath(): String {
-        val targetFile = File(filesDir, "model.bin")
-        if (!targetFile.exists()) {
-            targetFile.parentFile?.mkdirs()
-            assets.open("models/ggml-tiny.en.bin").use { input ->
-                FileOutputStream(targetFile).use { output -> input.copyTo(output) }
-            }
-        }
-        return targetFile.absolutePath
+        return File(filesDir, "model.bin").absolutePath
     }
 }
