@@ -15,7 +15,5 @@
   "stopStrategy": {
     "type": "MANUAL"
   },
-  "sessionTimeoutMs": 30000,
-  "highPassCutoffHz": 0,
-  "zcrEnabled": false
+  "sessionTimeoutMs": 30000
 }
