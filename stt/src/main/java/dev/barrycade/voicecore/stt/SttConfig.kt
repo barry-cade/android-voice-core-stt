@@ -41,6 +41,11 @@ package dev.barrycade.voicecore.stt
  * @property warmupDurationMs Duration of warm-up inference in ms.
  * @property bufferSizeSamples Size of the AudioRecord read buffer in samples.
  *        Must be >= 1024 and <= 16000. Default 4000 (0.25s at 16kHz).
+ * @property highPassCutoffHz High-pass filter cutoff frequency in Hz.
+ *        0 = disabled (default). Range [0, 2000]. Used to attenuate
+ *        low-frequency motor rumble from chassis vibration.
+ * @property zcrEnabled When true, enables zero-crossing rate (ZCR) validation
+ *        to reject high-frequency noise (e.g. servo whine). Default false.
  */
 internal data class SttConfig(
     val modelPath: String,
@@ -55,7 +60,9 @@ internal data class SttConfig(
     val sessionTimeoutMs: Int = 0,
     val warmupEnabled: Boolean = false,
     val warmupDurationMs: Int = 0,
-    val bufferSizeSamples: Int = 4000
+    val bufferSizeSamples: Int = 4000,
+    val highPassCutoffHz: Int = 0,
+    val zcrEnabled: Boolean = false
 ) {
     init {
         require(energyThreshold in 0.0001f..1f) {
@@ -72,6 +79,9 @@ internal data class SttConfig(
         }
         require(bufferSizeSamples in 1024..16000) {
             "bufferSizeSamples=$bufferSizeSamples must be in [1024, 16000]"
+        }
+        require(highPassCutoffHz in 0..2000) {
+            "highPassCutoffHz=$highPassCutoffHz must be in [0, 2000]"
         }
     }
 }

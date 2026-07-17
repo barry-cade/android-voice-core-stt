@@ -41,7 +41,9 @@ internal object SttJsonAdapter {
      *   "silenceMs": 1200,
      *   "maxDurationMs": 30000,
      *   "warmupEnabled": true,
-     *   "warmupDurationMs": 3000
+     *   "warmupDurationMs": 3000,
+     *   "highPassCutoffHz": 0,
+     *   "zcrEnabled": false
      * }
      * ```
      *
@@ -111,6 +113,10 @@ internal object SttJsonAdapter {
         // ── Buffer size (optional) ───────────────────────────────────────
         val bufferSizeSamples = resolveInt(json, "bufferSizeSamples") ?: 4000
 
+        // ── Noise resilience (optional) ──────────────────────────────────
+        val highPassCutoffHz = resolveInt(json, "highPassCutoffHz") ?: 0
+        val zcrEnabled = resolveBoolean(json, "zcrEnabled") ?: false
+
         return SttConfig(
             modelPath = modelPath,
             language = language,
@@ -124,7 +130,9 @@ internal object SttJsonAdapter {
             sessionTimeoutMs = sessionTimeoutMs,
             warmupEnabled = warmupEnabled,
             warmupDurationMs = warmupDurationMs,
-            bufferSizeSamples = bufferSizeSamples
+            bufferSizeSamples = bufferSizeSamples,
+            highPassCutoffHz = highPassCutoffHz,
+            zcrEnabled = zcrEnabled
         )
     }
 

@@ -22,6 +22,10 @@ package dev.barrycade.voicecore.stt
  *         Checked in [SpeechToText.transcribe] before the stop strategy gate.
  * @property warmupEnabled Whether Whisper warm-up is enabled.
  * @property warmupDurationMs Duration of warm-up inference (ms).
+ * @property highPassCutoffHz High-pass filter cutoff frequency in Hz.
+ *        0 = disabled. Passed through from [SttConfig].
+ * @property zcrEnabled When true, ZCR validation is enabled.
+ *        Passed through from [SttConfig].
  */
 internal data class RuntimeSttConfig(
     // ── VAD fields ───────────────────────────────────────────────────────
@@ -43,7 +47,11 @@ internal data class RuntimeSttConfig(
 
     // ── Warm-up fields ───────────────────────────────────────────────────
     val warmupEnabled: Boolean = false,
-    val warmupDurationMs: Int = 0
+    val warmupDurationMs: Int = 0,
+
+    // ── Noise resilience fields ──────────────────────────────────────────
+    val highPassCutoffHz: Int = 0,
+    val zcrEnabled: Boolean = false
 ) {
     companion object {
         /**
@@ -69,7 +77,9 @@ internal data class RuntimeSttConfig(
                 autoMaxDurationMs = autoMaxDurationMs,
                 sessionTimeoutMs = sttCfg.sessionTimeoutMs,
                 warmupEnabled = sttCfg.warmupEnabled,
-                warmupDurationMs = sttCfg.warmupDurationMs
+                warmupDurationMs = sttCfg.warmupDurationMs,
+                highPassCutoffHz = sttCfg.highPassCutoffHz,
+                zcrEnabled = sttCfg.zcrEnabled
             )
         }
 
@@ -131,6 +141,10 @@ internal fun RuntimeSttConfig.validate() {
 
     require(stableChunkSizeMs in 50..2000) {
         "stableChunkSizeMs=$stableChunkSizeMs must be in [50, 2000] ms"
+    }
+
+    require(highPassCutoffHz in 0..2000) {
+        "highPassCutoffHz=$highPassCutoffHz must be in [0, 2000] Hz"
     }
 }
 
