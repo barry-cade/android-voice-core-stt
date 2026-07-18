@@ -427,6 +427,7 @@ class SpeechToText internal constructor(
             if (modeController.isManualMode()) {
                 captureController.activatePcmCapture()
                 sessionController.beginUtteranceTiming()
+                isRunning.set(true)
                 modeController.minimalProcessorController?.start()
             } else {
                 startProcessor()
@@ -467,6 +468,12 @@ class SpeechToText internal constructor(
         synchronized(stateLock) {
             val cfg = sessionConfig
             if (cfg == null) return
+
+            // ── Early bail-out: session already ended ──────────────────────
+            if (!isRunning.get()) {
+                SttLogger.lifecycle("transcribe() ignored -- session not running")
+                return
+            }
 
             val runtimeCfg = cfg.runtimeConfig
             val elapsedMs = sessionController.endSession().toInt()
