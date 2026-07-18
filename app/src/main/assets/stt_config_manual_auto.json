@@ -1,10 +1,10 @@
 {
   "ttsEngineConfig": {
     "language": "en",
-    "debugLoggingEnabled": true
+    "debugLoggingEnabled": false
   },
   "vadConfig": {
-    "energyThreshold": 0.03,
+    "energyThreshold": 0.0015,
     "preRollMs": 100,
     "stableChunkSizeMs": 500
   },
