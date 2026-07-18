@@ -289,6 +289,46 @@ class SpeechToText internal constructor(
     }
 
     /**
+     * Reconfigure the pipeline with a new JSON config between sessions.
+     *
+     * Parses the new config, clears the existing session config so that
+     * [loadModel] can re-enter its full init path, then delegates to
+     * [loadModel]. Safe to call between sessions (not during active
+     * capture or inference).
+     *
+     * The singleton instance and message listener are preserved — only
+     * the pipeline configuration (VAD thresholds, stop strategy, etc.)
+     * is replaced.
+     *
+     * @param configJson A JSON string conforming to the input config schema.
+     *                   See [SttJsonAdapter.parseConfig] for the expected shape.
+     * @return An [SttError] on failure, or null on success.
+     */
+    fun reconfigure(configJson: String): SttError? {
+        synchronized(stateLock) {
+            if (sessionConfig == null) {
+                val error = SttError(
+                    code = SttErrorCode.CONFIG_NOT_SET,
+                    message = "loadModel() must be called before reconfigure()"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
+            }
+            if (isRunning.get() || isInferencing.get()) {
+                val error = SttError(
+                    code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
+                    message = "Cannot reconfigure during active session"
+                )
+                callbackDispatcher.dispatchError(error)
+                return error
+            }
+            // Clear session config so loadModel() re-enters its init path.
+            sessionConfig = null
+        }
+        return loadModel(configJson)
+    }
+
+    /**
      * Start a capture session.
      *
      * Begins audio capture, starts the processor, and transitions to
@@ -990,6 +1030,29 @@ class SpeechToText internal constructor(
         internal fun resetForTest() {
             instance = null
             pendingListener = null
+        }
+
+        /**
+         * Reconfigure the pipeline with a new JSON config between sessions.
+         *
+         * Delegates to the singleton instance's [SpeechToText.reconfigure].
+         * Safe to call between sessions; ignored with an error if a session
+         * is active.
+         *
+         * @param configJson A JSON string conforming to the input config schema.
+         * @return An [SttError] on failure, or null on success.
+         */
+        fun reconfigure(configJson: String): SttError? {
+            val stt = instance
+            if (stt == null) {
+                val error = SttError(
+                    code = SttErrorCode.CONFIG_NOT_SET,
+                    message = "loadModel() must be called before reconfigure()"
+                )
+                SttLogger.error("code=CONFIG_NOT_SET, message=\"loadModel() must be called before reconfigure()\"")
+                return error
+            }
+            return stt.reconfigure(configJson)
         }
     }
 }

@@ -88,6 +88,13 @@ class MainActivity : ComponentActivity() {
             }
             selectedStopType = newStopType
             displayConfigForStopType(newStopType)
+            // Reconfigure the STT pipeline with the new stop strategy.
+            // Only when not recording — active sessions complete with
+            // their original config.
+            if (!isRecording) {
+                val configJson = buildConfigJsonForStopType(newStopType)
+                SpeechToText.reconfigure(configJson)
+            }
         }
 
         btnStart.setOnClickListener {
