@@ -735,6 +735,24 @@ class SpeechToText internal constructor(
                     currentSessionEpoch = 0L
                     lifecycleController.onStop()
                     lifecycleController.onReset()
+                } else if (!completeStopPath && sessionEpochAtSubmission == currentSessionEpoch) {
+                    // ── AutoSilenceStop: end the session after inference ──────
+                    // ManualStart + AutoSilenceStop is a single-utterance mode.
+                    // When the UtteranceAccumulator delivers UtteranceReady via
+                    // handleUtteranceReady(), inference completes here. If the
+                    // active stop strategy is AutoSilenceStop, this was a
+                    // session-level stop — end the session cleanly.
+                    val stopStrategy = sessionConfig?.runtimeConfig?.stopStrategy
+                    if (stopStrategy is AutoSilenceStop) {
+                        processingController?.stop()
+                        transitionPipelineToIdleLocked("auto-silence session complete")
+                        currentSessionEpoch = 0L
+                        lifecycleController.onStop()
+                        lifecycleController.onReset()
+                    }
+                    // Other non-completeStopPath cases (future multi-utterance
+                    // modes) keep the existing behaviour — onPostDispatch
+                    // transitions back to CAPTURING.
                 }
             }
         }

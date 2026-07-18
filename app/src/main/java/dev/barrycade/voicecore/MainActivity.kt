@@ -51,6 +51,13 @@ class MainActivity : ComponentActivity() {
         private const val BLANK_AUDIO_MARKER = "[BLANK_AUDIO]"
         private const val CONFIG_MANUAL_MANUAL = "stt_config_manual_manual.json"
         private const val CONFIG_MANUAL_AUTO = "stt_config_manual_auto.json"
+
+        private fun configAssetForStopType(stopType: String): String {
+            return when (stopType) {
+                "AUTO_SILENCE" -> CONFIG_MANUAL_AUTO
+                else -> CONFIG_MANUAL_MANUAL
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,80 +76,7 @@ class MainActivity : ComponentActivity() {
         // Register the JSON message listener before loadModel.
         // The listener is buffered by the companion and wired once the
         // singleton is created inside loadModel().
-        SpeechToText.setOnMessageListener { json ->
-            postToUi {
-                try {
-                    val obj = JSONObject(json)
-                    val type = obj.optString("type", "")
-                    when (type) {
-                        "result" -> {
-                            val text = obj.optString("text", "")
-                            val code = obj.optString("code", "")
-                            val timing = obj.optJSONObject("timing")
-                            val timingInfo = if (timing != null) {
-                                val vadActiveMs = timing.optLong("vadActiveMs", 0)
-                                val utteranceMs = timing.optLong("utteranceMs", 0)
-                                val inferenceMs = timing.optLong("inferenceMs", 0)
-                                buildString {
-                                    appendLine("Timing (ms):")
-                                    if (vadActiveMs > 0 || utteranceMs > 0) {
-                                        appendLine("  vad    = $vadActiveMs")
-                                        appendLine("  speech = $utteranceMs")
-                                    }
-                                    appendLine("  infer  = $inferenceMs")
-                                    if (utteranceMs > 0 && text.trim().length > 0) {
-                                        val speechSecs = utteranceMs / 1000.0
-                                        val textLen = text.trim().length
-                                        val ratio = "%.1f".format(textLen / speechSecs)
-                                        appendLine("  chars/s= $ratio ($textLen chars in ${"%.1f".format(speechSecs)}s)")
-                                    }
-                                }
-                            } else ""
-                            txtOutput.text = "[$code] $text"
-                            txtDiagnostics.text = timingInfo
-                            txtDiagnostics.visibility = View.VISIBLE
-
-                            if (text == BLANK_AUDIO_MARKER || text == "") {
-                                blankAudioCount += 1
-                                if (blankAudioCount >= blankAudioThreshold) {
-                                    txtOutput.text =
-                                        "No speech detected. Tap Stop to end the session."
-                                    AppLogger.log(AppLogCode.BLANK_AUDIO_THRESHOLD, blankAudioCount)
-                                }
-                            } else {
-                                blankAudioCount = 0
-                            }
-                        }
-                        "config" -> {
-                            val code = obj.optString("code", "")
-                            when (code) {
-                                "DEFAULTS_USED" -> {
-                                    configDefaultsMessage = json
-                                    // Refresh the config display immediately so the
-                                    // defaults info appears alongside the raw JSON.
-                                    displayConfigForStopType(activeStopType)
-                                }
-                            }
-                        }
-                        "error" -> {
-                            // Route through the error router: logs, shows banner, updates output.
-                            val action = AppErrorRouter.route(obj)
-                            if (action.logCode != null) {
-                                AppLogger.log(action.logCode, *action.logArgs)
-                            }
-                            txtErrorBanner.visibility = if (action.showBanner) View.VISIBLE else View.GONE
-                            action.bannerText?.let { txtErrorBanner.text = it }
-                            action.outputText?.let { txtOutput.text = it }
-                            // Hide stale timing diagnostics on error.
-                            txtDiagnostics.visibility = View.GONE
-                            txtDiagnostics.text = ""
-                        }
-                    }
-                } catch (_: Exception) {
-                    txtOutput.text = "Malformed message: $json"
-                }
-            }
-        }
+        SpeechToText.setOnMessageListener(createMessageListener())
 
         // ── Preload model at startup ──────────────────────────────────────────
         preloadModelAsync()
@@ -225,11 +159,111 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun configAssetForStopType(stopType: String): String {
-        return when (stopType) {
-            "AUTO_SILENCE" -> CONFIG_MANUAL_AUTO
-            else -> CONFIG_MANUAL_MANUAL
+    /**
+     * Build the JSON message listener that processes STT callbacks.
+     */
+    private fun createMessageListener(): (String) -> Unit {
+        return { json ->
+            postToUi {
+                try {
+                    val obj = JSONObject(json)
+                    val type = obj.optString("type", "")
+                    when (type) {
+                        "result" -> onResultReceived(obj)
+                        "config" -> {
+                            val code = obj.optString("code", "")
+                            when (code) {
+                                "DEFAULTS_USED" -> {
+                                    configDefaultsMessage = json
+                                    displayConfigForStopType(activeStopType)
+                                }
+                            }
+                        }
+                        "error" -> onErrorReceived(obj)
+                    }
+                } catch (_: Exception) {
+                    txtOutput.text = "Malformed message: $json"
+                }
+            }
         }
+    }
+
+    /**
+     * Handle a "result" message from the STT module.
+     */
+    private fun onResultReceived(obj: JSONObject) {
+        val text = obj.optString("text", "")
+        val code = obj.optString("code", "")
+        val timing = obj.optJSONObject("timing")
+        val timingInfo = if (timing != null) {
+            val vadActiveMs = timing.optLong("vadActiveMs", 0)
+            val utteranceMs = timing.optLong("utteranceMs", 0)
+            val inferenceMs = timing.optLong("inferenceMs", 0)
+            buildString {
+                appendLine("Timing (ms):")
+                if (vadActiveMs > 0 || utteranceMs > 0) {
+                    appendLine("  vad    = $vadActiveMs")
+                    appendLine("  speech = $utteranceMs")
+                }
+                appendLine("  infer  = $inferenceMs")
+                if (utteranceMs > 0 && text.trim().length > 0) {
+                    val speechSecs = utteranceMs / 1000.0
+                    val textLen = text.trim().length
+                    val ratio = "%.1f".format(textLen / speechSecs)
+                    appendLine("  chars/s= $ratio ($textLen chars in ${"%.1f".format(speechSecs)}s)")
+                }
+            }
+        } else ""
+
+        txtOutput.text = "[$code] $text"
+        txtDiagnostics.text = timingInfo
+        txtDiagnostics.visibility = View.VISIBLE
+
+        if (text == BLANK_AUDIO_MARKER || text == "") {
+            blankAudioCount += 1
+            if (blankAudioCount >= blankAudioThreshold) {
+                txtOutput.text = "No speech detected. Tap Stop to end the session."
+                AppLogger.log(AppLogCode.BLANK_AUDIO_THRESHOLD, blankAudioCount)
+            }
+        } else {
+            blankAudioCount = 0
+        }
+    }
+
+    /**
+     * Handle an "error" message from the STT module.
+     */
+    private fun onErrorReceived(obj: JSONObject) {
+        val action = AppErrorRouter.route(obj)
+        if (action.logCode != null) {
+            AppLogger.log(action.logCode, *action.logArgs)
+        }
+        txtErrorBanner.visibility = if (action.showBanner) View.VISIBLE else View.GONE
+        action.bannerText?.let { txtErrorBanner.text = it }
+        action.outputText?.let { txtOutput.text = it }
+        txtDiagnostics.visibility = View.GONE
+        txtDiagnostics.text = ""
+    }
+
+    /**
+     * Build a full config JSON string for the given [stopType] by loading
+     * the asset template and injecting the model path.
+     */
+    private fun buildConfigJsonForStopType(stopType: String): String {
+        val assetName = configAssetForStopType(stopType)
+        val template = try {
+            assets.open(assetName).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Failed to load config asset: $assetName", e)
+        }
+
+        val modelPath = getModelPath()
+        val sb = StringBuilder()
+        sb.append("{\"modelPath\":\"")
+        sb.append(escapeJsonString(modelPath))
+        sb.append("\",")
+        sb.append(template.trimStart().removePrefix("{").trimStart())
+        return sb.toString()
     }
 
     /**
@@ -253,7 +287,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val configJson = loadConfigForStopType(selectedStopType)
+                val configJson = buildConfigJsonForStopType(selectedStopType)
                 val error = SpeechToText.loadModel(this, configJson)
                 postToUi {
                     if (error != null) {
@@ -270,26 +304,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, "ModelPreloadThread").start()
-    }
-
-    private fun loadConfigForStopType(stopType: String): String {
-        val assetName = configAssetForStopType(stopType)
-        val template = try {
-            assets.open(assetName).bufferedReader().use { it.readText() }
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Failed to load config asset: $assetName", e)
-        }
-
-        val modelPath = getModelPath()
-        // Inject modelPath into the JSON — the asset file doesn't carry it
-        // since it's a runtime/environment concern, not a behavioural config knob.
-        val sb = StringBuilder()
-        sb.append("{\"modelPath\":\"")
-        sb.append(escapeJsonString(modelPath))
-        sb.append("\",")
-        // Strip the opening { from the template and append the rest
-        sb.append(template.trimStart().removePrefix("{").trimStart())
-        return sb.toString()
     }
 
     private fun escapeJsonString(value: String): String {
