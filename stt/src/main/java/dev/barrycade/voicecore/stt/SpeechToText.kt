@@ -265,6 +265,17 @@ class SpeechToText internal constructor(
                 onTimeoutRef = onTimeoutRef
             )
 
+            // ── Step 5a: Tear down any previous processing controller ─────────
+            // When switching modes via reconfigure(), the old processing
+            // controller from the previous config must be stopped and
+            // discarded before a new one is created.
+            val oldProcessingController = processingController
+            if (oldProcessingController != null) {
+                oldProcessingController.stop()
+                processingController = null
+                vad = null
+            }
+
             if (!modeController.isManualMode()) {
                 val procController = SttProcessingController(
                     config = runtimeCfg,
@@ -753,10 +764,16 @@ class SpeechToText internal constructor(
         if (completeStopPath) {
             return {}
         }
+        val stopStrategy = sessionConfig?.runtimeConfig?.stopStrategy
+        val isAutoSilence = stopStrategy is AutoSilenceStop
         return {
             synchronized(stateLock) {
                 if (sessionEpochAtSubmission != currentSessionEpoch) {
                     transitionPipelineToIdleLocked("dispatch stale completion")
+                } else if (isAutoSilence) {
+                    // AutoSilenceStop: do not transition back to CAPTURING.
+                    // The utterance boundary is a session-level stop — let
+                    // onComplete handle the full teardown.
                 } else if (isRunning.get()) {
                     transitionPipelineStageLocked(SttPipelineStage.CAPTURING, "dispatch complete")
                 } else {
@@ -785,6 +802,8 @@ class SpeechToText internal constructor(
                     val stopStrategy = sessionConfig?.runtimeConfig?.stopStrategy
                     if (stopStrategy is AutoSilenceStop) {
                         processingController?.stop()
+                        captureController.finaliseAndStop(null)
+                        isRunning.set(false)
                         transitionPipelineToIdleLocked("auto-silence session complete")
                         currentSessionEpoch = 0L
                         lifecycleController.onStop()
