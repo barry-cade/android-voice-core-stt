@@ -73,7 +73,8 @@ internal class CaptureManager(
     private val sampleRate: Int = 16000,
     private val bufferSizeBytes: Int = 32000,
     private val bufferSizeSamples: Int = 4000,
-    private val sttErrorListener: SttErrorListener? = null
+    private val sttErrorListener: SttErrorListener? = null,
+    private val debugLoggingEnabled: Boolean = false
 ) : SessionManager {
 
     private val stateLock = Any()
@@ -83,7 +84,8 @@ internal class CaptureManager(
     private val audioCapture: AudioCapture = AudioCapture(
         sampleRate = sampleRate,
         requestedBufferSizeInBytes = bufferSizeBytes,
-        bufferSizeSamples = bufferSizeSamples
+        bufferSizeSamples = bufferSizeSamples,
+        debugLoggingEnabled = debugLoggingEnabled
     )
 
     /**

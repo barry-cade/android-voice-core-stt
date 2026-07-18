@@ -32,7 +32,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
 internal class AudioCapture(
     private val sampleRate: Int = 16000,
     private val requestedBufferSizeInBytes: Int,
-    private val bufferSizeSamples: Int = 4000
+    private val bufferSizeSamples: Int = 4000,
+    private val debugLoggingEnabled: Boolean = false
 ) {
     private val stateLock = Any()
 
@@ -130,7 +131,9 @@ internal class AudioCapture(
                 val running = isRunning
                 if (running) {
                     frameQueue.offer(floatFrame)
-                    SttLogger.pcmD("enqueue frame, size=${floatFrame.size}")
+                    if (debugLoggingEnabled) {
+                        SttLogger.pcmD("enqueue frame, size=${floatFrame.size}")
+                    }
                 }
             } else if (readCount < 0) {
                 handleReadError(readCount)

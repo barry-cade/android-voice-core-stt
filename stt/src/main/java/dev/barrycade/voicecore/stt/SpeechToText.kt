@@ -244,7 +244,8 @@ class SpeechToText internal constructor(
                 oldManager.shutdown()
                 val newManager = CaptureManager(
                     bufferSizeSamples = sessionCfg.bufferSizeSamples,
-                    sttErrorListener = callbackDispatcher.getSttErrorListener()
+                    sttErrorListener = callbackDispatcher.getSttErrorListener(),
+                    debugLoggingEnabled = runtimeCfg.debugLoggingEnabled
                 )
                 captureController = SttCaptureController(newManager)
                 sessionManager = newManager

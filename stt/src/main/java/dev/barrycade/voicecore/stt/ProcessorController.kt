@@ -119,7 +119,9 @@ internal class ProcessorController(
 
                 if (!isRunning.get()) break
 
-                SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
+                if (debugLogging) {
+                    SttLogger.pcmD("dequeue frame for VAD, size=${frame.size}")
+                }
 
                 // Run noise resilience pre-processing (HPF, ZCR) before VAD.
                 val isNoise = preProcessor?.process(frame) ?: false
