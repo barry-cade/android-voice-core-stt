@@ -9,21 +9,20 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Lifecycle
  *
- * 1. Call [loadModel] with a JSON config string to load the model and configure the pipeline.
- *    Safe to call at app startup — model loading and warmup happen without starting capture.
- * 2. Call [startSession] to begin audio capture and start a transcription session.
- *    Returns immediately since the model is already loaded.
- * 3. Call [transcribe] to stop the current utterance and transcribe it.
+ * 1. Call [init] with a JSON config string to load the model, configure the pipeline,
+ *    and start capture in a single call.
+ * 2. Call [transcribe] to stop the current utterance and transcribe it.
+ * 3. Call [reconfigure] with a new JSON config to switch modes between sessions.
  * 4. Results and errors arrive via the listener registered with [setOnMessageListener].
  *
- * For backward compatibility, [init] performs both [loadModel] and [startSession]
- * in a single call. Prefer the two-phase API for responsive UI startup.
+ * Internal lifecycle methods ([loadModel], [startSession]) are called by [init]
+ * and [reconfigure] automatically — the UI must not call them directly.
  *
  * ## Threading and lock model
  *
  * | Thread | Owns | Notes |
  * |--------|------|-------|
- * | Caller thread | Public lifecycle methods ([loadModel], [startSession], [init], [transcribe]) | Serialized via [stateLock] |
+ * | Caller thread | Public lifecycle methods ([init], [transcribe], [reconfigure]) | Serialized via [stateLock] |
  * | Audio capture (T1) | [AudioRecord] reads, PCM frame enqueue | Guarded by [AudioCapture.stateLock] for start/stop |
  * | Capture drain (T2) | Warm-up PCM buffering into session buffer | Guarded by [CaptureManager.sessionBufferLock] |
  * | Processor (T3) | VAD, utterance accumulation, PCM polling | Started/stopped via [ProcessorController] |
@@ -49,8 +48,9 @@ import java.util.concurrent.atomic.AtomicLong
  * Callers must post to their own [android.os.Handler] or
  * [kotlinx.coroutines.Dispatchers.Main] if main-thread delivery is required.
  *
- * All lifecycle methods ([loadModel], [startSession], [init], [transcribe]) are
- * serialized internally via [stateLock].
+ * All public lifecycle methods ([init], [transcribe], [reconfigure]) are
+ * serialized internally via [stateLock]. Internal methods ([loadModel], [startSession])
+ * are also guarded by [stateLock] but must not be called directly by external code.
  *
  * Callers MUST NOT call lifecycle methods from within callbacks — doing so
  * will produce undefined behavior (potential deadlock or re-entrancy).
@@ -165,18 +165,21 @@ class SpeechToText internal constructor(
     /**
      * Load the STT model and configure the pipeline without starting capture.
      *
+     * Internal — called by [init] and [reconfigure]. External callers must use
+     * [init] or the companion [loadModel].
+     *
      * Parses the JSON config, loads the model, runs warm-up (if configured),
      * and builds internal scaffolding. Does NOT start audio capture or begin
-     * a session — call [startSession] to do that.
+     * a session — [init] handles the full lifecycle.
      *
-     * Safe to call at app startup. Idempotent — subsequent calls return
+     * Safe to call repeatedly. Idempotent — subsequent calls return
      * immediately once the model is loaded.
      *
      * @param configJson A JSON string conforming to the input config schema.
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
-     * @return A JSON result string on success, or a JSON error string on failure.
+     * @return An [SttError] on failure, or null on success.
      */
-    fun loadModel(configJson: String): SttError? {
+    internal fun loadModel(configJson: String): SttError? {
         val sttConfig = try {
             SttJsonAdapter.parseConfig(configJson)
         } catch (e: IllegalArgumentException) {
@@ -342,16 +345,18 @@ class SpeechToText internal constructor(
     /**
      * Start a capture session.
      *
+     * Internal — called by [init]. External callers must use the companion
+     * [startSession].
+     *
      * Begins audio capture, starts the processor, and transitions to
      * the CAPTURING pipeline stage. Must be called after [loadModel]
      * has completed successfully.
      *
      * Idempotent — returns immediately if a session is already active.
      *
-     * @return A JSON result string on success, or a JSON error string
-     *         on failure (e.g. model not loaded).
+     * @return An [SttError] on failure, or null on success.
      */
-    fun startSession(): SttError? {
+    internal fun startSession(): SttError? {
         synchronized(stateLock) {
             // ── Guard: must have loaded a model ───────────────────────────────
             val cfg = sessionConfig
@@ -572,9 +577,10 @@ class SpeechToText internal constructor(
      *
      * **Delivery thread:** Varies (Whisper executor for results, error thread for errors).
      * Post to your own Handler or coroutine dispatcher if main-thread delivery is required.
+     * @param listener The callback that receives JSON result, error, or config messages.
      */
-    fun setOnMessageListener(l: (String) -> Unit) {
-        callbackDispatcher.setOnMessageListener(l)
+    fun setOnMessageListener(listener: (String) -> Unit) {
+        callbackDispatcher.setOnMessageListener(listener)
     }
 
     // ======== Internal pipeline ========================================

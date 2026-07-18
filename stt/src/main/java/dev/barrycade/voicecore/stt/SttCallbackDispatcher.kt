@@ -87,9 +87,9 @@ internal class SttCallbackDispatcher {
      *
      * Receives result, error, and debug JSON strings.
      */
-    fun setOnMessageListener(l: (String) -> Unit) {
+    fun setOnMessageListener(listener: (String) -> Unit) {
         synchronized(listenerLock) {
-            onMessageListener = l
+            onMessageListener = listener
         }
     }
 
