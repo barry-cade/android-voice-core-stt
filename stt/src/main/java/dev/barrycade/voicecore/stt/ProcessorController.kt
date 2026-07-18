@@ -1,5 +1,6 @@
 package dev.barrycade.voicecore.stt
 
+import android.os.Process
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -83,6 +84,7 @@ internal class ProcessorController(
         if (isRunning.getAndSet(true)) return
 
         val runnable = Runnable {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             runProcessingLoop()
         }
 
@@ -111,10 +113,14 @@ internal class ProcessorController(
                     continue
                 }
 
-                val frame = audioSource.pollFrame()
+                var frame = audioSource.pollFrame()
                 if (frame == null) {
-                    Thread.sleep(10L)
-                    continue
+                    val deadline = System.nanoTime() + 250_000_000L
+                    while (frame == null && System.nanoTime() < deadline) {
+                        Thread.sleep(1)
+                        frame = audioSource.pollFrame()
+                    }
+                    if (frame == null) continue
                 }
 
                 if (!isRunning.get()) break
