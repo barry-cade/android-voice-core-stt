@@ -198,7 +198,7 @@ class SpeechToText internal constructor(
 
         synchronized(stateLock) {
             // ── Idempotency guard ─────────────────────────────────────────────
-            if (sessionConfig != null || lifecycleController.currentState is SttLifecycleState.READY) {
+            if (sessionConfig != null) {
                 SttLogger.lifecycle("loadModel: already initialised — returning SUCCESS")
                 return null
             }
