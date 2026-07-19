@@ -21,6 +21,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Office
 - Bedroom
 - Studio
@@ -49,6 +50,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Kitchen
 - Workshop
 - Car interior
@@ -77,6 +79,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Phone mic
 - Tablet mic
 - Hand-held devices
@@ -104,6 +107,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Podcast mic
 - USB condenser mic
 - Desktop boom mic
@@ -131,6 +135,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Chatbot
 - Assistant
 - Multi-turn conversation
@@ -159,6 +164,7 @@ RuntimeSttConfig(
 ```
 
 **Use when:**
+
 - Robot control
 - Smart home commands
 - Button-press UX
@@ -178,6 +184,7 @@ RuntimeSttConfig(
 | **Command-and-Control** | Robot control, smart home, short phrases |
 
 Each preset is tuned for:
+
 - VAD sensitivity
 - Pre-roll
 - Silence detection

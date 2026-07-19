@@ -250,6 +250,113 @@ internal object SttJsonAdapter {
         return sb.toString()
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    // Output: RuntimeSttConfig → JSON (for reconfiguration)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Build a flat JSON config string from a [RuntimeSttConfig] and model path.
+     *
+     * The output uses the flat format consumed by [parseConfig] and is suitable
+     * for passing to [SpeechToText.reconfigure].
+     */
+    fun buildConfigJson(config: RuntimeSttConfig, modelPath: String): String {
+        val sb = StringBuilder()
+        sb.append('{')
+
+        appendJsonString(sb, "modelPath", modelPath)
+        sb.append(',')
+        appendJsonFloat(sb, "energyThreshold", config.energyThreshold)
+        sb.append(',')
+        appendJsonInt(sb, "preRollMs", config.preRollMs)
+        sb.append(',')
+        appendJsonInt(sb, "stableChunkSizeMs", config.stableChunkSizeMs)
+        sb.append(',')
+        appendJsonString(sb, "drainMode", "DRAIN_FROM_NEXT_FRAME")
+        sb.append(',')
+        appendJsonString(sb, "startType", "MANUAL")
+        sb.append(',')
+
+        val stopType: String
+        val silenceMs: Int
+        val maxDurationMs: Int
+        if (config.stopStrategy is AutoSilenceStop) {
+            stopType = "AUTO_SILENCE"
+            silenceMs = (config.stopStrategy as AutoSilenceStop).cfg.silenceMs
+            maxDurationMs = (config.stopStrategy as AutoSilenceStop).cfg.maxDurationMs
+        } else {
+            stopType = "MANUAL"
+            silenceMs = config.autoSilenceMs
+            maxDurationMs = config.autoMaxDurationMs
+        }
+
+        appendJsonString(sb, "stopType", stopType)
+        sb.append(',')
+        appendJsonInt(sb, "silenceMs", silenceMs)
+        sb.append(',')
+        appendJsonInt(sb, "maxDurationMs", maxDurationMs)
+        sb.append(',')
+        appendJsonInt(sb, "sessionTimeoutMs", config.sessionTimeoutMs)
+        sb.append(',')
+        appendJsonBoolean(sb, "warmupEnabled", config.warmupEnabled)
+        sb.append(',')
+        appendJsonInt(sb, "warmupDurationMs", config.warmupDurationMs)
+        sb.append(',')
+        appendJsonInt(sb, "highPassCutoffHz", config.highPassCutoffHz)
+        sb.append(',')
+        appendJsonBoolean(sb, "zcrEnabled", config.zcrEnabled)
+        sb.append(',')
+        appendJsonBoolean(sb, "debugLoggingEnabled", config.debugLoggingEnabled)
+        sb.append(',')
+        appendJsonInt(sb, "bufferSizeSamples", 4000)
+        sb.append(',')
+        appendJsonString(sb, "language", "en")
+
+        sb.append('}')
+        return sb.toString()
+    }
+
+    /**
+     * Append a JSON string key-value pair.
+     */
+    private fun appendJsonString(sb: StringBuilder, key: String, value: String) {
+        sb.append('"')
+        sb.append(key)
+        sb.append("\":\"")
+        sb.append(escapeJson(value))
+        sb.append('"')
+    }
+
+    /**
+     * Append a JSON integer key-value pair.
+     */
+    private fun appendJsonInt(sb: StringBuilder, key: String, value: Int) {
+        sb.append('"')
+        sb.append(key)
+        sb.append("\":")
+        sb.append(value)
+    }
+
+    /**
+     * Append a JSON float key-value pair.
+     */
+    private fun appendJsonFloat(sb: StringBuilder, key: String, value: Float) {
+        sb.append('"')
+        sb.append(key)
+        sb.append("\":")
+        sb.append(value.toDouble())
+    }
+
+    /**
+     * Append a JSON boolean key-value pair.
+     */
+    private fun appendJsonBoolean(sb: StringBuilder, key: String, value: Boolean) {
+        sb.append('"')
+        sb.append(key)
+        sb.append("\":")
+        sb.append(if (value) "true" else "false")
+    }
+
     /**
      * Minimal JSON string escaping for string values.
      */

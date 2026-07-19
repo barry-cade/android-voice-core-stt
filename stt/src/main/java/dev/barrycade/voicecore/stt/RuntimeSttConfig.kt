@@ -53,7 +53,115 @@ internal data class RuntimeSttConfig(
     val highPassCutoffHz: Int = 0,
     val zcrEnabled: Boolean = false
 ) {
+    /**
+     * Return a copy of this config with the stop strategy overridden.
+     *
+     * Used by the UI layer to apply a preset and then switch between
+     * Manual/Manual and Manual/Auto-Silence modes without modifying
+     * any other preset fields.
+     *
+     * @param autoSilenceEnabled When true, uses AutoSilenceStop; otherwise ManualStop.
+     */
+    fun withStopStrategyOverride(autoSilenceEnabled: Boolean): RuntimeSttConfig {
+        return if (autoSilenceEnabled) {
+            copy(
+                startStrategy = ManualStart(),
+                stopStrategy = AutoSilenceStop(
+                    AutoSilenceConfig(
+                        silenceMs = autoSilenceMs,
+                        maxDurationMs = autoMaxDurationMs
+                    )
+                )
+            )
+        } else {
+            copy(
+                startStrategy = ManualStart(),
+                stopStrategy = ManualStop()
+            )
+        }
+    }
+
     companion object {
+        /**
+         * Named presets matching the environments documented in STT_MODE_CONFIGS.md.
+         *
+         * Each preset defines a complete behavioural profile. Only stopStrategy
+         * depends on the UI mode radio — use [withStopStrategyOverride] to apply
+         * the mode override.
+         *
+         * All presets use ManualStart() as the base start strategy.
+         */
+        val presets: Map<String, RuntimeSttConfig> = mapOf(
+            "QUIET" to RuntimeSttConfig(
+                energyThreshold = 0.0012f,
+                preRollMs = 80,
+                stableChunkSizeMs = 300,
+                autoSilenceMs = 900,
+                autoMaxDurationMs = 30000,
+                sessionTimeoutMs = 0,
+                warmupEnabled = false,
+                highPassCutoffHz = 0,
+                zcrEnabled = false
+            ),
+            "NOISY" to RuntimeSttConfig(
+                energyThreshold = 0.0030f,
+                preRollMs = 150,
+                stableChunkSizeMs = 600,
+                autoSilenceMs = 1400,
+                autoMaxDurationMs = 30000,
+                sessionTimeoutMs = 0,
+                warmupEnabled = true,
+                warmupDurationMs = 150,
+                highPassCutoffHz = 120,
+                zcrEnabled = true
+            ),
+            "MOBILE" to RuntimeSttConfig(
+                energyThreshold = 0.0020f,
+                preRollMs = 120,
+                stableChunkSizeMs = 500,
+                autoSilenceMs = 1100,
+                autoMaxDurationMs = 30000,
+                sessionTimeoutMs = 0,
+                warmupEnabled = true,
+                warmupDurationMs = 100,
+                highPassCutoffHz = 80,
+                zcrEnabled = true
+            ),
+            "DESKTOP" to RuntimeSttConfig(
+                energyThreshold = 0.0015f,
+                preRollMs = 70,
+                stableChunkSizeMs = 300,
+                autoSilenceMs = 800,
+                autoMaxDurationMs = 30000,
+                sessionTimeoutMs = 0,
+                warmupEnabled = false,
+                highPassCutoffHz = 0,
+                zcrEnabled = false
+            ),
+            "CONVERSATIONAL" to RuntimeSttConfig(
+                energyThreshold = 0.0018f,
+                preRollMs = 100,
+                stableChunkSizeMs = 400,
+                autoSilenceMs = 1600,
+                autoMaxDurationMs = 60000,
+                sessionTimeoutMs = 2000,
+                warmupEnabled = false,
+                highPassCutoffHz = 0,
+                zcrEnabled = false
+            ),
+            "COMMAND" to RuntimeSttConfig(
+                energyThreshold = 0.0025f,
+                preRollMs = 60,
+                stableChunkSizeMs = 200,
+                autoSilenceMs = 600,
+                autoMaxDurationMs = 5000,
+                sessionTimeoutMs = 0,
+                warmupEnabled = false,
+                highPassCutoffHz = 100,
+                zcrEnabled = true
+            )
+        )
+
         /**
          * Build a [RuntimeSttConfig] from a [SttConfig].
          *
