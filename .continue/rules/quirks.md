@@ -33,6 +33,18 @@ The tool description says `powershell.exe` and testing confirms `ConsoleHost`. U
 | Paths | backslashes or forward slashes | forward slashes only |
 | Variables | `$env:VARNAME` | `$VARNAME` |
 | Strings | double quotes for interpolation | single quotes |
+| Command chaining | `cmd1; cmd2` | `cmd1 && cmd2` |
+| String quoting | double quotes | single quotes |
+
+### Git commit example (most common mistake)
+
+```powershell
+# Correct — PowerShell uses semicolons
+git add -A; git commit -m "my message"
+
+# Wrong — && is not valid in PowerShell
+git add -A && git commit -m "my message"
+```
 
 **If a command fails**, it's likely a PowerShell syntax issue — try the PowerShell-native equivalent.
 
