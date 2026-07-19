@@ -103,8 +103,8 @@ internal class UtteranceAccumulator(
 
         // ── PCM non-zero verification ────────────────────────────────────
         val hasNonZero = frame.any { it != 0.0f }
-        if (!hasNonZero) {
-            SttLogger.pcm("all-zero frame, size=${frame.size}")
+        if (!hasNonZero && debugLoggingEnabled) {
+            SttLogger.pcmD("all-zero frame, size=${frame.size}")
         }
 
         // ── Speech detection logging (per-frame, debug gate only) ────────
@@ -127,7 +127,9 @@ internal class UtteranceAccumulator(
                 }
             } else {
                 silenceFrameCount++
-                SttLogger.pcm("silenceFrameCount=$silenceFrameCount frameDurationMs=$frameDurationMs")
+                if (debugLoggingEnabled) {
+                    SttLogger.pcmD("silenceFrameCount=$silenceFrameCount frameDurationMs=$frameDurationMs")
+                }
             }
 
             // ── 2. Update duration ───────────────────────────────────────
@@ -168,18 +170,24 @@ internal class UtteranceAccumulator(
         val forceSpeech = (frameEnergy == 0.0f && frameHasNonZeroPCM)
 
         if (energyDetected) {
-            SttLogger.pcm("speech: energy=$frameEnergy >= threshold=$energyThreshold")
+            if (debugLoggingEnabled) {
+                SttLogger.pcmD("speech: energy=$frameEnergy >= threshold=$energyThreshold")
+            }
             silenceFrameCount = 0
             return handleSpeechStart()
         }
 
         if (forceSpeech) {
-            SttLogger.pcm("force speech: energy=$frameEnergy but PCM has non-zero content")
+            if (debugLoggingEnabled) {
+                SttLogger.pcmD("force speech: energy=$frameEnergy but PCM has non-zero content")
+            }
             silenceFrameCount = 0
             return handleSpeechStart()
         }
 
-        SttLogger.pcm("silence: energy=$frameEnergy < threshold=$energyThreshold hasNonZeroPCM=$frameHasNonZeroPCM")
+        if (debugLoggingEnabled) {
+            SttLogger.pcmD("silence: energy=$frameEnergy < threshold=$energyThreshold hasNonZeroPCM=$frameHasNonZeroPCM")
+        }
         return FrameResult.Continue
     }
 
@@ -194,7 +202,9 @@ internal class UtteranceAccumulator(
         val preRollFrameTarget = (preRollMs / frameDurationMs).coerceAtLeast(1)
         if (preRollFrameCount >= preRollFrameTarget) {
             preRollComplete = true
-            SttLogger.pcm("preRollMs=$preRollMs complete")
+            if (debugLoggingEnabled) {
+                SttLogger.pcmD("preRollMs=$preRollMs complete")
+            }
         }
         return FrameResult.Continue
     }
@@ -207,7 +217,9 @@ internal class UtteranceAccumulator(
         speechActive = true
         silenceFrameCount = 0
         durationMs = 0
-        SttLogger.pcm("speechActive=true, durationMs=0")
+        if (debugLoggingEnabled) {
+            SttLogger.pcmD("speechActive=true, durationMs=0")
+        }
 
         onSpeechStart?.invoke()
 
@@ -242,7 +254,9 @@ internal class UtteranceAccumulator(
      */
     private fun handleUtteranceReady(): FrameResult {
         val pcm = finalizeUtterancePcm()
-        SttLogger.pcm("utterance ready: size=${pcm.size}, durationMs=$durationMs")
+        if (debugLoggingEnabled) {
+            SttLogger.pcmD("utterance ready: size=${pcm.size}, durationMs=$durationMs")
+        }
         return FrameResult.UtteranceReady(pcm)
     }
 
@@ -272,8 +286,8 @@ internal class UtteranceAccumulator(
      */
     fun finaliseUtterance(): FloatArray? {
         val pcm = forceFinalize()
-        if (pcm != null) {
-            SttLogger.pcm("final pcm size=${pcm.size}")
+        if (pcm != null && debugLoggingEnabled) {
+            SttLogger.pcmD("final pcm size=${pcm.size}")
         }
         return pcm
     }
@@ -284,7 +298,9 @@ internal class UtteranceAccumulator(
      */
     fun resetForNextUtterance() {
         reset()
-        SttLogger.pcm("accumulator reset")
+        if (debugLoggingEnabled) {
+            SttLogger.pcmD("accumulator reset")
+        }
     }
 
     internal fun currentDurationMs(): Int = durationMs
@@ -295,10 +311,12 @@ internal class UtteranceAccumulator(
         lastUtteranceDurationMs = utterDurationMs
 
         // ── Debug: PCM amplitude stats ───────────────────────────────────────────
-        val maxAmp = utterance.maxOrNull() ?: 0f
-        val minAmp = utterance.minOrNull() ?: 0f
-        val avgAmp = if (utterance.isNotEmpty()) utterance.average() else 0.0
-        SttLogger.pcm("PCM stats: max=$maxAmp min=$minAmp avg=$avgAmp")
+        if (debugLoggingEnabled) {
+            val maxAmp = utterance.maxOrNull() ?: 0f
+            val minAmp = utterance.minOrNull() ?: 0f
+            val avgAmp = if (utterance.isNotEmpty()) utterance.average() else 0.0
+            SttLogger.pcmD("PCM stats: max=$maxAmp min=$minAmp avg=$avgAmp")
+        }
 
         speechAccumulator.clear()
         speechActive = false
@@ -307,7 +325,9 @@ internal class UtteranceAccumulator(
         preRollComplete = false
         preRollFrameCount = 0
 
-        SttLogger.pcm("utterance finalized: ${utterance.size} samples, ${utterDurationMs}ms")
+        if (debugLoggingEnabled) {
+            SttLogger.pcmD("utterance finalized: ${utterance.size} samples, ${utterDurationMs}ms")
+        }
         return utterance
     }
 }
