@@ -7,54 +7,65 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Main entry point for the STT pipeline.
  *
- * ## Lifecycle
+ * ## Public lifecycle
  *
- * 1. Call [init] with a JSON config string to load the model, configure the pipeline,
- *    and start capture in a single call.
- * 2. Call [transcribe] to stop the current utterance and transcribe it.
- * 3. Call [reconfigure] with a new JSON config to switch modes between sessions.
- * 4. Results and errors arrive via the listener registered with [setOnMessageListener].
+ * - `init(jsonConfig)`
+ *      Loads the model and prepares the pipeline. It does **not** start
+ *      recording. Capture begins only when a session is started internally.
  *
- * Internal lifecycle methods ([loadModel], [startSession]) are called by [init]
- * and [reconfigure] automatically — the UI must not call them directly.
+ * - `transcribe()`
+ *      Ends the current session, finalises the utterance, performs inference,
+ *      and dispatches the result. This is the **manual stop** entry point.
  *
- * ## Threading and lock model
+ * - `reconfigure(jsonConfig)`
+ *      Rebuilds the pipeline with a new configuration. Existing sessions are
+ *      stopped and replaced.
  *
- * | Thread | Owns | Notes |
- * |--------|------|-------|
- * | Caller thread | Public lifecycle methods ([init], [transcribe], [reconfigure]) | Serialized via [stateLock] |
- * | Audio capture (T1) | [AudioRecord] reads, PCM frame enqueue | Guarded by [AudioCapture.stateLock] for start/stop |
- * | Capture drain (T2) | Warm-up PCM buffering into session buffer | Guarded by [CaptureManager.sessionBufferLock] |
- * | Processor (T3) | VAD, utterance accumulation, PCM polling | Started/stopped via [ProcessorController] |
- * | Whisper executor (T4) | Model load/unload/transcribe | Single-thread executor in [ModelManager] |
+ * All results and errors are delivered through the listener registered via
+ * `setOnMessageListener()`.
  *
- * ### Lock boundaries
+ * ## Internal lifecycle
  *
- * - [stateLock] guards ALL public lifecycle methods end-to-end.
- * - [stateLock] is NOT held across blocking operations (thread joins,
+ * Internal methods (`loadModel`, `startSession`, `endSession`) are invoked
+ * automatically by the public lifecycle. They must not be called directly.
+ *
+ * `startSession()` is the point where audio capture actually begins.
+ * `endSession()` is the point where capture stops and inference is submitted.
+ *
+ * ## Threading model
+ *
+ * | Thread                | Responsibility                                         |
+ * |-----------------------|--------------------------------------------------------|
+ * | Caller thread         | Public lifecycle (`init`, `transcribe`, `reconfigure`) |
+ * | Audio capture (T1)    | AudioRecord read → PCM frame enqueue                   |
+ * | Capture drain (T2)    | Warm‑up buffering into session buffer                  |
+ * | Processor (T3)        | VAD, utterance accumulation, PCM polling               |
+ * | Whisper executor (T4) | Model load/unload/inference                            |
+ *
+ * ## Lock boundaries
+ *
+ * - `stateLock` serialises **all** public lifecycle methods.
+ * - `stateLock` is **not** held across blocking operations (thread joins,
  *   native inference, executor shutdown).
- * - Blocking operations (thread joins, native unload) are performed
- *   OUTSIDE [stateLock] — they happen before or after the lock scope.
+ * - Blocking operations occur **outside** the lock to avoid deadlock.
  *
- * ### Stale callback rejection
+ * ## Stale callback rejection
  *
- * - [sessionEpoch] is an [AtomicLong] incremented on each session start.
- * - [currentSessionEpoch] is snapshotted at inference submission.
- * - Callbacks whose epoch does not match [currentSessionEpoch] are dropped.
+ * - `sessionEpoch` increments on each session start.
+ * - `currentSessionEpoch` is captured when inference is submitted.
+ * - Callbacks whose epoch does not match are dropped.
  *
- * ### JSON message callback
+ * ## Callback delivery
  *
- * The JSON message callback is **not** delivered on the main thread.
- * Callers must post to their own [android.os.Handler] or
- * [kotlinx.coroutines.Dispatchers.Main] if main-thread delivery is required.
+ * JSON messages are delivered on a background thread. Callers must marshal
+ * to the main thread if required.
  *
- * All public lifecycle methods ([init], [transcribe], [reconfigure]) are
- * serialized internally via [stateLock]. Internal methods ([loadModel], [startSession])
- * are also guarded by [stateLock] but must not be called directly by external code.
+ * ## Re‑entrancy rules
  *
- * Callers MUST NOT call lifecycle methods from within callbacks — doing so
- * will produce undefined behavior (potential deadlock or re-entrancy).
+ * Callers must **not** invoke lifecycle methods from within callbacks.
+ * Doing so risks deadlock or undefined behaviour.
  */
+
 class SpeechToText internal constructor(
     private val whisperModel: WhisperModel = WhisperBridge,
     private val captureManager: SessionManager = CaptureManager()
@@ -472,6 +483,11 @@ class SpeechToText internal constructor(
      */
     fun transcribe() {
         synchronized(stateLock) {
+            // Ignore manual stop if auto-silence or another path already ended capture.
+            if (pipelineState.currentStage != SttPipelineStage.CAPTURING) {
+                return
+            }
+
             val cfg = sessionConfig
             if (cfg == null) return
 
@@ -820,6 +836,7 @@ class SpeechToText internal constructor(
                         isRunning.set(false)
                         transitionPipelineToIdleLocked("auto-silence session complete")
                         currentSessionEpoch = 0L
+                        lifecycleController.onFinalising()
                         lifecycleController.onStop()
                         lifecycleController.onReset()
                     }
