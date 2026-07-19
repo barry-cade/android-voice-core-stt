@@ -93,6 +93,8 @@ internal class SttProcessingController(
             listener = object : UtteranceListener {
                 override fun onUtteranceReady(pcm: FloatArray, code: SttReturnCode) {
                     listener.onUtteranceReady(pcm, code)
+                    // Reset the accumulator for the next utterance
+                    utteranceAccumulator.reset()
                 }
             },
             sampleRate = 16000,
@@ -142,6 +144,23 @@ internal class SttProcessingController(
     fun resetVadActiveMs() {
         processorController.resetVadActiveMs()
     }
+
+    /**
+     * Hard-reset the utterance accumulator state.
+     *
+     * Called during auto-silence teardown after [stop] to clear any
+     * residual PCM, boundary flags, or counters that were buffered
+     * between the last [UtteranceListener.onUtteranceReady] delivery
+     * and the processor thread stopping.
+     *
+     * This prevents stale accumulator state from carrying over to
+     * the next session, which would cause truncated or contaminated
+     * transcripts on subsequent utterances.
+     */
+    fun resetAccumulator() {
+        utteranceAccumulator.reset()
+        SttLogger.pcm("SttProcessingController: accumulator reset at session teardown")
+    }
 }
 
 /**
@@ -159,3 +178,4 @@ internal fun interface ProcessingListener {
      */
     fun onUtteranceReady(pcm: FloatArray, code: SttReturnCode)
 }
+

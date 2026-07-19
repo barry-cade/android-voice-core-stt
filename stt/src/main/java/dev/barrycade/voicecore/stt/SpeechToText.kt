@@ -832,6 +832,14 @@ class SpeechToText internal constructor(
                     val stopStrategy = sessionConfig?.runtimeConfig?.stopStrategy
                     if (stopStrategy is AutoSilenceStop) {
                         processingController?.stop()
+
+                        // Hard-reset accumulator state to prevent stale PCM
+                        // from the post-utterance buffering interval carrying
+                        // over to the next session.
+                        processingController?.let { procCtrl ->
+                            procCtrl.resetAccumulator()
+                        }
+
                         captureController.finaliseAndStop(null)
                         isRunning.set(false)
                         transitionPipelineToIdleLocked("auto-silence session complete")

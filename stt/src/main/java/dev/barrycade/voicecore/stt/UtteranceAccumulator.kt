@@ -107,9 +107,9 @@ internal class UtteranceAccumulator(
             SttLogger.pcm("all-zero frame, size=${frame.size}")
         }
 
-        // ── Speech detection logging ─────────────────────────────────────
-        if (isSpeechFrame) {
-            SttLogger.pcm("speech frame, energy=${vad.lastFrameEnergy}")
+        // ── Speech detection logging (per-frame, debug gate only) ────────
+        if (isSpeechFrame && debugLoggingEnabled) {
+            SttLogger.pcmD("speech frame, energy=${vad.lastFrameEnergy}")
         }
 
         if (!preRollComplete) {
@@ -122,7 +122,9 @@ internal class UtteranceAccumulator(
             // ── 1. Update silence counter ────────────────────────────────
             if (isSpeechFrame) {
                 silenceFrameCount = 0
-                SttLogger.pcm("speech-active reset")
+                if (debugLoggingEnabled) {
+                    SttLogger.pcmD("speech-active reset")
+                }
             } else {
                 silenceFrameCount++
                 SttLogger.pcm("silenceFrameCount=$silenceFrameCount frameDurationMs=$frameDurationMs")

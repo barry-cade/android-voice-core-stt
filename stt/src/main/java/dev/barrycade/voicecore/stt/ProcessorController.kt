@@ -142,7 +142,9 @@ internal class ProcessorController(
                 rmsSampler.feedFrame(frame)
 
                 if (isSpeechFrame) {
-                    SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
+                    if (debugLogging) {
+                        SttLogger.vadD("speechFrame: rmsAboveThreshold=true, lastEnergy=${vad.lastFrameEnergy}")
+                    }
                     val frameDurationMs = (frame.size * 1000L) / 16000L
                     vadActiveMs = (vadActiveMs ?: 0L) + frameDurationMs
                 }

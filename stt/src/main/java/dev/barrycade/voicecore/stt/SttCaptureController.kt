@@ -48,6 +48,8 @@ internal class SttCaptureController(
      * @return true if capture started successfully, false on failure.
      */
     fun startCapture(manualMode: Boolean): Boolean {
+        // Belt-and-braces: ensure no stale PCM from previous session.
+        sessionManager.reset()
         val pcmStarted = sessionManager.beginPcmCapture()
         if (!pcmStarted) return false
         if (!manualMode) {
