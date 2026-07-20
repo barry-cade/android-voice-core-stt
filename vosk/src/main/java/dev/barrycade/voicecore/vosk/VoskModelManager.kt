@@ -1,7 +1,7 @@
 package dev.barrycade.voicecore.vosk
 
-class VoskModelManager {
-    fun ensureModel(path: String) {
-        // TODO: Download / verify / load model
-    }
-}
+/**
+ * Stub removed — model management handled by VoskSessionManager.
+ * See VoskSessionManager.kt for lifecycle control.
+ */
+

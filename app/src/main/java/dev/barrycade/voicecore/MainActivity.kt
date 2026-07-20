@@ -14,10 +14,11 @@ import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.vosk.VoskEngine
+import dev.barrycade.voicecore.vosk.VoskFinalListener
+import dev.barrycade.voicecore.vosk.VoskPartialListener
+import dev.barrycade.voicecore.vosk.VoskMode
+import dev.barrycade.voicecore.vosk.VoskSessionManager
 import android.content.Context
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import java.io.File
 import java.io.FileOutputStream
 import org.json.JSONObject
@@ -52,8 +53,8 @@ class MainActivity : ComponentActivity() {
     private val blankAudioThreshold: Int = 3
 
     private var isRecording = false
-    private var isVoskActive = false
     private var voskEngine: VoskEngine? = null
+    private var voskSessionManager: VoskSessionManager? = null
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -388,7 +389,9 @@ class MainActivity : ComponentActivity() {
         Thread({
             try {
                 val modelDir = copyAssetFolder(this, "vosk-model-small-en-gb-0.15")
-                voskEngine = VoskEngine(modelDir.path)
+                val engine = VoskEngine(modelDir.path)
+                voskEngine = engine
+                voskSessionManager = VoskSessionManager(engine)
                 postToUi {
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."
                 }
@@ -401,100 +404,57 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start a standalone Vosk test capture.
-     * Runs its own AudioRecord, feeds PCM to VoskEngine, displays results.
+     * Start a Vosk command-mode session using VoskSessionManager.
+     * The manager owns AudioRecord and the capture thread.
      */
     private fun startVoskTest() {
-        val engine = voskEngine
-        if (engine == null) {
-            txtVoskOutput.text = "Vosk engine not ready yet (preload may still be running)."
+        val sessionManager = voskSessionManager
+        if (sessionManager == null) {
+            txtVoskOutput.text = "Vosk not initialised yet (preload may still be running)."
             return
         }
 
-        isVoskActive = true
+        if (sessionManager.mode != VoskMode.IDLE) {
+            txtVoskOutput.text = "Vosk session already active."
+            return
+        }
+
         btnVoskTest.isEnabled = false
         btnVoskStop.isEnabled = true
         txtVoskOutput.visibility = View.VISIBLE
-        txtVoskOutput.text = "Vosk test running... buffer: ${AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)} bytes"
+        txtVoskOutput.text = "Vosk running..."
 
-        val voskThread = Thread({
-            val sampleRate = 16000
-            val bufferSizeSamples = 4000
-            val minBufferBytes = AudioRecord.getMinBufferSize(
-                sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bufferBytes = maxOf(minBufferBytes, bufferSizeSamples * 2)
+        sessionManager.partialListener = VoskPartialListener { text ->
+            txtVoskOutput.text = "Partial: $text"
+        }
 
-            val audioRecord = try {
-                AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    sampleRate,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    bufferBytes
-                )
-            } catch (e: Exception) {
-                postToUi { txtVoskOutput.text = "AudioRecord failed: ${e.message}" }
-                return@Thread
-            }
+        sessionManager.finalListener = VoskFinalListener { text ->
+            txtVoskOutput.text = "[END] $text"
+            // Session auto-stops after final in command mode — reset UI.
+            btnVoskTest.isEnabled = true
+            btnVoskStop.isEnabled = false
+        }
 
-            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                audioRecord.release()
-                postToUi { txtVoskOutput.text = "AudioRecord not initialized." }
-                return@Thread
-            }
+        sessionManager.errorListener = { message ->
+            txtVoskOutput.text = "Error: $message"
+            btnVoskTest.isEnabled = true
+            btnVoskStop.isEnabled = false
+        }
 
-            audioRecord.startRecording()
-
-            val shortBuffer = ShortArray(bufferSizeSamples)
-
-            var frameCount = 0
-
-            while (isVoskActive) {
-                val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
-                if (readCount <= 0) continue
-
-                frameCount++
-
-                try {
-                    val pcmChunk = if (readCount < shortBuffer.size) {
-                        shortBuffer.copyOf(readCount)
-                    } else {
-                        shortBuffer
-                    }
-                    val utteranceEnd = engine.acceptShort(pcmChunk)
-
-                    val displayText: String
-                    if (utteranceEnd) {
-                        // Utterance ended — show final result and continue.
-                        // Vosk resets internally, but we keep capturing.
-                        val finalText = engine.finalResult()
-                        displayText = "frames: $frameCount\n[END] $finalText"
-                    } else {
-                        val partial = engine.partialResult()
-                        displayText = "frames: $frameCount\nPartial: $partial"
-                    }
-                    postToUi { txtVoskOutput.text = displayText }
-                } catch (t: Throwable) {
-                    postToUi { txtVoskOutput.text = "Vosk error: ${t.message}" }
-                    break
-                }
-            }
-
-            audioRecord.stop()
-            audioRecord.release()
-        }, "VoskCaptureThread")
-
-        voskThread.start()
+        try {
+            sessionManager.startCommandMode()
+        } catch (e: IllegalStateException) {
+            txtVoskOutput.text = "Error: ${e.message}"
+            btnVoskTest.isEnabled = true
+            btnVoskStop.isEnabled = false
+        }
     }
 
     /**
-     * Stop the Vosk test capture cleanly.
+     * Stop the Vosk session cleanly via VoskSessionManager.
      */
     private fun stopVoskTest() {
-        isVoskActive = false
+        voskSessionManager?.stop()
         btnVoskTest.isEnabled = true
         btnVoskStop.isEnabled = false
     }
