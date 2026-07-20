@@ -1,3 +1,9 @@
+---
+name: Available Tools Reference
+alwaysApply: true
+description: Complete reference for all Continue.dev agent tools - read_file, edit, terminal, search, and their arguments.
+---
+
 # Available Tools Reference
 
 Full tool definitions for the Continue.dev agent in VS Code.

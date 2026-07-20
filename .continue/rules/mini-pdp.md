@@ -1,3 +1,9 @@
+---
+name: Kotlin Mini-PDP Structural Rules
+alwaysApply: true
+description: Structural rules for writing Kotlin code - flat, readable, deterministic, no clever idioms.
+---
+
 # Kotlin Mini‑PDP Structural Rules (CATO Agent Directive)
 
 CATO must follow these rules for all Kotlin code it writes or modifies.

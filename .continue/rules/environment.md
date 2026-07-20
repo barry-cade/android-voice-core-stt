@@ -1,3 +1,9 @@
+---
+name: Environment & Tool Context
+alwaysApply: true
+description: Project environment details - IDE, OS, shell, project paths, and quick Gradle commands.
+---
+
 # Environment & Tool Context
 
 ## IDE & Extension

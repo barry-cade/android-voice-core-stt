@@ -1,3 +1,9 @@
+---
+name: Tool & Environment Quirks
+alwaysApply: true
+description: Known toolchain quirks - markdown tables, PowerShell syntax, file editing, and project exploration limits.
+---
+
 # Tool & Environment Quirks
 
 Known idiosyncrasies of the agent toolchain. Learn these to avoid repeated failures.
