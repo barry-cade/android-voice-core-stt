@@ -15,6 +15,9 @@ import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.vosk.VoskEngine
 import android.content.Context
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import java.io.File
 import java.io.FileOutputStream
 import org.json.JSONObject
@@ -23,7 +26,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
+    private lateinit var btnVoskTest: Button
+    private lateinit var btnVoskStop: Button
+    private lateinit var btnModeWhisper: Button
+    private lateinit var btnModeVosk: Button
+    private lateinit var panelWhisper: View
+    private lateinit var panelVosk: View
     private lateinit var txtOutput: TextView
+    private lateinit var txtVoskOutput: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
     private lateinit var txtErrorBanner: TextView
@@ -42,6 +52,8 @@ class MainActivity : ComponentActivity() {
     private val blankAudioThreshold: Int = 3
 
     private var isRecording = false
+    private var isVoskActive = false
+    private var voskEngine: VoskEngine? = null
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -62,27 +74,34 @@ class MainActivity : ComponentActivity() {
         }
 
         /**
-         * Copy an asset folder (and its files) to internal storage.
-         * Mirrors the STT module's model copy pattern.
+         * Recursively copy an asset folder tree to internal storage.
          */
         fun copyAssetFolder(context: Context, assetFolder: String): File {
             val outDir = File(context.filesDir, assetFolder)
+            copyAssetTree(context, assetFolder, outDir)
+            return outDir
+        }
+
+        private fun copyAssetTree(context: Context, assetPath: String, outDir: File) {
             if (!outDir.exists()) outDir.mkdirs()
 
             val assetManager = context.assets
-            val files = assetManager.list(assetFolder) ?: return outDir
+            val entries = assetManager.list(assetPath) ?: return
 
-            for (file in files) {
-                val inStream = assetManager.open("$assetFolder/$file")
-                val outFile = File(outDir, file)
-                val outStream = FileOutputStream(outFile)
-
-                inStream.copyTo(outStream)
-                inStream.close()
-                outStream.close()
+            for (entry in entries) {
+                val childAssetPath = "$assetPath/$entry"
+                val childOutFile = File(outDir, entry)
+                // Try opening as a file — if it throws, it's a directory.
+                try {
+                    assetManager.open(childAssetPath).use { inStream ->
+                        FileOutputStream(childOutFile).use { outStream ->
+                            inStream.copyTo(outStream)
+                        }
+                    }
+                } catch (_: Exception) {
+                    copyAssetTree(context, childAssetPath, childOutFile)
+                }
             }
-
-            return outDir
         }
     }
 
@@ -93,7 +112,14 @@ class MainActivity : ComponentActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
+        btnVoskTest = findViewById(R.id.btnVoskTest)
+        btnVoskStop = findViewById(R.id.btnVoskStop)
+        btnModeWhisper = findViewById(R.id.btnModeWhisper)
+        btnModeVosk = findViewById(R.id.btnModeVosk)
+        panelWhisper = findViewById(R.id.panelWhisper)
+        panelVosk = findViewById(R.id.panelVosk)
         txtOutput = findViewById(R.id.txtOutput)
+        txtVoskOutput = findViewById(R.id.txtVoskOutput)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
@@ -109,6 +135,10 @@ class MainActivity : ComponentActivity() {
 
         // ── Preload Vosk model at startup ────────────────────────────────────
         preloadVoskModelAsync()
+
+        // ── Mode toggle ──────────────────────────────────────────────────────
+        btnModeWhisper.setOnClickListener { switchToMode("whisper") }
+        btnModeVosk.setOnClickListener { switchToMode("vosk") }
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -139,6 +169,15 @@ class MainActivity : ComponentActivity() {
 
         btnClear.setOnClickListener {
             txtOutput.text = ""
+        }
+
+        btnVoskTest.setOnClickListener {
+            if (hasRecordAudioPermission()) startVoskTest()
+            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
+        btnVoskStop.setOnClickListener {
+            stopVoskTest()
         }
 
         requestPermissionLauncher = registerForActivityResult(
@@ -349,7 +388,7 @@ class MainActivity : ComponentActivity() {
         Thread({
             try {
                 val modelDir = copyAssetFolder(this, "vosk-model-small-en-gb-0.15")
-                val engine = VoskEngine(modelDir.path)
+                voskEngine = VoskEngine(modelDir.path)
                 postToUi {
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."
                 }
@@ -359,6 +398,105 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, "VoskPreloadThread").start()
+    }
+
+    /**
+     * Start a standalone Vosk test capture.
+     * Runs its own AudioRecord, feeds PCM to VoskEngine, displays results.
+     */
+    private fun startVoskTest() {
+        val engine = voskEngine
+        if (engine == null) {
+            txtVoskOutput.text = "Vosk engine not ready yet (preload may still be running)."
+            return
+        }
+
+        isVoskActive = true
+        btnVoskTest.isEnabled = false
+        btnVoskStop.isEnabled = true
+        txtVoskOutput.visibility = View.VISIBLE
+        txtVoskOutput.text = "Vosk test running... buffer: ${AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)} bytes"
+
+        val voskThread = Thread({
+            val sampleRate = 16000
+            val bufferSizeSamples = 4000
+            val minBufferBytes = AudioRecord.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufferBytes = maxOf(minBufferBytes, bufferSizeSamples * 2)
+
+            val audioRecord = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferBytes
+                )
+            } catch (e: Exception) {
+                postToUi { txtVoskOutput.text = "AudioRecord failed: ${e.message}" }
+                return@Thread
+            }
+
+            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord.release()
+                postToUi { txtVoskOutput.text = "AudioRecord not initialized." }
+                return@Thread
+            }
+
+            audioRecord.startRecording()
+
+            val shortBuffer = ShortArray(bufferSizeSamples)
+
+            var frameCount = 0
+
+            while (isVoskActive) {
+                val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
+                if (readCount <= 0) continue
+
+                frameCount++
+
+                try {
+                    val pcmChunk = if (readCount < shortBuffer.size) {
+                        shortBuffer.copyOf(readCount)
+                    } else {
+                        shortBuffer
+                    }
+                    val utteranceEnd = engine.acceptShort(pcmChunk)
+
+                    val displayText: String
+                    if (utteranceEnd) {
+                        // Utterance ended — show final result and continue.
+                        // Vosk resets internally, but we keep capturing.
+                        val finalText = engine.finalResult()
+                        displayText = "frames: $frameCount\n[END] $finalText"
+                    } else {
+                        val partial = engine.partialResult()
+                        displayText = "frames: $frameCount\nPartial: $partial"
+                    }
+                    postToUi { txtVoskOutput.text = displayText }
+                } catch (t: Throwable) {
+                    postToUi { txtVoskOutput.text = "Vosk error: ${t.message}" }
+                    break
+                }
+            }
+
+            audioRecord.stop()
+            audioRecord.release()
+        }, "VoskCaptureThread")
+
+        voskThread.start()
+    }
+
+    /**
+     * Stop the Vosk test capture cleanly.
+     */
+    private fun stopVoskTest() {
+        isVoskActive = false
+        btnVoskTest.isEnabled = true
+        btnVoskStop.isEnabled = false
     }
 
     private fun escapeJsonString(value: String): String {
@@ -441,6 +579,14 @@ class MainActivity : ComponentActivity() {
         btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
 
         btnClear.isEnabled = true
+    }
+
+    private fun switchToMode(mode: String) {
+        val isWhisper = mode == "whisper"
+        panelWhisper.visibility = if (isWhisper) View.VISIBLE else View.GONE
+        panelVosk.visibility = if (isWhisper) View.GONE else View.VISIBLE
+        btnModeWhisper.isEnabled = !isWhisper
+        btnModeVosk.isEnabled = isWhisper
     }
 
     private fun getModelPath(): String {
