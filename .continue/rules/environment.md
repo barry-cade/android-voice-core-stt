@@ -28,10 +28,11 @@ description: Project environment details - IDE, OS, shell, project paths, and qu
 - **Modules:** `app/` (demo harness), `stt/` (library)
 - **Public API package:** `dev.barrycade.voicecore.stt`
 - **JNI package:** `dev.barrycade.voicecore.stt` (must align with native code)
-- **STM library module:** `:stt` in Gradle
-- **STM library module:** `:vosk` in Gradle
+- **STT library module:** `:stt` in Gradle
+- **Vosk library module:** `:vosk` in Gradle
 - **App module:** `:app` in Gradle
-- **Test task:** `./gradlew.bat :stt:test` (or specific test class via `--tests`)
+- **STT test task:** `./gradlew.bat :stt:test` (or specific test class via `--tests`)
+- **Vosk test task:** `./gradlew.bat :vosk:test` (or specific test class via `--tests`)
 
 ## Useful Quick Commands (ask human to run these when needed)
 
