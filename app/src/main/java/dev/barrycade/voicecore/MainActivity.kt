@@ -13,6 +13,8 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.vosk.VoskEngine
+import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
 import org.json.JSONObject
@@ -58,6 +60,30 @@ class MainActivity : ComponentActivity() {
                 else -> CONFIG_MANUAL_MANUAL
             }
         }
+
+        /**
+         * Copy an asset folder (and its files) to internal storage.
+         * Mirrors the STT module's model copy pattern.
+         */
+        fun copyAssetFolder(context: Context, assetFolder: String): File {
+            val outDir = File(context.filesDir, assetFolder)
+            if (!outDir.exists()) outDir.mkdirs()
+
+            val assetManager = context.assets
+            val files = assetManager.list(assetFolder) ?: return outDir
+
+            for (file in files) {
+                val inStream = assetManager.open("$assetFolder/$file")
+                val outFile = File(outDir, file)
+                val outStream = FileOutputStream(outFile)
+
+                inStream.copyTo(outStream)
+                inStream.close()
+                outStream.close()
+            }
+
+            return outDir
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,8 +104,11 @@ class MainActivity : ComponentActivity() {
         // singleton is created inside loadModel().
         SpeechToText.setOnMessageListener(createMessageListener())
 
-        // ── Preload model at startup ──────────────────────────────────────────
+        // ── Preload STT model at startup ─────────────────────────────────────
         preloadModelAsync()
+
+        // ── Preload Vosk model at startup ────────────────────────────────────
+        preloadVoskModelAsync()
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -213,7 +242,7 @@ class MainActivity : ComponentActivity() {
                     appendLine("  speech = $utteranceMs")
                 }
                 appendLine("  infer  = $inferenceMs")
-                if (utteranceMs > 0 && text.trim().length > 0) {
+                if (utteranceMs > 0 && text.trim().isNotEmpty()) {
                     val speechSecs = utteranceMs / 1000.0
                     val textLen = text.trim().length
                     val ratio = "%.1f".format(textLen / speechSecs)
@@ -311,6 +340,25 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, "ModelPreloadThread").start()
+    }
+
+    /**
+     * Copy Vosk model from assets to internal storage and initialise VoskEngine.
+     */
+    private fun preloadVoskModelAsync() {
+        Thread({
+            try {
+                val modelDir = copyAssetFolder(this, "vosk-model-small-en-gb-0.15")
+                val engine = VoskEngine(modelDir.path)
+                postToUi {
+                    txtOutput.text = "Vosk model loaded. STT and Vosk ready."
+                }
+            } catch (t: Throwable) {
+                postToUi {
+                    txtOutput.text = "Vosk preload failed: ${t.message}"
+                }
+            }
+        }, "VoskPreloadThread").start()
     }
 
     private fun escapeJsonString(value: String): String {

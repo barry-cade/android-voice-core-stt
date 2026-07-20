@@ -44,6 +44,7 @@ android {
 
 dependencies {
     implementation(project(":stt"))
+    implementation(project(":vosk"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
