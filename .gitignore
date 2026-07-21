@@ -27,3 +27,6 @@ local.properties
 /tmp/**
 /temp/
 /temp/**
+
+# Vosk model assets - too large for version control
+/app/src/main/assets/vosk-model-small-en-us-0.15/
