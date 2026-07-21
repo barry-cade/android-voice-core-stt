@@ -16,6 +16,7 @@ import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.vosk.VoskEngine
 import dev.barrycade.voicecore.vosk.VoskFinalListener
 import dev.barrycade.voicecore.vosk.VoskPartialListener
+import dev.barrycade.voicecore.vosk.VoskWakeWordListener
 import dev.barrycade.voicecore.vosk.VoskMode
 import dev.barrycade.voicecore.vosk.VoskSessionManager
 import android.content.Context
@@ -27,14 +28,21 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnClear: Button
-    private lateinit var btnVoskTest: Button
+    private lateinit var radioVoskMode: RadioGroup
     private lateinit var btnVoskStop: Button
+    private lateinit var btnVoskStart: Button
+    private lateinit var btnVoskClear: Button
     private lateinit var btnModeWhisper: Button
     private lateinit var btnModeVosk: Button
     private lateinit var panelWhisper: View
     private lateinit var panelVosk: View
     private lateinit var txtOutput: TextView
     private lateinit var txtVoskOutput: TextView
+    private lateinit var txtVoskFinal: TextView
+    private lateinit var txtVoskMode: TextView
+    private lateinit var txtVoskStatus: TextView
+    private lateinit var txtWhisperStatus: TextView
+    private lateinit var txtVoskWakeWord: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
     private lateinit var txtErrorBanner: TextView
@@ -55,6 +63,14 @@ class MainActivity : ComponentActivity() {
     private var isRecording = false
     private var voskEngine: VoskEngine? = null
     private var voskSessionManager: VoskSessionManager? = null
+    private var voskWakeWordCount: Int = 0
+
+    /**
+     * Prevents the radio group change listener from re-triggering
+     * programmatic selection changes (e.g. when re-enabling after
+     * a session ends).
+     */
+    private var voskReady: Boolean = false
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -113,14 +129,21 @@ class MainActivity : ComponentActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnClear = findViewById(R.id.btnClear)
-        btnVoskTest = findViewById(R.id.btnVoskTest)
+        radioVoskMode = findViewById(R.id.radioVoskMode)
         btnVoskStop = findViewById(R.id.btnVoskStop)
+        btnVoskClear = findViewById(R.id.btnVoskClear)
+        btnVoskStart = findViewById(R.id.btnVoskStart)
         btnModeWhisper = findViewById(R.id.btnModeWhisper)
         btnModeVosk = findViewById(R.id.btnModeVosk)
         panelWhisper = findViewById(R.id.panelWhisper)
         panelVosk = findViewById(R.id.panelVosk)
         txtOutput = findViewById(R.id.txtOutput)
         txtVoskOutput = findViewById(R.id.txtVoskOutput)
+        txtVoskFinal = findViewById(R.id.txtVoskFinal)
+        txtVoskMode = findViewById(R.id.txtVoskMode)
+        txtVoskStatus = findViewById(R.id.txtVoskStatus)
+        txtWhisperStatus = findViewById(R.id.txtWhisperStatus)
+        txtVoskWakeWord = findViewById(R.id.txtVoskWakeWord)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
@@ -138,8 +161,10 @@ class MainActivity : ComponentActivity() {
         preloadVoskModelAsync()
 
         // ── Mode toggle ──────────────────────────────────────────────────────
+        // Initial state: Whisper visible, Whisper button disabled.
         btnModeWhisper.setOnClickListener { switchToMode("whisper") }
         btnModeVosk.setOnClickListener { switchToMode("vosk") }
+        switchToMode("whisper")
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
             val newStopType: String = when (checkedId) {
@@ -170,15 +195,32 @@ class MainActivity : ComponentActivity() {
 
         btnClear.setOnClickListener {
             txtOutput.text = ""
+            updateUi()
         }
 
-        btnVoskTest.setOnClickListener {
-            if (hasRecordAudioPermission()) startVoskTest()
-            else requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        btnVoskStart.setOnClickListener {
+            if (hasRecordAudioPermission()) {
+                when (radioVoskMode.checkedRadioButtonId) {
+                    R.id.radioVoskWakeWord -> startVoskWakeWordMode()
+                    R.id.radioVoskCmdMode -> startVoskCommandMode()
+                }
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        radioVoskMode.setOnCheckedChangeListener { _, _ ->
+            // State change only, no auto-start.
         }
 
         btnVoskStop.setOnClickListener {
             stopVoskTest()
+        }
+
+        btnVoskClear.setOnClickListener {
+            txtVoskOutput.text = ""
+            txtVoskFinal.text = getString(R.string.vosk_final_hint)
+            updateVoskClearButton()
         }
 
         requestPermissionLauncher = registerForActivityResult(
@@ -245,7 +287,14 @@ class MainActivity : ComponentActivity() {
                     val obj = JSONObject(json)
                     val type = obj.optString("type", "")
                     when (type) {
-                        "result" -> onResultReceived(obj)
+                        "result" -> {
+                            onResultReceived(obj)
+                            // If auto-silence finished, reset UI state
+                            if (activeStopType == "AUTO_SILENCE") {
+                                isRecording = false
+                                updateUi()
+                            }
+                        }
                         "config" -> {
                             val code = obj.optString("code", "")
                             when (code) {
@@ -295,6 +344,8 @@ class MainActivity : ComponentActivity() {
         txtDiagnostics.text = timingInfo
         txtDiagnostics.visibility = View.VISIBLE
 
+        updateUi()
+
         if (text == BLANK_AUDIO_MARKER || text == "") {
             blankAudioCount += 1
             if (blankAudioCount >= blankAudioThreshold) {
@@ -319,6 +370,7 @@ class MainActivity : ComponentActivity() {
         action.outputText?.let { txtOutput.text = it }
         txtDiagnostics.visibility = View.GONE
         txtDiagnostics.text = ""
+        updateUi()
     }
 
     /**
@@ -388,10 +440,11 @@ class MainActivity : ComponentActivity() {
     private fun preloadVoskModelAsync() {
         Thread({
             try {
-                val modelDir = copyAssetFolder(this, "vosk-model-small-en-gb-0.15")
+                val modelDir = copyAssetFolder(this, "vosk-model-small-en-us-0.15")
                 val engine = VoskEngine(modelDir.path)
                 voskEngine = engine
                 voskSessionManager = VoskSessionManager(engine)
+                voskReady = true
                 postToUi {
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."
                 }
@@ -404,10 +457,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start a Vosk command-mode session using VoskSessionManager.
-     * The manager owns AudioRecord and the capture thread.
+     * Start a Vosk wake-word session using VoskSessionManager.
+     *
+     * The manager continuously listens for the wake word ("zip").
+     * On detection it auto-switches to command mode for one utterance,
+     * then returns to wake-word mode.
      */
-    private fun startVoskTest() {
+    private fun startVoskWakeWordMode() {
         val sessionManager = voskSessionManager
         if (sessionManager == null) {
             txtVoskOutput.text = "Vosk not initialised yet (preload may still be running)."
@@ -419,44 +475,147 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        btnVoskTest.isEnabled = false
-        btnVoskStop.isEnabled = true
+        voskWakeWordCount = 0
+        txtVoskWakeWord.visibility = View.GONE
+        txtVoskMode.visibility = View.VISIBLE
         txtVoskOutput.visibility = View.VISIBLE
-        txtVoskOutput.text = "Vosk running..."
+        txtVoskOutput.text = "Listening for wake word..."
 
-        sessionManager.partialListener = VoskPartialListener { text ->
+        val partialCallback = VoskPartialListener { text ->
             txtVoskOutput.text = "Partial: $text"
         }
 
-        sessionManager.finalListener = VoskFinalListener { text ->
-            txtVoskOutput.text = "[END] $text"
-            // Session auto-stops after final in command mode — reset UI.
-            btnVoskTest.isEnabled = true
-            btnVoskStop.isEnabled = false
+        val finalCallback = VoskFinalListener { text ->
+            txtVoskFinal.text = "Final: $text"
+            txtVoskOutput.text = "[Utterance End]"
+            // In COMMAND mode, we want to stop definitively after one utterance.
+            if (voskSessionManager?.mode == VoskMode.COMMAND) {
+                stopVoskTest()
+            }
+            // In wake-word mode, final results are logged but loop continues.
+            // Reset indicator after command utterance.
+            txtVoskWakeWord.visibility = View.GONE
+            updateVoskClearButton()
         }
+
+        val wakeWordCallback = VoskWakeWordListener {
+            voskWakeWordCount += 1
+            txtVoskWakeWord.visibility = View.VISIBLE
+            txtVoskMode.text = "Mode: COMMAND (wake #$voskWakeWordCount)"
+            txtVoskWakeWord.text = "[WAKE WORD DETECTED] Switching to command mode..."
+        }
+
+        val modeChangeCallback: (VoskMode) -> Unit = { newMode ->
+            when (newMode) {
+                VoskMode.WAKEWORD -> {
+                    txtVoskMode.text = "Mode: WAKEWORD (say \"zip\")"
+                    txtVoskStatus.text = getString(R.string.vosk_status_active)
+                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+                    radioVoskMode.isEnabled = false
+                    btnVoskStart.isEnabled = false
+                    btnVoskStop.isEnabled = true
+                }
+                VoskMode.COMMAND -> {
+                    txtVoskMode.text = "Mode: COMMAND"
+                    txtVoskStatus.text = getString(R.string.vosk_status_active)
+                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+                    radioVoskMode.isEnabled = false
+                    btnVoskStart.isEnabled = false
+                    btnVoskStop.isEnabled = true
+                }
+                VoskMode.IDLE -> {
+                    txtVoskMode.visibility = View.GONE
+                    txtVoskWakeWord.visibility = View.GONE
+                    txtVoskStatus.text = getString(R.string.vosk_status_idle)
+                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
+                    radioVoskMode.isEnabled = true
+                    btnVoskStart.isEnabled = true
+                    btnVoskStop.isEnabled = false
+                    updateVoskClearButton()
+                }
+            }
+        }
+
+        sessionManager.partialListener = partialCallback
+        sessionManager.finalListener = finalCallback
+        sessionManager.wakeWordListener = wakeWordCallback
+        sessionManager.modeListener = modeChangeCallback
 
         sessionManager.errorListener = { message ->
             txtVoskOutput.text = "Error: $message"
-            btnVoskTest.isEnabled = true
+            radioVoskMode.isEnabled = true
+            btnVoskStart.isEnabled = true
             btnVoskStop.isEnabled = false
+            txtVoskMode.visibility = View.GONE
+            txtVoskWakeWord.visibility = View.GONE
+        }
+
+        try {
+            sessionManager.startWakeWordMode()
+        } catch (e: IllegalStateException) {
+            txtVoskOutput.text = "Error: ${e.message}"
+            radioVoskMode.isEnabled = true
+            btnVoskStart.isEnabled = true
+            btnVoskStop.isEnabled = false
+        }
+    }
+
+    /**
+     * Start a direct Vosk command-mode session (no wake word).
+     * Useful for testing the recogniser without wake-word logic.
+     */
+    private fun startVoskCommandMode() {
+        val sessionManager = voskSessionManager
+        if (sessionManager == null) {
+            txtVoskOutput.text = "Vosk not initialised yet (preload may still be running)."
+            return
+        }
+
+        if (sessionManager.mode != VoskMode.IDLE) {
+            txtVoskOutput.text = "Vosk session already active."
+            return
+        }
+
+        txtVoskWakeWord.visibility = View.GONE
+        txtVoskMode.visibility = View.VISIBLE
+        txtVoskOutput.visibility = View.VISIBLE
+        txtVoskOutput.text = "Listening for speech..."
+
+        val partialCallback = VoskPartialListener { text ->
+            txtVoskOutput.text = "Partial: $text"
+        }
+
+        val finalCallback = VoskFinalListener { text ->
+            txtVoskFinal.text = "Final: $text"
+            txtVoskOutput.text = "[Utterance End]"
+            stopVoskTest()
+        }
+
+        sessionManager.partialListener = partialCallback
+        sessionManager.finalListener = finalCallback
+
+        sessionManager.errorListener = { message ->
+            txtVoskOutput.text = "Error: $message"
+            radioVoskMode.isEnabled = true
+            btnVoskStart.isEnabled = true
+            btnVoskStop.isEnabled = false
+            txtVoskMode.visibility = View.GONE
         }
 
         try {
             sessionManager.startCommandMode()
         } catch (e: IllegalStateException) {
             txtVoskOutput.text = "Error: ${e.message}"
-            btnVoskTest.isEnabled = true
+            radioVoskMode.isEnabled = true
+            btnVoskStart.isEnabled = true
             btnVoskStop.isEnabled = false
         }
     }
 
-    /**
-     * Stop the Vosk session cleanly via VoskSessionManager.
-     */
     private fun stopVoskTest() {
         voskSessionManager?.stop()
-        btnVoskTest.isEnabled = true
-        btnVoskStop.isEnabled = false
+        // UI is handled by modeChangeCallback via IDLE state
+        txtVoskOutput.text = "Vosk stopped."
     }
 
     private fun escapeJsonString(value: String): String {
@@ -491,8 +650,7 @@ class MainActivity : ComponentActivity() {
             blankAudioCount = 0
             isRecording = true
             txtOutput.text = "Recording..."
-            btnStop.isEnabled = true
-            btnStart.isEnabled = false
+            updateUi()
 
             txtConfigDisplay.visibility = View.VISIBLE
         } catch (e: IllegalArgumentException) {
@@ -514,14 +672,14 @@ class MainActivity : ComponentActivity() {
 
     private fun stopRecording() {
         txtOutput.text = "Processing..."
+        btnStop.isEnabled = false
         val thread = Thread({
             try {
                 AppLogger.log(AppLogCode.STOP_USING_STOP_AND_TRANSCRIBE)
                 SpeechToText.transcribe()
                 postToUi {
                     isRecording = false
-                    btnStop.isEnabled = false
-                    btnStart.isEnabled = true
+                    updateUi()
                 }
             } catch (t: Throwable) {
                 AppLogger.log(AppLogCode.STOP_FAILED, t.message)
@@ -532,17 +690,61 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        val showStart = !isRecording
-        btnStart.visibility = if (showStart) View.VISIBLE else View.GONE
+        if (isRecording) {
+            btnStart.isEnabled = false
+            btnStop.isEnabled = true
+            btnClear.isEnabled = false
+            radioGroupStrategy.isEnabled = false
+            for (i in 0 until radioGroupStrategy.childCount) {
+                radioGroupStrategy.getChildAt(i).isEnabled = false
+            }
+            txtWhisperStatus.text = getString(R.string.vosk_status_active)
+            txtWhisperStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+        } else {
+            btnStart.isEnabled = true
+            btnStop.isEnabled = false
+            btnClear.isEnabled = isWhisperContentAvailable()
+            radioGroupStrategy.isEnabled = true
+            for (i in 0 until radioGroupStrategy.childCount) {
+                radioGroupStrategy.getChildAt(i).isEnabled = true
+            }
+            txtWhisperStatus.text = getString(R.string.vosk_status_idle)
+            txtWhisperStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
+        }
 
-        val showStop = activeStopType == "MANUAL"
-        btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
+        btnStart.visibility = View.VISIBLE
+        btnStop.visibility = View.VISIBLE
+    }
 
-        btnClear.isEnabled = true
+    private fun isWhisperContentAvailable(): Boolean {
+        val text = txtOutput.text.toString()
+        return text.isNotEmpty() && text != "Say something..." && text != "Microphone permission is required"
+    }
+
+    private fun updateVoskClearButton() {
+        btnVoskClear.isEnabled = isVoskContentAvailable()
+    }
+
+    private fun isVoskContentAvailable(): Boolean {
+        val finalResult = txtVoskFinal.text.toString()
+        return finalResult.isNotEmpty() && finalResult != getString(R.string.vosk_final_hint)
     }
 
     private fun switchToMode(mode: String) {
         val isWhisper = mode == "whisper"
+
+        if (isWhisper) {
+            // Teardown Vosk when switching to Whisper
+            if (voskSessionManager?.mode != VoskMode.IDLE) {
+                stopVoskTest()
+            }
+        } else {
+            // Teardown Whisper when switching to Vosk
+            if (isRecording) {
+                stopRecording()
+            }
+        }
+
         panelWhisper.visibility = if (isWhisper) View.VISIBLE else View.GONE
         panelVosk.visibility = if (isWhisper) View.GONE else View.VISIBLE
         btnModeWhisper.isEnabled = !isWhisper

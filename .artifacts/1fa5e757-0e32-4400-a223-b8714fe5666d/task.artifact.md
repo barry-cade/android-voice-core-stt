@@ -1,0 +1,7 @@
+- `[ ]` Update `activity_main.xml` to add `txtWhisperStatus` and fix Whisper button states
+- `[ ]` Update `MainActivity.kt` for coordinated Whisper lifecycle
+    - `[ ]` Update `startRecording()` and `stopRecording()` for strict state toggling
+    - `[ ]` Refine `updateUi()` to use `isEnabled` and show all buttons
+    - `[ ]` Update JSON message listener to handle status reset on result
+- `[ ]` Verify coordinated behavior (Manual and Auto modes)
+- `[ ]` Create final walkthrough

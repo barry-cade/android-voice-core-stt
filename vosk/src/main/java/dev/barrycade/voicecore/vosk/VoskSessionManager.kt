@@ -36,6 +36,16 @@ fun interface VoskFinalListener {
 }
 
 /**
+ * Callback for wake-word detection.
+ *
+ * Fired on the main thread when the wake word is spotted
+ * in a partial result during [VoskMode.WAKEWORD] mode.
+ */
+fun interface VoskWakeWordListener {
+    fun onWakeWordDetected()
+}
+
+/**
  * Manages Vosk capture sessions with explicit lifecycle control.
  *
  * Owns the [AudioRecord] thread and [VoskEngine] usage, ensuring
@@ -43,14 +53,21 @@ fun interface VoskFinalListener {
  * [startWakeWordMode], [startCommandMode], or [stop] — it never
  * touches AudioRecord or VoskEngine directly.
  *
+ * In wake-word mode the manager continuously listens for a wake word
+ * (default "zip") in partial results. On detection it auto-switches
+ * to command mode, captures one utterance, then returns to wake-word
+ * mode, creating a seamless hands-free loop.
+ *
  * @param voskEngine Initialised VoskEngine instance (model loaded).
  * @param sampleRate Audio sample rate in Hz (default 16000).
  * @param bufferSizeSamples Number of short samples per read chunk (default 4000).
+ * @param wakeWord The wake word to listen for (default "zip").
  */
 class VoskSessionManager(
     private val voskEngine: VoskEngine,
     private val sampleRate: Int = 16000,
-    private val bufferSizeSamples: Int = 4000
+    private val bufferSizeSamples: Int = 4000,
+    private val wakeWord: String = "Max"
 ) {
     // ── Public callbacks ─────────────────────────────────────────────────────
 
@@ -59,6 +76,16 @@ class VoskSessionManager(
 
     /** Called on the main thread for every final result. */
     var finalListener: VoskFinalListener? = null
+
+    /** Called on the main thread when the wake word is detected. */
+    var wakeWordListener: VoskWakeWordListener? = null
+
+    /**
+     * Called on the main thread whenever the mode changes.
+     * Receives the new [VoskMode] value. Fires after the mode
+     * has been updated internally.
+     */
+    var modeListener: ((VoskMode) -> Unit)? = null
 
     /**
      * Called when the capture thread encounters an error.
@@ -78,13 +105,24 @@ class VoskSessionManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var captureThread: Thread? = null
 
+    /**
+     * Set by the wake-word detection path to indicate we just
+     * auto-switched to command mode. Prevents re-triggering the
+     * wake word callback from partial results during the command
+     * utterance.
+     */
+    @Volatile
+    private var autoSwitchedToCommand: Boolean = false
+
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Start a wake-word capture session.
+     * Start a wake-word capture session with automatic command mode switching.
      *
      * In this mode the recogniser continuously processes incoming audio
-     * and reports partial results via [partialListener]. The mode persists
+     * and reports partial results via [partialListener]. When the wake
+     * word is detected the manager auto-switches to command mode, captures
+     * one utterance, then returns to wake-word mode. This loop continues
      * until [stop] is called or an error occurs.
      *
      * @throws IllegalStateException if a session is already active.
@@ -94,6 +132,7 @@ class VoskSessionManager(
             throw IllegalStateException("Vosk session already active in mode: $mode")
         }
         mode = VoskMode.WAKEWORD
+        postModeChange(VoskMode.WAKEWORD)
         startCapture()
     }
 
@@ -112,6 +151,7 @@ class VoskSessionManager(
             throw IllegalStateException("Vosk session already active in mode: $mode")
         }
         mode = VoskMode.COMMAND
+        postModeChange(VoskMode.COMMAND)
         startCapture()
     }
 
@@ -123,6 +163,7 @@ class VoskSessionManager(
     fun stop() {
         active.set(false)
         mode = VoskMode.IDLE
+        postModeChange(VoskMode.IDLE)
         // Thread will exit its loop and terminate naturally.
     }
 
@@ -143,14 +184,146 @@ class VoskSessionManager(
     private fun startCapture() {
         active.set(true)
 
-        captureThread = Thread({
+        val thread = Thread({
             runCaptureLoop()
         }, "VoskCaptureThread")
 
-        captureThread?.start()
+        captureThread = thread
+        thread.start()
     }
 
     private fun runCaptureLoop() {
+        // ── Outer loop: stays alive across wake-word → command → wake-word ──
+        while (active.get()) {
+            val audioRecord = createAudioRecord() ?: return
+            var keepGoing = true
+
+            if (mode == VoskMode.WAKEWORD) {
+                keepGoing = runWakeWordInnerLoop(audioRecord)
+            } else if (mode == VoskMode.COMMAND) {
+                keepGoing = runCommandInnerLoop(audioRecord)
+            }
+
+            audioRecord.stop()
+            audioRecord.release()
+
+            if (!keepGoing) {
+                // Command mode completed one utterance or stop was requested.
+                if (!active.get()) {
+                    // Explicit stop — exit completely.
+                    mode = VoskMode.IDLE
+                    return
+                }
+
+                // Auto-switch back to wake-word mode.
+                mode = VoskMode.WAKEWORD
+                autoSwitchedToCommand = false
+                postModeChange(VoskMode.WAKEWORD)
+                // Continue outer loop to re-create AudioRecord and listen again.
+            }
+        }
+
+        mode = VoskMode.IDLE
+        postModeChange(VoskMode.IDLE)
+    }
+
+    /**
+     * Inner loop for wake-word mode.
+     *
+     * Reads audio frames, feeds them to Vosk, and checks partial results
+     * for the wake word. Returns `true` to continue the outer loop
+     * (normal exit due to wake-word detection → command mode).
+     * Returns `false` on explicit stop or error.
+     */
+    private fun runWakeWordInnerLoop(audioRecord: AudioRecord): Boolean {
+        val shortBuffer = ShortArray(bufferSizeSamples)
+
+        while (active.get() && mode == VoskMode.WAKEWORD) {
+            val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
+            if (readCount <= 0) continue
+
+            val pcmChunk = if (readCount < shortBuffer.size) {
+                shortBuffer.copyOf(readCount)
+            } else {
+                shortBuffer
+            }
+
+            val utteranceEnd: Boolean = try {
+                voskEngine.acceptShort(pcmChunk)
+            } catch (t: Throwable) {
+                postError("Vosk accept failed: ${t.message}")
+                return false
+            }
+
+            if (utteranceEnd) {
+                val finalText = voskEngine.finalResult()
+                postFinal(finalText)
+            } else {
+                val partial = voskEngine.partialResult()
+                    postPartial(partial)
+
+                if (containsWakeWord(partial)) {
+                    // Wake word spotted — switch to command mode.
+                    mode = VoskMode.COMMAND
+                    autoSwitchedToCommand = true
+                    postModeChange(VoskMode.COMMAND)
+                    postWakeWord()
+                    return true
+                }
+            }
+        }
+
+        // Stop requested while in wake-word mode.
+        return false
+    }
+
+    /**
+     * Inner loop for command mode.
+     *
+     * Reads audio frames until an utterance-end is reported by Vosk
+     * or a stop is requested. Returns `true` to continue outer loop
+     * (normal command completion → back to wake-word).
+     * Returns `false` on explicit stop or error.
+     */
+    private fun runCommandInnerLoop(audioRecord: AudioRecord): Boolean {
+        val shortBuffer = ShortArray(bufferSizeSamples)
+
+        while (active.get() && mode == VoskMode.COMMAND) {
+            val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
+            if (readCount <= 0) continue
+
+            val pcmChunk = if (readCount < shortBuffer.size) {
+                shortBuffer.copyOf(readCount)
+            } else {
+                shortBuffer
+            }
+
+            val utteranceEnd: Boolean = try {
+                voskEngine.acceptShort(pcmChunk)
+            } catch (t: Throwable) {
+                postError("Vosk accept failed: ${t.message}")
+                return false
+            }
+
+            if (utteranceEnd) {
+                val finalText = voskEngine.finalResult()
+                postFinal(finalText)
+                // Command utterance complete — return to outer loop.
+                return true
+            } else {
+                val partial = voskEngine.partialResult()
+                // Suppress wake-word detection from command-mode partials.
+                if (!autoSwitchedToCommand || !containsWakeWord(partial)) {
+                    postPartial(partial)
+                }
+            }
+        }
+
+        // Stop requested while in command mode.
+        return false
+    }
+
+    private fun createAudioRecord(): AudioRecord? {
         val minBufferBytes = AudioRecord.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
@@ -168,62 +341,29 @@ class VoskSessionManager(
             )
         } catch (e: Exception) {
             postError("AudioRecord creation failed: ${e.message}")
-            return
+            return null
         }
 
         if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
             audioRecord.release()
             postError("AudioRecord not initialised.")
-            return
+            return null
         }
 
         audioRecord.startRecording()
+        return audioRecord
+    }
 
-        val shortBuffer = ShortArray(bufferSizeSamples)
-        var frameCount = 0
+    // ── Wake-word detection ──────────────────────────────────────────────────
 
-        try {
-            while (active.get()) {
-                val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
-                if (readCount <= 0) continue
-
-                frameCount++
-
-                val pcmChunk = if (readCount < shortBuffer.size) {
-                    shortBuffer.copyOf(readCount)
-                } else {
-                    shortBuffer
-                }
-
-                val utteranceEnd: Boolean = try {
-                    voskEngine.acceptShort(pcmChunk)
-                } catch (t: Throwable) {
-                    postError("Vosk accept failed: ${t.message}")
-                    break
-                }
-
-                if (utteranceEnd) {
-                    if (mode == VoskMode.COMMAND) {
-                        val finalText = voskEngine.finalResult()
-                        postFinal(finalText)
-                        // Command mode ends after one utterance.
-                        break
-                    } else {
-                        // Wake-word mode: log final but keep going.
-                        val finalText = voskEngine.finalResult()
-                        postFinal(finalText)
-                    }
-                } else {
-                    val partial = voskEngine.partialResult()
-                    postPartial(partial)
-                }
-            }
-        } finally {
-            audioRecord.stop()
-            audioRecord.release()
-            active.set(false)
-            mode = VoskMode.IDLE
-        }
+    /**
+     * Check whether [text] contains the configured wake word.
+     *
+     * Performs a case-insensitive check on the raw partial result string.
+     */
+    private fun containsWakeWord(text: String): Boolean {
+        if (wakeWord.isBlank()) return false
+        return text.contains(wakeWord, ignoreCase = true)
     }
 
     // ── Main-thread dispatching ──────────────────────────────────────────────
@@ -241,6 +381,22 @@ class VoskSessionManager(
         if (listener == null) return
         mainHandler.post {
             listener.onFinalResult(text)
+        }
+    }
+
+    private fun postWakeWord() {
+        val listener = wakeWordListener
+        if (listener == null) return
+        mainHandler.post {
+            listener.onWakeWordDetected()
+        }
+    }
+
+    private fun postModeChange(newMode: VoskMode) {
+        val listener = modeListener
+        if (listener == null) return
+        mainHandler.post {
+            listener(newMode)
         }
     }
 

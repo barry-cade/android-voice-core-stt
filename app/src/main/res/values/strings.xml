@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">android-voice-core</string>
+    <string name="vosk_mode">Vosk Mode</string>
+    <string name="strategy">Strategy</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="clear">Clear</string>
+    <string name="whisper">Whisper</string>
+    <string name="vosk">Vosk</string>
+    <string name="cmd_mode">Cmd Mode</string>
+    <string name="wake_word">Wake Word</string>
+    <string name="vosk_final_hint">Final: (awaiting result...)</string>
+    <string name="vosk_status_idle">Status: IDLE</string>
+    <string name="vosk_status_active">Status: ACTIVE</string>
 </resources>
