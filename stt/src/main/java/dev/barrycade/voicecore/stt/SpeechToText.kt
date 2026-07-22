@@ -1,42 +1,36 @@
 package dev.barrycade.voicecore.stt
 
-import android.content.Context
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Main entry point for the STT pipeline.
  *
- * ## Public lifecycle
+ * ## Public API (all return JSON strings)
  *
- * - `init(jsonConfig)`
- *      Loads the model and prepares the pipeline. It does **not** start
- *      recording. Capture begins only when a session is started internally.
+ * - `init(configJson)` — load model + start session (first call), or start session only (subsequent calls)
+ * - `loadModelOnly(configJson)` — load model and configure pipeline without starting capture
+ * - `configure(configJson)` — lightweight runtime config change
+ * - `transcribe()` — synchronous: block until utterance complete, return JSON
  *
- * - `transcribe()`
- *      Ends the current session, finalises the utterance, performs inference,
- *      and dispatches the result. This is the **manual stop** entry point.
+ * ## Intended lifecycle (Manual mode)
  *
- * - `reconfigure(jsonConfig)`
- *      Rebuilds the pipeline with a new configuration. Existing sessions are
- *      stopped and replaced.
- *
- * All results and errors are delivered through the listener registered via
- * `setOnMessageListener()`.
+ * 1. App startup → `loadModelOnly()` → load model, warm-up, no capture, no session
+ * 2. User presses Start → `init()` → start session, begin capture, begin polling
+ * 3. User speaks → PCM accumulates in session buffer
+ * 4. User presses Stop → `transcribe()` → finalise PCM, run inference, return result
+ * 5. Pipeline returns to IDLE, ready for next session
  *
  * ## Internal lifecycle
  *
- * Internal methods (`loadModel`, `startSession`, `endSession`) are invoked
- * automatically by the public lifecycle. They must not be called directly.
- *
- * `startSession()` is the point where audio capture actually begins.
- * `endSession()` is the point where capture stops and inference is submitted.
+ * Internal methods (`loadModel`, `startSession`) are invoked automatically
+ * by the public API. They must not be called directly.
  *
  * ## Threading model
  *
  * | Thread                | Responsibility                                         |
  * |-----------------------|--------------------------------------------------------|
- * | Caller thread         | Public lifecycle (`init`, `transcribe`, `reconfigure`) |
+ * | Caller thread         | Public API (`init`, `configure`, `transcribe`)          |
  * | Audio capture (T1)    | AudioRecord read → PCM frame enqueue                   |
  * | Capture drain (T2)    | Warm‑up buffering into session buffer                  |
  * | Processor (T3)        | VAD, utterance accumulation, PCM polling               |
@@ -44,21 +38,10 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Lock boundaries
  *
- * - `stateLock` serialises **all** public lifecycle methods.
+ * - `stateLock` serialises **all** public API methods.
  * - `stateLock` is **not** held across blocking operations (thread joins,
  *   native inference, executor shutdown).
  * - Blocking operations occur **outside** the lock to avoid deadlock.
- *
- * ## Stale callback rejection
- *
- * - `sessionEpoch` increments on each session start.
- * - `currentSessionEpoch` is captured when inference is submitted.
- * - Callbacks whose epoch does not match are dropped.
- *
- * ## Callback delivery
- *
- * JSON messages are delivered on a background thread. Callers must marshal
- * to the main thread if required.
  *
  * ## Re‑entrancy rules
  *
@@ -67,9 +50,19 @@ import java.util.concurrent.atomic.AtomicLong
  */
 
 class SpeechToText internal constructor(
-    private val whisperModel: WhisperModel = WhisperBridge,
-    private val captureManager: SessionManager = CaptureManager()
+    internal val whisperModel: WhisperModel,
+    internal val captureManager: SessionManager
 ) {
+    // ── Public no-arg constructor ────────────────────────────────────────
+
+    /**
+     * Public no-arg constructor.
+     *
+     * Creates the STT engine with default dependencies (WhisperBridge, CaptureManager).
+     * Call [init] to load the model and start the pipeline.
+     */
+    constructor() : this(WhisperBridge, CaptureManager())
+
     // ── Controller references ────────────────────────────────────────────
 
     /** Capture lifecycle controller, wraps the [SessionManager]. */
@@ -315,43 +308,63 @@ class SpeechToText internal constructor(
     }
 
     /**
-     * Reconfigure the pipeline with a new JSON config between sessions.
+     * Load the STT model and configure the pipeline without starting audio capture.
      *
-     * Parses the new config, clears the existing session config so that
-     * [loadModel] can re-enter its full init path, then delegates to
-     * [loadModel]. Safe to call between sessions (not during active
-     * capture or inference).
+     * This is intended for preload scenarios where the model must be loaded
+     * and warmed up before the user presses Start (e.g. app startup). After
+     * calling this method, call [init] to begin a capture session.
      *
-     * The singleton instance and message listener are preserved — only
-     * the pipeline configuration (VAD thresholds, stop strategy, etc.)
-     * is replaced.
+     * Safe to call multiple times — idempotent after first success.
      *
      * @param configJson A JSON string conforming to the input config schema.
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
-     * @return An [SttError] on failure, or null on success.
+     * @return JSON response. Success: {"type":"init","status":"ok"}
+     *         Error: {"type":"error","code":"...","message":"..."}
      */
-    fun reconfigure(configJson: String): SttError? {
+    fun loadModelOnly(configJson: String): String {
+        val error = loadModel(configJson)
+        if (error != null) {
+            return SttJsonAdapter.buildErrorJson(error.code, error.message, error.details)
+        }
+        return """{"type":"init","status":"ok"}"""
+    }
+
+    /**
+     * Apply new configuration at runtime without restarting the pipeline.
+     *
+     * Updates runtime-safe fields: sttMode, grammar, energyThreshold,
+     * silenceTimeoutMs, partialsEnabled, autoReturn, and strategy config.
+     *
+     * Safe to call between utterances. Not allowed during active capture
+     * or inference.
+     *
+     * @param configJson A JSON string with the fields to update.
+     * @return JSON response. Success: {"type":"config","status":"ok"}
+     *         Error: {"type":"error","code":"...","message":"..."}
+     */
+    fun configure(configJson: String): String {
         synchronized(stateLock) {
             if (sessionConfig == null) {
                 val error = SttError(
                     code = SttErrorCode.CONFIG_NOT_SET,
-                    message = "loadModel() must be called before reconfigure()"
+                    message = "init() must be called before configure()"
                 )
-                callbackDispatcher.dispatchError(error)
-                return error
+                return SttJsonAdapter.buildErrorJson(error.code, error.message, error.details)
             }
             if (isRunning.get() || isInferencing.get()) {
                 val error = SttError(
                     code = SttErrorCode.PIPELINE_ILLEGAL_STATE,
-                    message = "Cannot reconfigure during active session"
+                    message = "Cannot configure during active session"
                 )
-                callbackDispatcher.dispatchError(error)
-                return error
+                return SttJsonAdapter.buildErrorJson(error.code, error.message, error.details)
             }
-            // Clear session config so loadModel() re-enters its init path.
             sessionConfig = null
         }
-        return loadModel(configJson)
+        val error = loadModel(configJson)
+        if (error != null) {
+            return SttJsonAdapter.buildErrorJson(error.code, error.message, error.details)
+        }
+        return """{"type":"config","status":"ok"}"""
     }
 
     /**
@@ -456,149 +469,200 @@ class SpeechToText internal constructor(
     }
 
     /**
-     * Initialise STT and start a session in a single call.
+     * Initialise the STT subsystem and start a capture session.
      *
-     * Convenience method equivalent to calling [loadModel] then [startSession].
-     * For responsive UI startup, prefer the two-phase API:
-     * call [loadModel] at app startup and [startSession] on the Start button.
+     * ## First call (sessionConfig == null)
+     *
+     * Loads the model, configures the pipeline, and starts a capture session.
+     * Equivalent to calling [loadModelOnly] followed by [startSession].
+     *
+     * ## Subsequent calls (sessionConfig != null)
+     *
+     * Starts a new capture session only. The model and pipeline remain
+     * loaded from the first call. Call this from the Start button to
+     * begin a fresh session without re-loading the model.
+     *
+     * Safe to call multiple times. After the first call, subsequent calls
+     * start a new session without re-loading the model.
      *
      * @param configJson A JSON string conforming to the input config schema.
      *                   See [SttJsonAdapter.parseConfig] for the expected shape.
-     * @return A JSON result string on success, or a JSON error string on failure.
+     * @return JSON response. Success: {"type":"init","status":"ok"}
+     *         Error: {"type":"error","code":"...","message":"..."}
      */
-    fun init(configJson: String): SttError? {
-        val loadError = loadModel(configJson)
-        if (loadError != null) return loadError
-        return startSession()
-    }
-
-    /**
-     * Transcribe the current utterance and deliver the result via the message listener.
-     *
-     * Stops the current capture session, runs inference on accumulated PCM,
-     * and dispatches the result via [setOnMessageListener].
-     *
-     * The result JSON will have `"type": "result"` on success, or
-     * `"type": "error"` if an error occurs.
-     */
-    fun transcribe() {
-        synchronized(stateLock) {
-            // Ignore manual stop if auto-silence or another path already ended capture.
-            if (pipelineState.currentStage != SttPipelineStage.CAPTURING) {
-                return
+    fun init(configJson: String): String {
+        if (sessionConfig != null) {
+            // Model already loaded — start a new capture session.
+            val sessionError = startSession()
+            if (sessionError != null) {
+                return SttJsonAdapter.buildErrorJson(sessionError.code, sessionError.message, sessionError.details)
             }
-
-            val cfg = sessionConfig
-            if (cfg == null) return
-
-            // ── Early bail-out: session already ended ──────────────────────
-            if (!isRunning.get()) {
-                SttLogger.lifecycle("transcribe() ignored -- session not running")
-                return
-            }
-
-            val runtimeCfg = cfg.runtimeConfig
-            val elapsedMs = sessionController.endSession().toInt()
-
-            SttLogger.pcm("entered -- isRunning=${isRunning.get()}, state=${lifecycleController.currentState}")
-
-            // ── Session timeout check (safety limit) ────────────────────────
-            // Checked before the stop strategy so the timeout can force-stop
-            // even when the user never pressed Stop (abandoned session).
-            val sessionTimeoutMs = runtimeCfg.sessionTimeoutMs
-            val timedOut = sessionTimeoutMs > 0 && elapsedMs >= sessionTimeoutMs
-            if (timedOut) {
-                SttLogger.lifecycle("session timeout: ${elapsedMs}ms >= ${sessionTimeoutMs}ms — forcing finalisation")
-            }
-
-            events.manualStopPressed.raise()
-
-            if (!timedOut && !runtimeCfg.stopStrategy.shouldStop(events, vad, elapsedMs)) {
-                return
-            }
-
-            if (lifecycleController.currentState is SttLifecycleState.STOPPED) {
-                SttLogger.pcm("ignoring -- state=STOPPED")
-                return
-            }
-
-            if (lifecycleController.currentState is SttLifecycleState.FINALISING) {
-                SttLogger.pcm("already FINALISING -- returning")
-                return
-            }
-
-            if (!transitionPipelineStageLocked(SttPipelineStage.FINALISING, "transcribe")) {
-                SttLogger.lifecycleW("transcribe() ignored -- illegal stage from ${pipelineState.currentStage}")
-                return
-            }
-
-            isRunning.set(false)
-            stopRequest.raise()
-            modeController.stopController()
-
-            val vadGate = modeController.minimalProcessorController?.vadGate
-            val finalPcm = captureController.finaliseAndStop(vadGate)
-
-            if (finalPcm.isEmpty()) {
-                SttLogger.pcm("no PCM accumulated -- transitioning to STOPPED then READY")
-                transitionPipelineToIdleLocked("transcribe empty pcm")
-                currentSessionEpoch = 0L
-                lifecycleController.onStop()
-                lifecycleController.onReset()
-                return
-            }
-
-            lifecycleController.onFinalising()
-            val timingMs = sessionController.currentPcmElapsedMs()
-
-            val epoch = currentSessionEpoch
-            if (epoch == 0L) {
-                SttLogger.lifecycleW("transcribe() with no active session epoch -- dropping inference")
-                transitionPipelineToIdleLocked("transcribe missing epoch")
-                lifecycleController.onStop()
-                lifecycleController.onReset()
-                return
-            }
-
-            if (!enterInferencingLocked("transcribe")) {
-                SttLogger.lifecycleW("transcribe() ignored -- inference already active")
-                return
-            }
-
-            val vadMs = processingController?.vadActiveMs ?: 0L
-            val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
-            val returnCode = if (timedOut) SttReturnCode.SESSION_TIMEOUT else SttReturnCode.SUCCESS
-            val submitted = submitInferenceAndDispatch(
-                pcm = finalPcm,
-                code = returnCode,
-                vadActiveMs = vadMs,
-                utteranceMs = utterMs,
-                captureMs = timingMs,
-                sessionEpochAtSubmission = epoch,
-                completeStopPath = true
-            )
-
-            if (!submitted) {
-                SttLogger.lifecycleW("transcribe() -- inference submission failed")
-            }
+            return """{"type":"init","status":"ok"}"""
         }
+        val error = loadModel(configJson)
+        if (error != null) {
+            return SttJsonAdapter.buildErrorJson(error.code, error.message, error.details)
+        }
+        val sessionError = startSession()
+        if (sessionError != null) {
+            return SttJsonAdapter.buildErrorJson(sessionError.code, sessionError.message, sessionError.details)
+        }
+        return """{"type":"init","status":"ok"}"""
     }
 
     /**
-     * Unified JSON message listener.
+     * Block until the current utterance is complete, then return the
+     * transcription result as a JSON string.
      *
-     * Receives all STT output as JSON strings. The caller should inspect the
-     * `"type"` field to distinguish:
-     * - `"result"` — successful transcription
-     * - `"error"` — an error occurred
+     * This method is synchronous — it blocks the caller thread until
+     * inference finishes or the silence timeout expires. It never blocks
+     * indefinitely.
      *
-     * **Delivery thread:** Varies (Whisper executor for results, error thread for errors).
-     * Post to your own Handler or coroutine dispatcher if main-thread delivery is required.
-     * @param listener The callback that receives JSON result, error, or config messages.
+     * @return JSON result string. Success:
+     *         {"type":"result","text":"...","code":"SUCCESS","timing":{...}}
+     *         Silence/empty: {"type":"result","text":"","code":"SILENCE"}
+     *         Error: {"type":"error","code":"...","message":"..."}
      */
-    fun setOnMessageListener(listener: (String) -> Unit) {
-        callbackDispatcher.setOnMessageListener(listener)
+    fun transcribe(): String {
+        // ── Phase 1: Prepare inside stateLock (fast, non-blocking) ────────
+        val prepared = synchronized(stateLock) {
+            prepareTranscribeLocked()
+        }
+        if (prepared == null) {
+            return """{"type":"result","text":"","code":"SILENCE"}"""
+        }
+
+        // ── Phase 2: Await result OUTSIDE stateLock (blocks on executor) ──
+        return inferenceController.submitAndAwait(
+            request = prepared.request,
+            decideDispatch = prepared.decideDispatch,
+            onPostDispatch = prepared.onPostDispatch,
+            onComplete = prepared.onComplete,
+            timeoutMs = 30_000L
+        )
     }
+
+    /**
+     * Prepare transcribe state inside [stateLock].
+     *
+     * Extracts PCM, builds the inference request, and creates callbacks.
+     * Returns null if there is nothing to transcribe.
+     */
+    private fun prepareTranscribeLocked(): PreparedTranscribe? {
+        // Ignore manual stop if auto-silence or another path already ended capture.
+        if (pipelineState.currentStage != SttPipelineStage.CAPTURING) {
+            return null
+        }
+
+        val cfg = sessionConfig ?: return null
+
+        if (!isRunning.get()) {
+            SttLogger.lifecycle("transcribe() ignored -- session not running")
+            return null
+        }
+
+        val runtimeCfg = cfg.runtimeConfig
+        val elapsedMs = sessionController.endSession().toInt()
+
+        // Session timeout check
+        val sessionTimeoutMs = runtimeCfg.sessionTimeoutMs
+        val timedOut = sessionTimeoutMs > 0 && elapsedMs >= sessionTimeoutMs
+        if (timedOut) {
+            SttLogger.lifecycle("session timeout: ${elapsedMs}ms >= ${sessionTimeoutMs}ms — forcing finalisation")
+        }
+
+        events.manualStopPressed.raise()
+
+        if (!timedOut && !runtimeCfg.stopStrategy.shouldStop(events, vad, elapsedMs)) {
+            return null
+        }
+
+        if (lifecycleController.currentState is SttLifecycleState.STOPPED) {
+            SttLogger.pcm("ignoring -- state=STOPPED")
+            return null
+        }
+
+        if (lifecycleController.currentState is SttLifecycleState.FINALISING) {
+            SttLogger.pcm("already FINALISING -- returning")
+            return null
+        }
+
+        if (!transitionPipelineStageLocked(SttPipelineStage.FINALISING, "transcribe")) {
+            SttLogger.lifecycleW("transcribe() ignored -- illegal stage from ${pipelineState.currentStage}")
+            return null
+        }
+
+        isRunning.set(false)
+        stopRequest.raise()
+        modeController.stopController()
+
+        val vadGate = modeController.minimalProcessorController?.vadGate
+        val finalPcm = captureController.finaliseAndStop(vadGate)
+
+        if (finalPcm.isEmpty()) {
+            SttLogger.pcm("no PCM accumulated -- transitioning to STOPPED then READY")
+            transitionPipelineToIdleLocked("transcribe empty pcm")
+            currentSessionEpoch = 0L
+            lifecycleController.onStop()
+            lifecycleController.onReset()
+            return null
+        }
+
+        lifecycleController.onFinalising()
+        val timingMs = sessionController.currentPcmElapsedMs()
+
+        val epoch = currentSessionEpoch
+        if (epoch == 0L) {
+            SttLogger.lifecycleW("transcribe() with no active session epoch -- dropping inference")
+            transitionPipelineToIdleLocked("transcribe missing epoch")
+            lifecycleController.onStop()
+            lifecycleController.onReset()
+            return null
+        }
+
+        if (!enterInferencingLocked("transcribe")) {
+            SttLogger.lifecycleW("transcribe() ignored -- inference already active")
+            return null
+        }
+
+        val vadMs = processingController?.vadActiveMs ?: 0L
+        val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
+        val returnCode = if (timedOut) SttReturnCode.SESSION_TIMEOUT else SttReturnCode.SUCCESS
+
+        val request = SttInferenceController.InferenceRequest(
+            pcm = finalPcm,
+            code = returnCode,
+            vadActiveMs = vadMs,
+            utteranceMs = utterMs,
+            captureMs = timingMs,
+            preRollMs = runtimeCfg.preRollMs.toLong(),
+            autoSilenceMs = runtimeCfg.autoSilenceMs.toLong(),
+            pipelineStartMs = sessionController.utteranceStartMs(),
+            sessionEpochAtSubmission = epoch
+        )
+
+        val decideDispatch = createDecideDispatch(epoch)
+        val onPostDispatch = createOnPostDispatch(epoch, completeStopPath = true)
+        val onComplete = createOnComplete(epoch, completeStopPath = true)
+
+        return PreparedTranscribe(
+            request = request,
+            decideDispatch = decideDispatch,
+            onPostDispatch = onPostDispatch,
+            onComplete = onComplete
+        )
+    }
+
+    /**
+     * Holder for transcribe preparation state, extracted from [stateLock]
+     * so the blocking await can happen outside the lock.
+     */
+    private data class PreparedTranscribe(
+        val request: SttInferenceController.InferenceRequest,
+        val decideDispatch: () -> SttInferenceController.DispatchDecision,
+        val onPostDispatch: () -> Unit,
+        val onComplete: () -> Unit
+    )
 
     // ======== Internal pipeline ========================================
 
@@ -968,149 +1032,4 @@ class SpeechToText internal constructor(
         return sb.toString()
     }
 
-    companion object {
-        @Volatile
-        var instance: SpeechToText? = null
-            internal set
-
-        @Volatile
-        private var pendingListener: ((String) -> Unit)? = null
-
-        /**
-         * Load the STT model and configure the pipeline without starting capture.
-         *
-         * Creates the singleton on first call; subsequent calls delegate to the
-         * existing instance's [loadModel].
-         *
-         * Safe to call at app startup. The model is loaded and warmup runs on the
-         * Whisper executor thread. Call [startSession] when you want to begin
-         * audio capture.
-         *
-         * @param context Application or Activity context (applicationContext is used internally).
-         * @param configJson A JSON string conforming to the input config schema.
-         * @return A JSON result string on success, or a JSON error string on failure.
-         */
-        fun loadModel(context: Context, configJson: String): SttError? {
-            val stt = instance ?: synchronized(this) {
-                instance ?: SpeechToText(
-                    WhisperBridge,
-                    CaptureManager()
-                ).also { newInstance ->
-                    instance = newInstance
-                    pendingListener?.let { newInstance.setOnMessageListener(it) }
-                }
-            }
-
-            return stt.loadModel(configJson)
-        }
-
-        /**
-         * Start a capture session.
-         *
-         * Delegates to the singleton instance's [startSession].
-         * [loadModel] must have been called first.
-         *
-         * @return An [SttError] on failure, or null on success.
-         */
-        fun startSession(): SttError? {
-            val stt = instance
-            if (stt == null) {
-                val error = SttError(
-                    code = SttErrorCode.CONFIG_NOT_SET,
-                    message = "loadModel() must be called before startSession()"
-                )
-                // No dispatcher available outside instance; log the error
-                SttLogger.error("code=CONFIG_NOT_SET, message=\"loadModel() must be called before startSession()\"")
-                return error
-            }
-            return stt.startSession()
-        }
-
-        /**
-         * Initialise STT and start a session in a single call.
-         *
-         * The singleton is created on the first call; subsequent calls
-         * delegate to the existing instance's [init].
-         *
-         * This is a convenience method. For responsive UI startup, prefer
-         * calling [loadModel] at app startup and [startSession] on the
-         * Start button.
-         *
-         * @param context Application or Activity context (applicationContext is used internally).
-         * @param configJson A JSON string conforming to the input config schema.
-         * @return An [SttError] on failure, or null on success.
-         */
-        fun init(context: Context, configJson: String): SttError? {
-            val stt = instance ?: synchronized(this) {
-                instance ?: SpeechToText(
-                    WhisperBridge,
-                    CaptureManager()
-                ).also { newInstance ->
-                    instance = newInstance
-                    pendingListener?.let { newInstance.setOnMessageListener(it) }
-                }
-            }
-
-            return stt.init(configJson)
-        }
-
-        /**
-         * Transcribe the current utterance via the singleton instance.
-         *
-         * If [loadModel] has not been called, a warning is logged and the call is ignored.
-         */
-        fun transcribe() {
-            val stt = instance
-            if (stt == null) {
-                SttLogger.lifecycleW("SpeechToText.transcribe() called before init() — ignoring")
-                return
-            }
-            stt.transcribe()
-        }
-
-        /**
-         * Register a JSON message listener.
-         *
-         * Safe to call before [loadModel]; the listener is buffered and wired
-         * to the singleton once it is created.
-         */
-        fun setOnMessageListener(listener: (String) -> Unit) {
-            pendingListener = listener
-            instance?.setOnMessageListener(listener)
-        }
-
-        /**
-         * Reset the singleton for testing.
-         *
-         * Clears the instance and any pending listener so the next call
-         * to [init] creates a fresh singleton.
-         */
-        internal fun resetForTest() {
-            instance = null
-            pendingListener = null
-        }
-
-        /**
-         * Reconfigure the pipeline with a new JSON config between sessions.
-         *
-         * Delegates to the singleton instance's [SpeechToText.reconfigure].
-         * Safe to call between sessions; ignored with an error if a session
-         * is active.
-         *
-         * @param configJson A JSON string conforming to the input config schema.
-         * @return An [SttError] on failure, or null on success.
-         */
-        fun reconfigure(configJson: String): SttError? {
-            val stt = instance
-            if (stt == null) {
-                val error = SttError(
-                    code = SttErrorCode.CONFIG_NOT_SET,
-                    message = "loadModel() must be called before reconfigure()"
-                )
-                SttLogger.error("code=CONFIG_NOT_SET, message=\"loadModel() must be called before reconfigure()\"")
-                return error
-            }
-            return stt.reconfigure(configJson)
-        }
-    }
 }

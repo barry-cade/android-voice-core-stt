@@ -78,6 +78,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
 
+    /** STT engine instance, created once and reused. */
+    private val stt: SpeechToText = SpeechToText()
+
     companion object {
         private const val BLANK_AUDIO_MARKER = "[BLANK_AUDIO]"
         private const val CONFIG_MANUAL_MANUAL = "stt_config_manual_manual.json"
@@ -149,11 +152,6 @@ class MainActivity : ComponentActivity() {
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
-        // Register the JSON message listener before loadModel.
-        // The listener is buffered by the companion and wired once the
-        // singleton is created inside loadModel().
-        SpeechToText.setOnMessageListener(createMessageListener())
-
         // ── Preload STT model at startup ─────────────────────────────────────
         preloadModelAsync()
 
@@ -178,7 +176,7 @@ class MainActivity : ComponentActivity() {
             // their original config.
             if (!isRecording) {
                 val configJson = buildConfigJsonForStopType(newStopType)
-                SpeechToText.reconfigure(configJson)
+                stt.configure(configJson)
             }
         }
 
@@ -397,7 +395,11 @@ class MainActivity : ComponentActivity() {
     /**
      * Preload the STT model in the background at app startup.
      * Ensures the model file is copied from assets and the
-     * singleton is initialised before the user presses Start.
+     * engine is loaded before the user presses Start.
+     *
+     * Uses [loadModelOnly] to load the model without starting
+     * audio capture. The Start button calls [init] to begin
+     * a capture session.
      */
     private fun preloadModelAsync() {
         val modelFile = File(filesDir, "model.bin")
@@ -416,11 +418,12 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val configJson = buildConfigJsonForStopType(selectedStopType)
-                val error = SpeechToText.loadModel(this, configJson)
+                val result = stt.loadModelOnly(configJson)
                 postToUi {
-                    if (error != null) {
-                        AppLogger.log(AppLogCode.PRELOAD_FAILED, "STT error: ${error.message}")
-                        txtOutput.text = "Model preload error: ${error.message}"
+                    if (result.contains("\"type\":\"error\"")) {
+                        val message = JSONObject(result).optString("message", "Unknown error")
+                        AppLogger.log(AppLogCode.PRELOAD_FAILED, "STT error: $message")
+                        txtOutput.text = "Model preload error: $message"
                     } else {
                         txtOutput.text = "Model loaded. Tap Start to record."
                     }
@@ -636,13 +639,13 @@ class MainActivity : ComponentActivity() {
 
     private fun startRecording() {
         try {
-            // The message listener was already registered in onCreate().
-            // startSession() starts the capture — the singleton and model
-            // were already loaded at app startup via loadModel().
-            val sessionError = SpeechToText.startSession()
-            if (sessionError != null) {
-                val message = sessionError.message
-                AppLogger.log(AppLogCode.SESSION_ERROR, "${sessionError.code.name}: $message")
+            // The model was already loaded at startup via preloadModelAsync().
+            // Calling init() after loadModelOnly() starts a new capture session
+            // without re-loading the model.
+            val result = stt.init(buildConfigJsonForStopType(selectedStopType))
+            if (result.contains("\"type\":\"error\"")) {
+                val message = JSONObject(result).optString("message", "Unknown error")
+                AppLogger.log(AppLogCode.SESSION_ERROR, "Session error: $message")
                 postToUi { txtOutput.text = "Session error: $message" }
                 return
             }
@@ -673,11 +676,29 @@ class MainActivity : ComponentActivity() {
     private fun stopRecording() {
         txtOutput.text = "Processing..."
         btnStop.isEnabled = false
+
         val thread = Thread({
             try {
                 AppLogger.log(AppLogCode.STOP_USING_STOP_AND_TRANSCRIBE)
-                SpeechToText.transcribe()
+                val result = stt.transcribe()
                 postToUi {
+                    try {
+                        val obj = JSONObject(result)
+                        val type = obj.optString("type", "")
+                        when (type) {
+                            "result" -> {
+                                onResultReceived(obj)
+                            }
+                            "error" -> {
+                                onErrorReceived(obj)
+                            }
+                            else -> {
+                                txtOutput.text = result
+                            }
+                        }
+                    } catch (_: Exception) {
+                        txtOutput.text = result
+                    }
                     isRecording = false
                     updateUi()
                 }

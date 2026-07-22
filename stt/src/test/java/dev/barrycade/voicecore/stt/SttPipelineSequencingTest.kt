@@ -1,6 +1,7 @@
 package dev.barrycade.voicecore.stt
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -10,35 +11,29 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Pipeline sequencing tests for stop-path stage/lifecycle ordering
- * and stale callback rejection across session epoch changes.
+ * with the new synchronous API.
  *
- * Merged from:
- * - SttDeterministicPipelineTest (stop path sequencing)
- * - SttStaleCallbackStressTest (stale callback rejection)
- *
- * Uses the JSON-boundary API: [init] and [transcribe].
+ * Uses the new three-method API: [init] and [transcribe] both return JSON.
+ * Internal pipeline states can still be observed via [lifecycleController]
+ * and [currentPipelineStageForTest].
  */
 class SttPipelineSequencingTest {
 
-    private data class BlockingTranscribeControl(
-        val startedLatch: CountDownLatch,
-        val releaseLatch: CountDownLatch,
-        val finishedLatch: CountDownLatch
-    )
-
     private class BlockingWhisperModel : WhisperModel {
-        private var control: BlockingTranscribeControl? = null
+        private val transcribeInProgress = CountDownLatch(1)
+        private var releaseLatch: CountDownLatch? = null
         private val transcribeIndex = AtomicInteger(0)
 
         @Synchronized
-        fun blockNextTranscribe(): BlockingTranscribeControl {
-            val created = BlockingTranscribeControl(
-                startedLatch = CountDownLatch(1),
-                releaseLatch = CountDownLatch(1),
-                finishedLatch = CountDownLatch(1)
-            )
-            control = created
-            return created
+        fun blockNextTranscribe(): CountDownLatch {
+            val latch = CountDownLatch(1)
+            releaseLatch = latch
+            return latch
+        }
+
+        @Synchronized
+        fun waitForInferenceStart() {
+            transcribeInProgress.await(2, TimeUnit.SECONDS)
         }
 
         override fun loadModel(modelPath: String) {
@@ -46,15 +41,10 @@ class SttPipelineSequencingTest {
         }
 
         override fun transcribe(samples: ShortArray): String {
-            val current = synchronized(this) {
-                val snapshot = control
-                control = null
-                snapshot
-            }
+            transcribeInProgress.countDown()
 
-            current?.startedLatch?.countDown()
-            current?.releaseLatch?.await(2, TimeUnit.SECONDS)
-            current?.finishedLatch?.countDown()
+            val release = synchronized(this) { releaseLatch }
+            release?.await(2, TimeUnit.SECONDS)
 
             val index = transcribeIndex.incrementAndGet()
             return "transcript-$index"
@@ -68,67 +58,65 @@ class SttPipelineSequencingTest {
     private lateinit var speechToText: SpeechToText
     private lateinit var captureManager: FakeCaptureManager
     private lateinit var blockingModel: BlockingWhisperModel
-    private val resultCount = AtomicInteger(0)
 
     @Before
     fun setUp() {
         captureManager = FakeCaptureManager()
         blockingModel = BlockingWhisperModel()
-        resultCount.set(0)
 
-        SpeechToText.resetForTest()
         speechToText = SpeechToText(
             whisperModel = blockingModel,
             captureManager = captureManager
         )
-
-        speechToText.setOnMessageListener { json ->
-            if (json != null && json.contains("\"type\":\"result\"")) {
-                resultCount.incrementAndGet()
-            }
-        }
     }
 
     private fun buildConfigJson(): String {
         return """{"modelPath":"/dummy/model.bin","language":"en","debugLoggingEnabled":false,"energyThreshold":0.03,"preRollMs":100,"stableChunkSizeMs":500,"drainMode":"DRAIN_FROM_NEXT_FRAME","startType":"MANUAL","stopType":"MANUAL","warmupEnabled":false,"warmupDurationMs":0}"""
     }
 
-    private fun initSafely(): SttError? {
+    private fun initSafely(): Boolean {
         val json = buildConfigJson()
-        return try {
-            speechToText.init(json)
-        } catch (_: RuntimeException) {
-            // ModelManager may fail with FakeWhisperModel in unit tests
-            null
-        }
+        val result = speechToText.init(json)
+        return result.contains("\"type\":\"init\"")
     }
 
     // -- Stop path sequencing -----------------------------------------------
 
     @Test
     fun stopNonEmpty_transitionsReadyOnlyAfterInferenceCompletes() {
-        val control = blockingModel.blockNextTranscribe()
+        // Arrange: release latch so transcribe can finish
+        blockingModel.blockNextTranscribe()
+        captureManager.addSpeechFrames(8)
+        assertTrue("init should succeed", initSafely())
 
         captureManager.addSpeechFrames(8)
-        initSafely()
 
-        captureManager.addSpeechFrames(8)
-        speechToText.transcribe()
-        assertTrue("inference should start", control.startedLatch.await(1, TimeUnit.SECONDS))
+        // Act: transcribe in a background thread since it blocks
+        val transcribeResult = Array<String?>(1) { null }
+        val thread = Thread {
+            transcribeResult[0] = speechToText.transcribe()
+        }
+        thread.start()
 
-        assertTrue(
-            "lifecycle must remain FINALISING while inference is blocked",
-            speechToText.lifecycleController.currentState is SttLifecycleState.FINALISING
-        )
+        // Wait for inference to start
+        blockingModel.waitForInferenceStart()
+
+        // Assert: pipeline is INFERENCING while waiting
         assertEquals(
             "pipeline stage must be INFERENCING while inference is blocked",
             SttPipelineStage.INFERENCING,
             speechToText.currentPipelineStageForTest()
         )
+        assertTrue(
+            "lifecycle must be FINALISING while inference is blocked",
+            speechToText.lifecycleController.currentState is SttLifecycleState.FINALISING
+        )
 
-        control.releaseLatch.countDown()
-        assertTrue("blocked transcribe should finish", control.finishedLatch.await(1, TimeUnit.SECONDS))
+        // Release inference
+        blockingModel.blockNextTranscribe().countDown()
+        thread.join(3000)
 
+        // Assert: pipeline resets after inference
         waitForReadyState()
         assertTrue(
             "lifecycle must become READY after inference completes",
@@ -139,12 +127,18 @@ class SttPipelineSequencingTest {
             SttPipelineStage.IDLE,
             speechToText.currentPipelineStageForTest()
         )
+
+        // Assert: result contains transcript
+        val result = transcribeResult[0]
+        assertNotNull("transcribe should return a result", result)
+        assertTrue("result should contain transcript", result?.contains("transcript") == true)
     }
 
     @Test
     fun stopEmpty_transitionsReadyImmediately() {
-        initSafely()
-        speechToText.transcribe()
+        assertTrue("init should succeed", initSafely())
+
+        val result = speechToText.transcribe()
 
         assertTrue(
             "empty stop path should reset lifecycle to READY immediately",
@@ -155,25 +149,24 @@ class SttPipelineSequencingTest {
             SttPipelineStage.IDLE,
             speechToText.currentPipelineStageForTest()
         )
+
+        // Empty PCM returns silence
+        assertTrue("empty transcribe should return silence", result.contains("\"code\":\"SILENCE\""))
     }
 
-    // -- Stale callback rejection -------------------------------------------
+    // -- Stale callback rejection (via transcribe result) ------------------
 
     @Test
     fun nonStaleResultDelivered_whenEpochUnchanged() {
-        val control = blockingModel.blockNextTranscribe()
-
+        blockingModel.blockNextTranscribe()
         captureManager.addSpeechFrames(8)
-        initSafely()
+        assertTrue("init should succeed", initSafely())
 
-        speechToText.transcribe()
-        assertTrue("inference should start", control.startedLatch.await(1, TimeUnit.SECONDS))
+        // Run transcribe in background, wait for result
+        val result = speechToText.transcribe()
 
-        control.releaseLatch.countDown()
-        assertTrue("blocked transcribe should finish", control.finishedLatch.await(1, TimeUnit.SECONDS))
-
-        waitForResultCount(target = 1)
-        assertEquals("non-stale callback should be delivered", 1, resultCount.get())
+        // Result should be delivered (non-stale) — contains transcript
+        assertTrue("result should contain success", result.contains("\"code\":\"SUCCESS\"") || result.contains("\"text\""))
     }
 
     // -- Helpers ------------------------------------------------------------
@@ -181,15 +174,6 @@ class SttPipelineSequencingTest {
     private fun waitForReadyState() {
         repeat(100) {
             if (speechToText.lifecycleController.currentState is SttLifecycleState.READY) {
-                return
-            }
-            Thread.sleep(10)
-        }
-    }
-
-    private fun waitForResultCount(target: Int) {
-        repeat(100) {
-            if (resultCount.get() >= target) {
                 return
             }
             Thread.sleep(10)
