@@ -454,11 +454,26 @@ class MainActivity : ComponentActivity() {
      * Follows the same pattern as [buildConfigJsonForStopType] for Whisper:
      * loads a JSON asset template, parses it, and replaces the model path
      * with the runtime location of the model directory.
+     *
+     * Parses via [VoskConfig.fromJson] first to apply JSON defaults, then
+     * injects the real model path via [VoskConfig.copy] to avoid the
+     * blank model path validation in the constructor.
      */
     private fun buildVoskConfig(modelPath: String): VoskConfig {
         val json = assets.open("vosk_config.json").bufferedReader().use { it.readText() }
         val template = VoskConfig.fromJson(json)
-        return template.copy(modelPath = modelPath)
+        // Direct construction with modelPath set first avoids init validation
+        // failing on the blank placeholder in the JSON template.
+        return VoskConfig(
+            modelPath = modelPath,
+            sampleRate = template.sampleRate,
+            endpointerMode = template.endpointerMode,
+            postSpeechSilenceMs = template.postSpeechSilenceMs,
+            preSpeechPadMs = template.preSpeechPadMs,
+            maxDurationMs = template.maxDurationMs,
+            wakeWord = template.wakeWord,
+            bufferSizeSamples = template.bufferSizeSamples
+        )
     }
 
     /**
@@ -474,7 +489,7 @@ class MainActivity : ComponentActivity() {
             appendLine("Config: vosk_config.json")
             appendLine("Model:  $modelPath")
             appendLine("")
-            append(VoskConfig.fromJson(configJson).toString())
+            append(configJson)
         }
     }
 
