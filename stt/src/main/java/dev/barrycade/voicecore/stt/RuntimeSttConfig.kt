@@ -11,11 +11,12 @@ package dev.barrycade.voicecore.stt
  * @property energyThreshold VAD energy threshold for speech detection.
  * @property preRollMs Pre-roll window before speech detection (ms).
  * @property stableChunkSizeMs Chunk size for stable frame processing (ms).
- *         Mapped to UtteranceAccumulator's utteranceSilenceTimeoutMs.
  * @property debugLoggingEnabled Whether debug logging is enabled.
  * @property startStrategy Start strategy instance.
  * @property stopStrategy Stop strategy instance.
- * @property autoSilenceMs Silence threshold used by StopStrategy for auto-silence mode (ms).
+ * @property autoSilenceMs Silence threshold for utterance boundary (ms). Maps to
+ *         UtteranceAccumulator's utteranceSilenceTimeoutMs. Also used by
+ *         AutoSilenceStop strategy for session-level stop decisions.
  * @property autoMaxDurationMs Max utterance duration (ms). Mapped to UtteranceAccumulator's
  *         utteranceMaxDurationMs. Also used by StopStrategy for auto-silence and duration modes.
  * @property sessionTimeoutMs Safety timeout for session duration (ms). 0 = no timeout.

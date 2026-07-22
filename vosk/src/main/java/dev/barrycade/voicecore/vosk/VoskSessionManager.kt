@@ -54,20 +54,21 @@ fun interface VoskWakeWordListener {
  * touches AudioRecord or VoskEngine directly.
  *
  * In wake-word mode the manager continuously listens for a wake word
- * (default "zip") in partial results. On detection it auto-switches
- * to command mode, captures one utterance, then returns to wake-word
- * mode, creating a seamless hands-free loop.
+ * in partial results. On detection it auto-switches to command mode,
+ * captures one utterance, then returns to wake-word mode,
+ * creating a seamless hands-free loop.
  *
  * @param voskEngine Initialised VoskEngine instance (model loaded).
- * @param sampleRate Audio sample rate in Hz (default 16000).
- * @param bufferSizeSamples Number of short samples per read chunk (default 4000).
- * @param wakeWord The wake word to listen for (default "zip").
+ * @param config Configuration including wake-word, buffer size, sample rate.
  */
 class VoskSessionManager(
     private val voskEngine: VoskEngine,
-    private val sampleRate: Int = 16000,
-    private val bufferSizeSamples: Int = 4000,
-    private val wakeWord: String = "Max"
+    private val config: VoskConfig = VoskConfig(
+        modelPath = "",
+        wakeWord = "Max",
+        bufferSizeSamples = 4000,
+        sampleRate = 16000f
+    )
 ) {
     // ── Public callbacks ─────────────────────────────────────────────────────
 
@@ -113,6 +114,12 @@ class VoskSessionManager(
      */
     @Volatile
     private var autoSwitchedToCommand: Boolean = false
+
+    // ── Derived values from config ───────────────────────────────────────────
+
+    private val sampleRate: Int = config.sampleRate.toInt()
+    private val bufferSizeSamples: Int = config.bufferSizeSamples
+    private val wakeWord: String = config.wakeWord
 
     // ── Public API ───────────────────────────────────────────────────────────
 

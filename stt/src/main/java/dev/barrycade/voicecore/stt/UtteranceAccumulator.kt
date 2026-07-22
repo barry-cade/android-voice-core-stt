@@ -58,7 +58,7 @@ internal class UtteranceAccumulator(
         preRollMs = config.preRollMs,
         vad = vad,
         utteranceMaxDurationMs = config.autoMaxDurationMs,
-        utteranceSilenceTimeoutMs = config.stableChunkSizeMs,
+        utteranceSilenceTimeoutMs = config.autoSilenceMs,
         debugLoggingEnabled = config.debugLoggingEnabled,
         sttErrorListener = sttErrorListener
     )

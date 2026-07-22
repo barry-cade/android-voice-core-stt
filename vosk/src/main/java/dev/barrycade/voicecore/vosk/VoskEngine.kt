@@ -4,18 +4,34 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.IOException
 
-class VoskEngine(modelPath: String) {
+/**
+ * Manages a Vosk Model and Recognizer pair.
+ *
+ * Configures the endpointer from [VoskConfig] instead of hardcoded values.
+ * The recognizer is created once and reused across capture sessions.
+ *
+ * @param config Configuration including model path and endpointer delays.
+ */
+class VoskEngine(config: VoskConfig) {
 
-    private val model = Model(modelPath)
+    private val model = Model(config.modelPath)
     private val recognizer: Recognizer
 
     init {
         try {
-            recognizer = Recognizer(model, 16000.0f)
-            // Longer endpointer delays to avoid premature utterance end.
-            recognizer.setEndpointerMode(Recognizer.EndpointerMode.LONG)
-            // Very long silence timeout: 15s initial, 5s mid, 30s max.
-            recognizer.setEndpointerDelays(15.0f, 5.0f, 30.0f)
+            recognizer = Recognizer(model, config.sampleRate)
+
+            // Configure endpointer from config.
+            val endpointerMode = when (config.endpointerMode.uppercase()) {
+                "LONG" -> Recognizer.EndpointerMode.LONG
+                else -> Recognizer.EndpointerMode.SHORT
+            }
+            recognizer.setEndpointerMode(endpointerMode)
+            recognizer.setEndpointerDelays(
+                config.postSpeechSilenceMs,
+                config.preSpeechPadMs,
+                config.maxDurationMs
+            )
         } catch (e: IOException) {
             throw RuntimeException("Failed to create Vosk recognizer", e)
         }
@@ -46,3 +62,4 @@ class VoskEngine(modelPath: String) {
         model.close()
     }
 }
+

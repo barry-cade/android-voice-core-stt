@@ -13,6 +13,7 @@ import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
 import dev.barrycade.voicecore.stt.SpeechToText
+import dev.barrycade.voicecore.vosk.VoskConfig
 import dev.barrycade.voicecore.vosk.VoskEngine
 import dev.barrycade.voicecore.vosk.VoskFinalListener
 import dev.barrycade.voicecore.vosk.VoskPartialListener
@@ -452,9 +453,18 @@ class MainActivity : ComponentActivity() {
         Thread({
             try {
                 val modelDir = copyAssetFolder(this, "vosk-model-small-en-us-0.15")
-                val engine = VoskEngine(modelDir.path)
+                val voskConfig = VoskConfig(
+                    modelPath = modelDir.path,
+                    endpointerMode = "SHORT",
+                    postSpeechSilenceMs = 1.2f,
+                    preSpeechPadMs = 0.5f,
+                    maxDurationMs = 30.0f,
+                    wakeWord = "Max",
+                    bufferSizeSamples = 4000
+                )
+                val engine = VoskEngine(voskConfig)
                 voskEngine = engine
-                voskSessionManager = VoskSessionManager(engine)
+                voskSessionManager = VoskSessionManager(engine, voskConfig)
                 voskReady = true
                 postToUi {
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."

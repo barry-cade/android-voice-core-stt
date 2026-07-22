@@ -1,0 +1,10 @@
+{
+  "modelPath": "",
+  "sampleRate": 16000,
+  "endpointerMode": "SHORT",
+  "postSpeechSilenceMs": 1.2,
+  "preSpeechPadMs": 0.5,
+  "maxDurationMs": 30.0,
+  "wakeWord": "Max",
+  "bufferSizeSamples": 4000
+}
