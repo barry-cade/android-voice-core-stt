@@ -9,9 +9,13 @@ import java.util.concurrent.atomic.AtomicLong
  * ## Public API (all return JSON strings)
  *
  * - `init(configJson)` — load model + start session (first call), or start session only (subsequent calls)
- * - `loadModelOnly(configJson)` — load model and configure pipeline without starting capture
  * - `configure(configJson)` — lightweight runtime config change
  * - `transcribe()` — synchronous: block until utterance complete, return JSON
+ *
+ * ## Internal methods (not part of public API)
+ *
+ * - `loadModelOnly(configJson)` — load model and configure pipeline without starting capture
+ * - `setOnMessageListener(listener)` — register JSON callback for async results
  *
  * ## Intended lifecycle (Manual mode)
  *
@@ -311,6 +315,9 @@ class SpeechToText internal constructor(
     /**
      * Load the STT model and configure the pipeline without starting audio capture.
      *
+     * Internal — called by the app layer for preload scenarios. Not part of the
+     * public API surface. External callers should use [init] to begin a session.
+     *
      * This is intended for preload scenarios where the model must be loaded
      * and warmed up before the user presses Start (e.g. app startup). After
      * calling this method, call [init] to begin a capture session.
@@ -545,6 +552,10 @@ class SpeechToText internal constructor(
 
     /**
      * Register a JSON message listener for the JSON-boundary API.
+     *
+     * Internal — called by the app layer for async result delivery. Not part
+     * of the public API surface. External callers use [transcribe] for
+     * synchronous results.
      *
      * Receives result, error, and debug JSON strings delivered from the
      * auto-silence path (when the UtteranceAccumulator detects silence
