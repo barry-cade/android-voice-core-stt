@@ -26,6 +26,10 @@ package dev.barrycade.voicecore.stt
  *        0 = disabled. Passed through from [SttConfig].
  * @property zcrEnabled When true, ZCR validation is enabled.
  *        Passed through from [SttConfig].
+ * @property sttMode Listening mode string. Runtime-safe.
+ * @property grammar Optional context/grammar hint string. Runtime-safe.
+ * @property partialsEnabled When true, partial results are produced. Runtime-safe.
+ * @property autoReturn When true, auto-returns transcript on silence. Runtime-safe.
  */
 internal data class RuntimeSttConfig(
     // ── VAD fields ───────────────────────────────────────────────────────
@@ -51,7 +55,13 @@ internal data class RuntimeSttConfig(
 
     // ── Noise resilience fields ──────────────────────────────────────────
     val highPassCutoffHz: Int = 0,
-    val zcrEnabled: Boolean = false
+    val zcrEnabled: Boolean = false,
+
+    // ── New public API fields (Phase 1) ────────────────────────────────
+    val sttMode: String = "ALWAYS_ON",
+    val grammar: String? = null,
+    val partialsEnabled: Boolean = false,
+    val autoReturn: Boolean = false
 ) {
     /**
      * Return a copy of this config with the stop strategy overridden.
@@ -187,7 +197,11 @@ internal data class RuntimeSttConfig(
                 warmupEnabled = sttCfg.warmupEnabled,
                 warmupDurationMs = sttCfg.warmupDurationMs,
                 highPassCutoffHz = sttCfg.highPassCutoffHz,
-                zcrEnabled = sttCfg.zcrEnabled
+                zcrEnabled = sttCfg.zcrEnabled,
+                sttMode = sttCfg.sttMode,
+                grammar = sttCfg.grammar,
+                partialsEnabled = sttCfg.partialsEnabled,
+                autoReturn = sttCfg.autoReturn
             )
         }
 

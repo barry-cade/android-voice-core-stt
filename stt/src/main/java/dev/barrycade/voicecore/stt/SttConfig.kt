@@ -46,6 +46,13 @@ package dev.barrycade.voicecore.stt
  *        low-frequency motor rumble from chassis vibration.
  * @property zcrEnabled When true, enables zero-crossing rate (ZCR) validation
  *        to reject high-frequency noise (e.g. servo whine). Default false.
+ * @property sttMode Listening mode: "ALWAYS_ON", "WAKE_WORD", "COMMAND", "PUSH_TO_TALK".
+ *        Default "ALWAYS_ON". Runtime-safe via configure().
+ * @property grammar Optional context/grammar hint string. Default null. Runtime-safe.
+ * @property partialsEnabled When true, enables partial transcription results. Default false.
+ *        Runtime-safe.
+ * @property autoReturn When true, automatically returns transcript on silence without
+ *        explicit transcribe() call. Default false. Runtime-safe.
  */
 internal data class SttConfig(
     val modelPath: String,
@@ -62,7 +69,12 @@ internal data class SttConfig(
     val warmupDurationMs: Int = 0,
     val bufferSizeSamples: Int = 4000,
     val highPassCutoffHz: Int = 0,
-    val zcrEnabled: Boolean = false
+    val zcrEnabled: Boolean = false,
+    // ── New public API fields (Phase 1) ────────────────────────────────
+    val sttMode: String = "ALWAYS_ON",
+    val grammar: String? = null,
+    val partialsEnabled: Boolean = false,
+    val autoReturn: Boolean = false
 ) {
     init {
         require(energyThreshold in 0.0001f..1f) {

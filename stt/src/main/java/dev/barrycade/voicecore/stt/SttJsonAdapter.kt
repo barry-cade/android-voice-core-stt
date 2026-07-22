@@ -43,7 +43,11 @@ internal object SttJsonAdapter {
      *   "warmupEnabled": true,
      *   "warmupDurationMs": 3000,
      *   "highPassCutoffHz": 0,
-     *   "zcrEnabled": false
+     *   "zcrEnabled": false,
+     *   "sttMode": "ALWAYS_ON",
+     *   "grammar": null,
+     *   "partialsEnabled": false,
+     *   "autoReturn": false
      * }
      * ```
      *
@@ -117,6 +121,12 @@ internal object SttJsonAdapter {
         val highPassCutoffHz = resolveInt(json, "highPassCutoffHz") ?: 0
         val zcrEnabled = resolveBoolean(json, "zcrEnabled") ?: false
 
+        // ── New public API fields (optional) ─────────────────────────────
+        val sttMode = resolveString(json, "sttMode") ?: "ALWAYS_ON"
+        val grammar = resolveString(json, "grammar")
+        val partialsEnabled = resolveBoolean(json, "partialsEnabled") ?: false
+        val autoReturn = resolveBoolean(json, "autoReturn") ?: false
+
         return SttConfig(
             modelPath = modelPath,
             language = language,
@@ -132,7 +142,11 @@ internal object SttJsonAdapter {
             warmupDurationMs = warmupDurationMs,
             bufferSizeSamples = bufferSizeSamples,
             highPassCutoffHz = highPassCutoffHz,
-            zcrEnabled = zcrEnabled
+            zcrEnabled = zcrEnabled,
+            sttMode = sttMode,
+            grammar = grammar,
+            partialsEnabled = partialsEnabled,
+            autoReturn = autoReturn
         )
     }
 
@@ -311,6 +325,17 @@ internal object SttJsonAdapter {
         appendJsonInt(sb, "bufferSizeSamples", 4000)
         sb.append(',')
         appendJsonString(sb, "language", "en")
+        sb.append(',')
+        appendJsonString(sb, "sttMode", config.sttMode)
+        val grammarVal = config.grammar
+        if (grammarVal != null) {
+            sb.append(',')
+            appendJsonString(sb, "grammar", grammarVal)
+        }
+        sb.append(',')
+        appendJsonBoolean(sb, "partialsEnabled", config.partialsEnabled)
+        sb.append(',')
+        appendJsonBoolean(sb, "autoReturn", config.autoReturn)
 
         sb.append('}')
         return sb.toString()
