@@ -152,6 +152,12 @@ class MainActivity : ComponentActivity() {
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
 
+        // Register the JSON message listener before loadModel.
+        // Required for auto-silence results — when the UtteranceAccumulator
+        // detects silence and triggers inference internally, the result is
+        // delivered through this listener (not via transcribe() return value).
+        stt.setOnMessageListener(createMessageListener())
+
         // ── Preload STT model at startup ─────────────────────────────────────
         preloadModelAsync()
 

@@ -543,6 +543,25 @@ class SpeechToText internal constructor(
     }
 
     /**
+     * Register a JSON message listener for the JSON-boundary API.
+     *
+     * Receives result, error, and debug JSON strings delivered from the
+     * auto-silence path (when the UtteranceAccumulator detects silence
+     * and triggers inference without an explicit [transcribe] call).
+     *
+     * In Manual/Manual mode the result is returned directly from
+     * [transcribe]. In Manual/Auto mode the result is delivered through
+     * this listener because inference is triggered internally by the
+     * UtteranceAccumulator, not by the caller.
+     *
+     * Must be registered before the first session starts to receive
+     * auto-silence results.
+     */
+    fun setOnMessageListener(listener: (String) -> Unit) {
+        callbackDispatcher.setOnMessageListener(listener)
+    }
+
+    /**
      * Prepare transcribe state inside [stateLock].
      *
      * Extracts PCM, builds the inference request, and creates callbacks.
