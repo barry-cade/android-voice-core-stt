@@ -447,21 +447,26 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Load the Vosk config template from assets and inject the model path.
+     *
+     * Follows the same pattern as [buildConfigJsonForStopType] for Whisper:
+     * loads a JSON asset template, parses it, and replaces the model path
+     * with the runtime location of the model directory.
+     */
+    private fun buildVoskConfig(modelPath: String): VoskConfig {
+        val json = assets.open("vosk_config.json").bufferedReader().use { it.readText() }
+        val template = VoskConfig.fromJson(json)
+        return template.copy(modelPath = modelPath)
+    }
+
+    /**
      * Copy Vosk model from assets to internal storage and initialise VoskEngine.
      */
     private fun preloadVoskModelAsync() {
         Thread({
             try {
                 val modelDir = copyAssetFolder(this, "vosk-model-small-en-us-0.15")
-                val voskConfig = VoskConfig(
-                    modelPath = modelDir.path,
-                    endpointerMode = "SHORT",
-                    postSpeechSilenceMs = 1.2f,
-                    preSpeechPadMs = 0.5f,
-                    maxDurationMs = 30.0f,
-                    wakeWord = "Max",
-                    bufferSizeSamples = 4000
-                )
+                val voskConfig = buildVoskConfig(modelDir.path)
                 val engine = VoskEngine(voskConfig)
                 voskEngine = engine
                 voskSessionManager = VoskSessionManager(engine, voskConfig)

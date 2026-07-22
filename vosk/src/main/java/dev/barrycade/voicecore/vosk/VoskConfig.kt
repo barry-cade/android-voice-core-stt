@@ -58,4 +58,33 @@ data class VoskConfig(
             "bufferSizeSamples=$bufferSizeSamples must be in [1024, 16000]"
         }
     }
+
+    companion object {
+        /**
+         * Parse a JSON config string into a [VoskConfig].
+         *
+         * The JSON format is flat and caller-friendly:
+         * ```json
+         * {
+         *   "modelPath": "/path/to/vosk/model",
+         *   "sampleRate": 16000,
+         *   "endpointerMode": "SHORT",
+         *   "postSpeechSilenceMs": 1.2,
+         *   "preSpeechPadMs": 0.5,
+         *   "maxDurationMs": 30.0,
+         *   "wakeWord": "Max",
+         *   "bufferSizeSamples": 4000
+         * }
+         * ```
+         *
+         * All fields except [modelPath] are optional and fall back to defaults.
+         *
+         * @param json Raw JSON string.
+         * @return Parsed [VoskConfig].
+         * @throws IllegalArgumentException if required fields are missing or invalid.
+         */
+        fun fromJson(json: String): VoskConfig {
+            return VoskJsonAdapter.parseConfig(json)
+        }
+    }
 }
