@@ -452,28 +452,23 @@ class MainActivity : ComponentActivity() {
      * Load the Vosk config template from assets and inject the model path.
      *
      * Follows the same pattern as [buildConfigJsonForStopType] for Whisper:
-     * loads a JSON asset template, parses it, and replaces the model path
-     * with the runtime location of the model directory.
+     * loads a JSON asset template, injects the runtime model path at the front
+     * of the JSON, then parses into a [VoskConfig].
      *
-     * Parses via [VoskConfig.fromJson] first to apply JSON defaults, then
-     * injects the real model path via [VoskConfig.copy] to avoid the
-     * blank model path validation in the constructor.
+     * Injecting the path into the raw JSON string before parsing ensures
+     * [VoskConfig]'s init validation sees a non-blank modelPath.
      */
     private fun buildVoskConfig(modelPath: String): VoskConfig {
         val json = assets.open("vosk_config.json").bufferedReader().use { it.readText() }
-        val template = VoskConfig.fromJson(json)
-        // Direct construction with modelPath set first avoids init validation
-        // failing on the blank placeholder in the JSON template.
-        return VoskConfig(
-            modelPath = modelPath,
-            sampleRate = template.sampleRate,
-            endpointerMode = template.endpointerMode,
-            postSpeechSilenceMs = template.postSpeechSilenceMs,
-            preSpeechPadMs = template.preSpeechPadMs,
-            maxDurationMs = template.maxDurationMs,
-            wakeWord = template.wakeWord,
-            bufferSizeSamples = template.bufferSizeSamples
-        )
+        val injected = buildString {
+            append('{')
+            append("\"modelPath\":\"")
+            append(escapeJsonString(modelPath))
+            append('"')
+            append(',')
+            append(json.trimStart().removePrefix("{").trimStart())
+        }
+        return VoskConfig.fromJson(injected)
     }
 
     /**
@@ -513,8 +508,21 @@ class MainActivity : ComponentActivity() {
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."
                 }
             } catch (t: Throwable) {
+                // Show the full exception chain in the Vosk output for debugging.
+                val detail = buildString {
+                    appendLine("Vosk preload failed:")
+                    appendLine("  ${t.javaClass.simpleName}: ${t.message}")
+                    var cause = t.cause
+                    var depth = 0
+                    while (cause != null && depth < 5) {
+                        appendLine("  Caused by: ${cause.javaClass.simpleName}: ${cause.message}")
+                        cause = cause.cause
+                        depth += 1
+                    }
+                }
                 postToUi {
-                    txtOutput.text = "Vosk preload failed: ${t.message}"
+                    txtVoskOutput.text = detail
+                    txtOutput.text = "Vosk preload failed. See Vosk panel for details."
                 }
             }
         }, "VoskPreloadThread").start()
