@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtVoskStatus: TextView
     private lateinit var txtWhisperStatus: TextView
     private lateinit var txtVoskWakeWord: TextView
+    private lateinit var txtVoskConfigDisplay: TextView
     private lateinit var txtDiagnostics: TextView
     private lateinit var txtConfigDisplay: TextView
     private lateinit var txtErrorBanner: TextView
@@ -148,6 +149,7 @@ class MainActivity : ComponentActivity() {
         txtVoskStatus = findViewById(R.id.txtVoskStatus)
         txtWhisperStatus = findViewById(R.id.txtWhisperStatus)
         txtVoskWakeWord = findViewById(R.id.txtVoskWakeWord)
+        txtVoskConfigDisplay = findViewById(R.id.txtVoskConfigDisplay)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
@@ -460,6 +462,23 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Display the active Vosk config in the Vosk panel.
+     *
+     * Follows the same pattern as [displayConfigForStopType] for Whisper:
+     * shows the config asset contents with the injected model path.
+     */
+    private fun displayVoskConfig(configJson: String, modelPath: String) {
+        txtVoskConfigDisplay.visibility = View.VISIBLE
+        txtVoskConfigDisplay.text = buildString {
+            appendLine("=== Active Vosk Config ===")
+            appendLine("Config: vosk_config.json")
+            appendLine("Model:  $modelPath")
+            appendLine("")
+            append(VoskConfig.fromJson(configJson).toString())
+        }
+    }
+
+    /**
      * Copy Vosk model from assets to internal storage and initialise VoskEngine.
      */
     private fun preloadVoskModelAsync() {
@@ -471,7 +490,11 @@ class MainActivity : ComponentActivity() {
                 voskEngine = engine
                 voskSessionManager = VoskSessionManager(engine, voskConfig)
                 voskReady = true
+
+                // Display active Vosk config on the UI.
+                val configJson = assets.open("vosk_config.json").bufferedReader().use { it.readText() }
                 postToUi {
+                    displayVoskConfig(configJson, voskConfig.modelPath)
                     txtOutput.text = "Vosk model loaded. STT and Vosk ready."
                 }
             } catch (t: Throwable) {

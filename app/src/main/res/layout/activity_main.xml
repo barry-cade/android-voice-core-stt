@@ -301,6 +301,19 @@
                     android:typeface="monospace"
                     android:textIsSelectable="true"
                     android:text="@string/vosk_final_hint" />
+
+                <TextView
+                    android:id="@+id/txtVoskConfigDisplay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:padding="8dp"
+                    android:background="#F3E5F5"
+                    android:textColor="#4A148C"
+                    android:textSize="11sp"
+                    android:typeface="monospace"
+                    android:visibility="gone"
+                    android:text="" />
             </LinearLayout>
         </ScrollView>
     </LinearLayout>
