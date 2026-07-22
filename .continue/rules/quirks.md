@@ -89,3 +89,16 @@ Ask the human when environment details are needed.
 
 - `search_web` returns `401 Invalid API key`. Do not rely on it.
 - `fetch_url_content` **does work** — use it to look up docs, APIs, SDK references via URL.
+
+## 9. Absolute Paths Break Edit Tools
+
+`edit_existing_file` and `single_find_and_replace` accept file paths but may fail with
+`"file does not exist"` when passed absolute paths like `C:\Users\...`, even though the
+file clearly exists on disk.
+
+**Workaround:** Always use **relative paths** from the workspace root for edit tools.
+
+- Correct: `temp/session-handover.md`
+- Wrong: `C:\Users\home-\git\android-voice-core-stt\temp\session-handover.md`
+
+`read_file` and `ls` work fine with either path style — this only affects write tools.
