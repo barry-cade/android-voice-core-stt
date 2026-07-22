@@ -258,11 +258,12 @@ class SpeechToText internal constructor(
             }
 
             // ── Step 5: Construct STT scaffolding via mode controller ─────────
-            // The onTimeoutRef is a reference to transcribe() so that session
-            // timeout fires on the MinimalPollingController worker thread.
+            // The onTimeoutRef is a reference to handleSessionTimeout() so that session
+            // timeout fires on the MinimalPollingController worker thread and dispatches
+            // the result through the callback dispatcher (not via transcribe() return value).
             val sessionTimeoutMs = runtimeCfg.sessionTimeoutMs
             val onTimeoutRef: () -> Unit = if (sessionTimeoutMs > 0) {
-                { this@SpeechToText.transcribe() }
+                { this@SpeechToText.handleSessionTimeout() }
             } else {
                 {}
             }
@@ -559,6 +560,155 @@ class SpeechToText internal constructor(
      */
     fun setOnMessageListener(listener: (String) -> Unit) {
         callbackDispatcher.setOnMessageListener(listener)
+    }
+
+    /**
+     * Handle session timeout on the [MinimalPollingController] worker thread.
+     *
+     * Called when [sessionTimeoutMs] has elapsed since the session started.
+     * Finalises capture, runs inference, and dispatches the result through
+     * [SttCallbackDispatcher] so it reaches [setOnMessageListener].
+     *
+     * This must NOT call [transcribe] because [transcribe] returns its value
+     * to the caller thread — on the timeout path the caller is the worker
+     * thread, so the result would be lost.
+     */
+    private fun handleSessionTimeout() {
+        // Run the entire path on the worker thread. This method is called
+        // from within the MinimalPollingController worker thread.
+        val prepared = synchronized(stateLock) {
+            prepareSessionTimeoutLocked()
+        }
+        if (prepared == null) {
+            // No PCM accumulated — dispatch SILENCE through the callback dispatcher.
+            callbackDispatcher.dispatchResult(
+                text = "",
+                code = SttReturnCode.SESSION_TIMEOUT,
+                timing = null
+            )
+            return
+        }
+        // Submit inference with dispatch path (fires onMessageListener).
+        val submitted = inferenceController.submit(
+            request = prepared.request,
+            decideDispatch = prepared.decideDispatch,
+            onPostDispatch = prepared.onPostDispatch,
+            onComplete = prepared.onComplete
+        )
+        if (!submitted) {
+            synchronized(stateLock) {
+                isInferencing.set(false)
+                transitionPipelineToIdleLocked("session timeout submit rejected")
+                currentSessionEpoch = 0L
+                lifecycleController.onStop()
+                lifecycleController.onReset()
+            }
+            callbackDispatcher.dispatchResult(
+                text = "",
+                code = SttReturnCode.SESSION_TIMEOUT,
+                timing = null
+            )
+        }
+    }
+
+    /**
+     * Prepare session timeout state inside [stateLock].
+     *
+     * Similar to [prepareTranscribeLocked] but adapted for the timeout path:
+     * - Uses [SttReturnCode.SESSION_TIMEOUT] instead of [SttReturnCode.SUCCESS].
+     * - The result goes through [SttCallbackDispatcher.dispatchResult] (via
+     *   [inferenceController.submit]) instead of being returned synchronously.
+     * - Returns null when there is no PCM to transcribe.
+     */
+    private fun prepareSessionTimeoutLocked(): PreparedTranscribe? {
+        if (pipelineState.currentStage != SttPipelineStage.CAPTURING) {
+            return null
+        }
+        val cfg = sessionConfig ?: return null
+        val runtimeCfg = cfg.runtimeConfig
+
+        if (!isRunning.get()) {
+            SttLogger.lifecycle("handleSessionTimeout: session not running — ignoring")
+            return null
+        }
+
+        val elapsedMs = sessionController.endSession().toInt()
+        SttLogger.lifecycle("session timeout: ${elapsedMs}ms >= ${runtimeCfg.sessionTimeoutMs}ms — forcing finalisation")
+
+        events.manualStopPressed.raise()
+
+        if (lifecycleController.currentState is SttLifecycleState.STOPPED) {
+            SttLogger.pcm("handleSessionTimeout: state=STOPPED — ignoring")
+            return null
+        }
+        if (lifecycleController.currentState is SttLifecycleState.FINALISING) {
+            SttLogger.pcm("handleSessionTimeout: already FINALISING — returning")
+            return null
+        }
+
+        if (!transitionPipelineStageLocked(SttPipelineStage.FINALISING, "session timeout")) {
+            SttLogger.lifecycleW("handleSessionTimeout: illegal stage from ${pipelineState.currentStage}")
+            return null
+        }
+
+        isRunning.set(false)
+        stopRequest.raise()
+        modeController.stopController()
+
+        val vadGate = modeController.minimalProcessorController?.vadGate
+        val finalPcm = captureController.finaliseAndStop(vadGate)
+
+        if (finalPcm.isEmpty()) {
+            SttLogger.pcm("no PCM accumulated on session timeout — transitioning to STOPPED then READY")
+            transitionPipelineToIdleLocked("session timeout empty pcm")
+            currentSessionEpoch = 0L
+            lifecycleController.onStop()
+            lifecycleController.onReset()
+            return null
+        }
+
+        lifecycleController.onFinalising()
+        val timingMs = sessionController.currentPcmElapsedMs()
+
+        val epoch = currentSessionEpoch
+        if (epoch == 0L) {
+            SttLogger.lifecycleW("handleSessionTimeout: no active session epoch — dropping inference")
+            transitionPipelineToIdleLocked("session timeout missing epoch")
+            lifecycleController.onStop()
+            lifecycleController.onReset()
+            return null
+        }
+
+        if (!enterInferencingLocked("session timeout")) {
+            SttLogger.lifecycleW("handleSessionTimeout: inference already active")
+            return null
+        }
+
+        val vadMs = processingController?.vadActiveMs ?: 0L
+        val utterMs = (processingController?.lastUtteranceDurationMs ?: 0).toLong()
+
+        val request = SttInferenceController.InferenceRequest(
+            pcm = finalPcm,
+            code = SttReturnCode.SESSION_TIMEOUT,
+            vadActiveMs = vadMs,
+            utteranceMs = utterMs,
+            captureMs = timingMs,
+            preRollMs = runtimeCfg.preRollMs.toLong(),
+            autoSilenceMs = runtimeCfg.autoSilenceMs.toLong(),
+            pipelineStartMs = sessionController.utteranceStartMs(),
+            sessionEpochAtSubmission = epoch
+        )
+
+        val decideDispatch = createDecideDispatch(epoch)
+        val onPostDispatch = createOnPostDispatch(epoch, completeStopPath = true)
+        val onComplete = createOnComplete(epoch, completeStopPath = true)
+
+        return PreparedTranscribe(
+            request = request,
+            decideDispatch = decideDispatch,
+            onPostDispatch = onPostDispatch,
+            onComplete = onComplete
+        )
     }
 
     /**

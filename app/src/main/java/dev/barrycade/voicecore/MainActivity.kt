@@ -293,8 +293,10 @@ class MainActivity : ComponentActivity() {
                     when (type) {
                         "result" -> {
                             onResultReceived(obj)
-                            // If auto-silence finished, reset UI state
-                            if (activeStopType == "AUTO_SILENCE") {
+                            // If auto-silence finished or session timeout fired,
+                            // reset the UI state (Stop disabled, Start enabled).
+                            val code = obj.optString("code", "")
+                            if (activeStopType == "AUTO_SILENCE" || code == "SESSION_TIMEOUT") {
                                 isRecording = false
                                 updateUi()
                             }
