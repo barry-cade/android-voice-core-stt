@@ -7,7 +7,7 @@
     <string name="clear">Clear</string>
     <string name="whisper">Whisper</string>
     <string name="vosk">Vosk</string>
-    <string name="vosk_mode_normal">Normal</string>
+    <string name="vosk_mode_normal">Command</string>
     <string name="vosk_mode_hotword">Hot Word</string>
     <string name="vosk_mode_wakeword">Wake Word</string>
     <string name="vosk_final_hint">Final: (awaiting result...)</string>

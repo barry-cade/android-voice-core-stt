@@ -208,8 +208,8 @@ class MainActivity : ComponentActivity() {
         btnVoskStart.setOnClickListener {
             if (hasRecordAudioPermission()) {
                 when (radioVoskMode.checkedRadioButtonId) {
-                    R.id.radioVoskWakeWord -> startVoskWakeWordMode()
                     R.id.radioVoskHotWord -> startVoskHotWordMode()
+                    R.id.radioVoskWakeWord -> showWakeWordPlaceholder()
                     R.id.radioVoskNormal -> startVoskCommandMode()
                 }
             } else {
@@ -530,13 +530,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start a Vosk wake-word session using VoskSessionManager.
+     * Start a Vosk hot-word session.
      *
-     * The manager continuously listens for the wake word.
-     * On detection it auto-switches to command mode for one utterance,
-     * then returns to wake-word mode.
+     * Listens continuously for the hot word. On detection it
+     * auto-switches to command mode for one utterance,
+     * then returns to hot-word listening mode.
      */
-    private fun startVoskWakeWordMode() {
+    private fun startVoskHotWordMode() {
         val sessionManager = voskSessionManager
         if (sessionManager == null) {
             txtVoskOutput.text = "Vosk not initialised yet (preload may still be running)."
@@ -686,17 +686,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start a hot-word session (placeholder).
+     * Show a placeholder message for true wake-word mode (not yet implemented).
      *
-     * Hot-word mode listens continuously and transcribes everything.
-     * When the hot word appears in a partial result, the manager flags it
-     * but does NOT stop — the utterance completes naturally.
-     *
-     * Currently delegates to [startVoskCommandMode] as a placeholder
-     * until true hot-word mode is implemented in VoskSessionManager.
+     * True wake-word mode will listen for a wake word while the system is
+     * otherwise dormant, then activate on detection. This is distinct from
+     * hot-word mode which continuously transcribes and flags the word.
      */
-    private fun startVoskHotWordMode() {
-        startVoskCommandMode()
+    private fun showWakeWordPlaceholder() {
+        txtVoskOutput.text = "Wake Word mode is not yet implemented.\nUse Hot Word for wake-word behaviour in the meantime."
     }
 
     private fun stopVoskTest() {
