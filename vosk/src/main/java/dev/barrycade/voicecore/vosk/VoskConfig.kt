@@ -12,16 +12,16 @@ package dev.barrycade.voicecore.vosk
  * - [preSpeechPadMs] ↔ Whisper's [preRollMs]
  * - [postSpeechSilenceMs] ↔ Whisper's [autoSilenceMs]
  *
- * Note: Vosk uses **float seconds** for endpointer delays,
- * while Whisper uses **int milliseconds**. Conversion is
- * handled by [VoskJsonAdapter].
+ * All time fields are in **milliseconds** (Int or Float), matching
+ * the Whisper naming convention. Conversion to Vosk's float-seconds
+ * for the endpointer API is handled by [VoskEngine].
  *
  * @property modelPath Absolute path to the Vosk model directory.
  * @property sampleRate Audio sample rate in Hz.
  * @property endpointerMode Vosk endpointer mode: "SHORT" or "LONG".
- * @property postSpeechSilenceMs Silence after speech before utterance ends (seconds).
- * @property preSpeechPadMs Silence before speech to begin utterance (seconds).
- * @property maxDurationMs Maximum utterance duration (seconds).
+ * @property postSpeechSilenceMs Silence after speech before utterance ends (milliseconds).
+ * @property preSpeechPadMs Silence before speech to begin utterance (milliseconds).
+ * @property maxDurationMs Maximum utterance duration (milliseconds).
  * @property wakeWord The wake word to listen for in wake-word mode.
  * @property bufferSizeSamples Number of short samples per audio read chunk.
  */
@@ -29,9 +29,9 @@ data class VoskConfig(
     val modelPath: String,
     val sampleRate: Float = 16000f,
     val endpointerMode: String = "SHORT",
-    val postSpeechSilenceMs: Float = 1.2f,
-    val preSpeechPadMs: Float = 0.5f,
-    val maxDurationMs: Float = 30.0f,
+    val postSpeechSilenceMs: Float = 1200f,
+    val preSpeechPadMs: Float = 500f,
+    val maxDurationMs: Float = 30000f,
     val wakeWord: String = "Max",
     val bufferSizeSamples: Int = 4000
 ) {
@@ -45,14 +45,14 @@ data class VoskConfig(
         require(endpointerMode == "SHORT" || endpointerMode == "LONG") {
             "endpointerMode must be 'SHORT' or 'LONG', got '$endpointerMode'"
         }
-        require(postSpeechSilenceMs in 0.1f..60.0f) {
-            "postSpeechSilenceMs=$postSpeechSilenceMs must be in [0.1, 60.0] seconds"
+        require(postSpeechSilenceMs in 100f..60000f) {
+            "postSpeechSilenceMs=$postSpeechSilenceMs must be in [100, 60000] ms"
         }
-        require(preSpeechPadMs in 0.0f..10.0f) {
-            "preSpeechPadMs=$preSpeechPadMs must be in [0.0, 10.0] seconds"
+        require(preSpeechPadMs in 0f..10000f) {
+            "preSpeechPadMs=$preSpeechPadMs must be in [0, 10000] ms"
         }
-        require(maxDurationMs in 1.0f..120.0f) {
-            "maxDurationMs=$maxDurationMs must be in [1.0, 120.0] seconds"
+        require(maxDurationMs in 1000f..120000f) {
+            "maxDurationMs=$maxDurationMs must be in [1000, 120000] ms"
         }
         require(bufferSizeSamples in 1024..16000) {
             "bufferSizeSamples=$bufferSizeSamples must be in [1024, 16000]"
@@ -69,9 +69,9 @@ data class VoskConfig(
          *   "modelPath": "/path/to/vosk/model",
          *   "sampleRate": 16000,
          *   "endpointerMode": "SHORT",
-         *   "postSpeechSilenceMs": 1.2,
-         *   "preSpeechPadMs": 0.5,
-         *   "maxDurationMs": 30.0,
+         *   "postSpeechSilenceMs": 1200,
+         *   "preSpeechPadMs": 500,
+         *   "maxDurationMs": 30000,
          *   "wakeWord": "Max",
          *   "bufferSizeSamples": 4000
          * }

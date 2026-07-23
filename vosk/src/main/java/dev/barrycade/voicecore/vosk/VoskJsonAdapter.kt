@@ -12,13 +12,16 @@ package dev.barrycade.voicecore.vosk
  *   "modelPath": "/path/to/vosk/model",
  *   "sampleRate": 16000,
  *   "endpointerMode": "SHORT",
- *   "postSpeechSilenceMs": 1.2,
- *   "preSpeechPadMs": 0.5,
- *   "maxDurationMs": 30.0,
+ *   "postSpeechSilenceMs": 1200,
+ *   "preSpeechPadMs": 500,
+ *   "maxDurationMs": 30000,
  *   "wakeWord": "Max",
  *   "bufferSizeSamples": 4000
  * }
  * ```
+ *
+ * All time values are in milliseconds. Conversion to float seconds
+ * for Vosk's endpointer API is handled by [VoskEngine].
  *
  * All fields are optional except [modelPath]. Missing optional fields
  * fall back to defaults defined in [VoskConfig].

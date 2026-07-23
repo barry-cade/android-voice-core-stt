@@ -27,10 +27,12 @@ class VoskEngine(config: VoskConfig) {
                 else -> Recognizer.EndpointerMode.SHORT
             }
             recognizer.setEndpointerMode(endpointerMode)
+            // Vosk's setEndpointerDelays expects float seconds.
+            // Convert from milliseconds (config convention) to seconds.
             recognizer.setEndpointerDelays(
-                config.postSpeechSilenceMs,
-                config.preSpeechPadMs,
-                config.maxDurationMs
+                config.postSpeechSilenceMs / 1000f,
+                config.preSpeechPadMs / 1000f,
+                config.maxDurationMs / 1000f
             )
         } catch (e: IOException) {
             throw RuntimeException("Failed to create Vosk recognizer", e)
