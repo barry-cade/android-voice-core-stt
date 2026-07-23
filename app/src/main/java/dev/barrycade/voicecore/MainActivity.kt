@@ -17,7 +17,7 @@ import dev.barrycade.voicecore.vosk.VoskConfig
 import dev.barrycade.voicecore.vosk.VoskEngine
 import dev.barrycade.voicecore.vosk.VoskFinalListener
 import dev.barrycade.voicecore.vosk.VoskPartialListener
-import dev.barrycade.voicecore.vosk.VoskWakeWordListener
+import dev.barrycade.voicecore.vosk.VoskHotWordListener
 import dev.barrycade.voicecore.vosk.VoskMode
 import dev.barrycade.voicecore.vosk.VoskSessionManager
 import android.content.Context
@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
     private var isRecording = false
     private var voskEngine: VoskEngine? = null
     private var voskSessionManager: VoskSessionManager? = null
-    private var voskWakeWordCount: Int = 0
+    private var voskHotWordCount: Int = 0
 
     /**
      * Prevents the radio group change listener from re-triggering
@@ -548,11 +548,11 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        voskWakeWordCount = 0
+        voskHotWordCount = 0
         txtVoskWakeWord.visibility = View.GONE
         txtVoskMode.visibility = View.VISIBLE
         txtVoskOutput.visibility = View.VISIBLE
-        txtVoskOutput.text = "Listening for wake word..."
+        txtVoskOutput.text = "Listening for hot word..."
 
         val partialCallback = VoskPartialListener { text ->
             txtVoskOutput.text = "Partial: $text"
@@ -565,23 +565,23 @@ class MainActivity : ComponentActivity() {
             if (voskSessionManager?.mode == VoskMode.COMMAND) {
                 stopVoskTest()
             }
-            // In wake-word mode, final results are logged but loop continues.
+            // In hot-word mode, final results are logged but loop continues.
             // Reset indicator after command utterance.
             txtVoskWakeWord.visibility = View.GONE
             updateVoskClearButton()
         }
 
-        val wakeWordCallback = VoskWakeWordListener {
-            voskWakeWordCount += 1
+        val hotWordCallback = VoskHotWordListener {
+            voskHotWordCount += 1
             txtVoskWakeWord.visibility = View.VISIBLE
-            txtVoskMode.text = "Mode: COMMAND (wake #$voskWakeWordCount)"
-            txtVoskWakeWord.text = "[WAKE WORD DETECTED] Switching to command mode..."
+            txtVoskMode.text = "Mode: COMMAND (hot #$voskHotWordCount)"
+            txtVoskWakeWord.text = "[HOT WORD DETECTED] Switching to command mode..."
         }
 
         val modeChangeCallback: (VoskMode) -> Unit = { newMode ->
             when (newMode) {
-                VoskMode.WAKEWORD -> {
-                    txtVoskMode.text = "Mode: WAKEWORD"
+                VoskMode.HOTWORD -> {
+                    txtVoskMode.text = "Mode: HOTWORD"
                     txtVoskStatus.text = getString(R.string.vosk_status_active)
                     txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
                     radioVoskMode.isEnabled = false
@@ -611,7 +611,7 @@ class MainActivity : ComponentActivity() {
 
         sessionManager.partialListener = partialCallback
         sessionManager.finalListener = finalCallback
-        sessionManager.wakeWordListener = wakeWordCallback
+        sessionManager.hotWordListener = hotWordCallback
         sessionManager.modeListener = modeChangeCallback
 
         sessionManager.errorListener = { message ->
@@ -624,7 +624,7 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            sessionManager.startWakeWordMode()
+            sessionManager.startHotWordMode()
         } catch (e: IllegalStateException) {
             txtVoskOutput.text = "Error: ${e.message}"
             radioVoskMode.isEnabled = true
@@ -634,8 +634,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start a direct Vosk command-mode session (no wake word).
-     * Useful for testing the recogniser without wake-word logic.
+     * Start a direct Vosk command-mode session (no hot word).
+     * Useful for testing the recogniser without hot-word logic.
      */
     private fun startVoskCommandMode() {
         val sessionManager = voskSessionManager

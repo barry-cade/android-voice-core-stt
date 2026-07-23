@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 enum class VoskMode {
     IDLE,
-    WAKEWORD,
+    HOTWORD,
     COMMAND
 }
 
@@ -36,13 +36,13 @@ fun interface VoskFinalListener {
 }
 
 /**
- * Callback for wake-word detection.
+ * Callback for hot-word detection.
  *
- * Fired on the main thread when the wake word is spotted
- * in a partial result during [VoskMode.WAKEWORD] mode.
+ * Fired on the main thread when the hot word is spotted
+ * in a partial result during [VoskMode.HOTWORD] mode.
  */
-fun interface VoskWakeWordListener {
-    fun onWakeWordDetected()
+fun interface VoskHotWordListener {
+    fun onHotWordDetected()
 }
 
 /**
@@ -50,16 +50,16 @@ fun interface VoskWakeWordListener {
  *
  * Owns the [AudioRecord] thread and [VoskEngine] usage, ensuring
  * only one capture session is active at a time. The UI calls
- * [startWakeWordMode], [startCommandMode], or [stop] — it never
+ * [startHotWordMode], [startCommandMode], or [stop] — it never
  * touches AudioRecord or VoskEngine directly.
  *
- * In wake-word mode the manager continuously listens for a wake word
+ * In hot-word mode the manager continuously listens for a trigger word
  * in partial results. On detection it auto-switches to command mode,
- * captures one utterance, then returns to wake-word mode,
+ * captures one utterance, then returns to hot-word mode,
  * creating a seamless hands-free loop.
  *
  * @param voskEngine Initialised VoskEngine instance (model loaded).
- * @param config Configuration including wake-word, buffer size, sample rate.
+ * @param config Configuration including trigger word, buffer size, sample rate.
  */
 class VoskSessionManager(
     private val voskEngine: VoskEngine,
@@ -78,8 +78,8 @@ class VoskSessionManager(
     /** Called on the main thread for every final result. */
     var finalListener: VoskFinalListener? = null
 
-    /** Called on the main thread when the wake word is detected. */
-    var wakeWordListener: VoskWakeWordListener? = null
+    /** Called on the main thread when the hot word is detected. */
+    var hotWordListener: VoskHotWordListener? = null
 
     /**
      * Called on the main thread whenever the mode changes.
@@ -107,9 +107,9 @@ class VoskSessionManager(
     private var captureThread: Thread? = null
 
     /**
-     * Set by the wake-word detection path to indicate we just
+     * Set by the hot-word detection path to indicate we just
      * auto-switched to command mode. Prevents re-triggering the
-     * wake word callback from partial results during the command
+     * hot word callback from partial results during the command
      * utterance.
      */
     @Volatile
@@ -119,27 +119,27 @@ class VoskSessionManager(
 
     private val sampleRate: Int = config.sampleRate.toInt()
     private val bufferSizeSamples: Int = config.bufferSizeSamples
-    private val wakeWord: String = config.wakeWord
+    private val hotWord: String = config.wakeWord
 
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Start a wake-word capture session with automatic command mode switching.
+     * Start a hot-word capture session with automatic command mode switching.
      *
      * In this mode the recogniser continuously processes incoming audio
-     * and reports partial results via [partialListener]. When the wake
+     * and reports partial results via [partialListener]. When the hot
      * word is detected the manager auto-switches to command mode, captures
-     * one utterance, then returns to wake-word mode. This loop continues
+     * one utterance, then returns to hot-word mode. This loop continues
      * until [stop] is called or an error occurs.
      *
      * @throws IllegalStateException if a session is already active.
      */
-    fun startWakeWordMode() {
+    fun startHotWordMode() {
         if (active.get()) {
             throw IllegalStateException("Vosk session already active in mode: $mode")
         }
-        mode = VoskMode.WAKEWORD
-        postModeChange(VoskMode.WAKEWORD)
+        mode = VoskMode.HOTWORD
+        postModeChange(VoskMode.HOTWORD)
         startCapture()
     }
 
@@ -200,13 +200,13 @@ class VoskSessionManager(
     }
 
     private fun runCaptureLoop() {
-        // ── Outer loop: stays alive across wake-word → command → wake-word ──
+        // ── Outer loop: stays alive across hot-word → command → hot-word ──
         while (active.get()) {
             val audioRecord = createAudioRecord() ?: return
             var keepGoing = true
 
-            if (mode == VoskMode.WAKEWORD) {
-                keepGoing = runWakeWordInnerLoop(audioRecord)
+            if (mode == VoskMode.HOTWORD) {
+                keepGoing = runHotWordInnerLoop(audioRecord)
             } else if (mode == VoskMode.COMMAND) {
                 keepGoing = runCommandInnerLoop(audioRecord)
             }
@@ -222,10 +222,10 @@ class VoskSessionManager(
                     return
                 }
 
-                // Auto-switch back to wake-word mode.
-                mode = VoskMode.WAKEWORD
+                // Auto-switch back to hot-word mode.
+                mode = VoskMode.HOTWORD
                 autoSwitchedToCommand = false
-                postModeChange(VoskMode.WAKEWORD)
+                postModeChange(VoskMode.HOTWORD)
                 // Continue outer loop to re-create AudioRecord and listen again.
             }
         }
@@ -235,17 +235,17 @@ class VoskSessionManager(
     }
 
     /**
-     * Inner loop for wake-word mode.
+     * Inner loop for hot-word mode.
      *
      * Reads audio frames, feeds them to Vosk, and checks partial results
-     * for the wake word. Returns `true` to continue the outer loop
-     * (normal exit due to wake-word detection → command mode).
+     * for the hot word. Returns `true` to continue the outer loop
+     * (normal exit due to hot-word detection → command mode).
      * Returns `false` on explicit stop or error.
      */
-    private fun runWakeWordInnerLoop(audioRecord: AudioRecord): Boolean {
+    private fun runHotWordInnerLoop(audioRecord: AudioRecord): Boolean {
         val shortBuffer = ShortArray(bufferSizeSamples)
 
-        while (active.get() && mode == VoskMode.WAKEWORD) {
+        while (active.get() && mode == VoskMode.HOTWORD) {
             val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
             if (readCount <= 0) continue
 
@@ -269,18 +269,18 @@ class VoskSessionManager(
                 val partial = voskEngine.partialResult()
                     postPartial(partial)
 
-                if (containsWakeWord(partial)) {
-                    // Wake word spotted — switch to command mode.
+                if (containsHotWord(partial)) {
+                    // Hot word spotted — switch to command mode.
                     mode = VoskMode.COMMAND
                     autoSwitchedToCommand = true
                     postModeChange(VoskMode.COMMAND)
-                    postWakeWord()
+                    postHotWordDetected()
                     return true
                 }
             }
         }
 
-        // Stop requested while in wake-word mode.
+        // Stop requested while in hot-word mode.
         return false
     }
 
@@ -289,7 +289,7 @@ class VoskSessionManager(
      *
      * Reads audio frames until an utterance-end is reported by Vosk
      * or a stop is requested. Returns `true` to continue outer loop
-     * (normal command completion → back to wake-word).
+     * (normal command completion → back to hot-word).
      * Returns `false` on explicit stop or error.
      */
     private fun runCommandInnerLoop(audioRecord: AudioRecord): Boolean {
@@ -319,8 +319,8 @@ class VoskSessionManager(
                 return true
             } else {
                 val partial = voskEngine.partialResult()
-                // Suppress wake-word detection from command-mode partials.
-                if (!autoSwitchedToCommand || !containsWakeWord(partial)) {
+                // Suppress hot-word detection from command-mode partials.
+                if (!autoSwitchedToCommand || !containsHotWord(partial)) {
                     postPartial(partial)
                 }
             }
@@ -361,16 +361,16 @@ class VoskSessionManager(
         return audioRecord
     }
 
-    // ── Wake-word detection ──────────────────────────────────────────────────
+    // ── Hot-word detection ──────────────────────────────────────────────────
 
     /**
-     * Check whether [text] contains the configured wake word.
+     * Check whether [text] contains the configured hot word.
      *
      * Performs a case-insensitive check on the raw partial result string.
      */
-    private fun containsWakeWord(text: String): Boolean {
-        if (wakeWord.isBlank()) return false
-        return text.contains(wakeWord, ignoreCase = true)
+    private fun containsHotWord(text: String): Boolean {
+        if (hotWord.isBlank()) return false
+        return text.contains(hotWord, ignoreCase = true)
     }
 
     // ── Main-thread dispatching ──────────────────────────────────────────────
@@ -391,11 +391,11 @@ class VoskSessionManager(
         }
     }
 
-    private fun postWakeWord() {
-        val listener = wakeWordListener
+    private fun postHotWordDetected() {
+        val listener = hotWordListener
         if (listener == null) return
         mainHandler.post {
-            listener.onWakeWordDetected()
+            listener.onHotWordDetected()
         }
     }
 

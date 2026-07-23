@@ -27,7 +27,7 @@ package dev.barrycade.voicecore.vosk
  * @property preSpeechStartMaxMs Max time to wait for speech at start (milliseconds). Maps to setEndpointerDelays 1st param (t_start_max).
  * @property postSpeechSilenceMs Trailing silence after speech before endpoint (milliseconds). Maps to setEndpointerDelays 2nd param (t_end).
  * @property maxUtteranceMs Max utterance length (milliseconds). Maps to setEndpointerDelays 3rd param (t_max).
- * @property wakeWord The wake word to listen for in wake-word mode.
+ * @property wakeWord The trigger word to listen for in hot-word mode.
  * @property bufferSizeSamples Number of short samples per audio read chunk.
  */
 data class VoskConfig(
