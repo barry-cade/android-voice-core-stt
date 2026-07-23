@@ -209,7 +209,8 @@ class MainActivity : ComponentActivity() {
             if (hasRecordAudioPermission()) {
                 when (radioVoskMode.checkedRadioButtonId) {
                     R.id.radioVoskWakeWord -> startVoskWakeWordMode()
-                    R.id.radioVoskCmdMode -> startVoskCommandMode()
+                    R.id.radioVoskHotWord -> startVoskHotWordMode()
+                    R.id.radioVoskNormal -> startVoskCommandMode()
                 }
             } else {
                 requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -531,7 +532,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Start a Vosk wake-word session using VoskSessionManager.
      *
-     * The manager continuously listens for the wake word ("zip").
+     * The manager continuously listens for the wake word.
      * On detection it auto-switches to command mode for one utterance,
      * then returns to wake-word mode.
      */
@@ -580,7 +581,7 @@ class MainActivity : ComponentActivity() {
         val modeChangeCallback: (VoskMode) -> Unit = { newMode ->
             when (newMode) {
                 VoskMode.WAKEWORD -> {
-                    txtVoskMode.text = "Mode: WAKEWORD (say \"zip\")"
+                    txtVoskMode.text = "Mode: WAKEWORD"
                     txtVoskStatus.text = getString(R.string.vosk_status_active)
                     txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
                     radioVoskMode.isEnabled = false
@@ -682,6 +683,20 @@ class MainActivity : ComponentActivity() {
             btnVoskStart.isEnabled = true
             btnVoskStop.isEnabled = false
         }
+    }
+
+    /**
+     * Start a hot-word session (placeholder).
+     *
+     * Hot-word mode listens continuously and transcribes everything.
+     * When the hot word appears in a partial result, the manager flags it
+     * but does NOT stop — the utterance completes naturally.
+     *
+     * Currently delegates to [startVoskCommandMode] as a placeholder
+     * until true hot-word mode is implemented in VoskSessionManager.
+     */
+    private fun startVoskHotWordMode() {
+        startVoskCommandMode()
     }
 
     private fun stopVoskTest() {

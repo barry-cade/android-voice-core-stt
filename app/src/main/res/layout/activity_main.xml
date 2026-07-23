@@ -213,16 +213,21 @@
             android:orientation="horizontal">
 
             <RadioButton
-                android:id="@+id/radioVoskCmdMode"
+                android:id="@+id/radioVoskNormal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/cmd_mode"
+                android:text="@string/vosk_mode_normal"
                 android:checked="true" />
+            <RadioButton
+                android:id="@+id/radioVoskHotWord"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/vosk_mode_hotword" />
             <RadioButton
                 android:id="@+id/radioVoskWakeWord"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/wake_word" />
+                android:text="@string/vosk_mode_wakeword" />
         </RadioGroup>
 
         <!-- Vosk Action Buttons -->
