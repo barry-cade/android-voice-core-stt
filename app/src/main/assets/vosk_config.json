@@ -2,9 +2,9 @@
   "modelPath": "",
   "sampleRate": 16000,
   "endpointerMode": "SHORT",
-  "postSpeechSilenceMs": 1200,
-  "preSpeechPadMs": 500,
-  "maxDurationMs": 30000,
-  "wakeWord": "Max",
+  "preSpeechStartMaxMs": 5000,
+  "postSpeechSilenceMs": 2000,
+  "maxUtteranceMs": 30000,
+  "wakeWord": "jenkins",
   "bufferSizeSamples": 4000
 }

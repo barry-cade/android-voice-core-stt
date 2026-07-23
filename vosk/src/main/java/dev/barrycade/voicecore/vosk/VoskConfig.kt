@@ -6,22 +6,27 @@ package dev.barrycade.voicecore.vosk
  * All fields have safe defaults. Use the DSL-style factory or
  * load from JSON via [VoskJsonAdapter.parseConfig].
  *
- * ## Field naming alignment
+ * ## Endpointer parameters
  *
- * Fields use names consistent with the Whisper STT config:
- * - [preSpeechPadMs] ↔ Whisper's [preRollMs]
- * - [postSpeechSilenceMs] ↔ Whisper's [autoSilenceMs]
+ * Vosk's [org.vosk.Recognizer.setEndpointerDelays] takes **three** parameters
+ * (vosk-android 0.3.75 API). The 5 values logged by Vosk are internally
+ * derived from these 3 inputs:
  *
- * All time fields are in **milliseconds** (Int or Float), matching
- * the Whisper naming convention. Conversion to Vosk's float-seconds
+ * | Field | setEndpointerDelays param | Meaning | Logged as |
+ * | --- | --- | --- | --- |
+ * | [preSpeechStartMaxMs] | t_start_max (1st) | Max time to wait for speech at start | rule1 |
+ * | [postSpeechSilenceMs] | t_end (2nd) | Trailing silence after speech before endpoint | rule2 (rule3=1.5x, rule4=2x) |
+ * | [maxUtteranceMs] | t_max (3rd) | Max utterance length; also used internally for min utterance length | rule5 |
+ *
+ * All time fields are in **milliseconds**. Conversion to Vosk's float-seconds
  * for the endpointer API is handled by [VoskEngine].
  *
  * @property modelPath Absolute path to the Vosk model directory.
  * @property sampleRate Audio sample rate in Hz.
  * @property endpointerMode Vosk endpointer mode: "SHORT" or "LONG".
- * @property postSpeechSilenceMs Silence after speech before utterance ends (milliseconds).
- * @property preSpeechPadMs Silence before speech to begin utterance (milliseconds).
- * @property maxDurationMs Maximum utterance duration (milliseconds).
+ * @property preSpeechStartMaxMs Max time to wait for speech at start (milliseconds). Maps to setEndpointerDelays 1st param (t_start_max).
+ * @property postSpeechSilenceMs Trailing silence after speech before endpoint (milliseconds). Maps to setEndpointerDelays 2nd param (t_end).
+ * @property maxUtteranceMs Max utterance length (milliseconds). Maps to setEndpointerDelays 3rd param (t_max).
  * @property wakeWord The wake word to listen for in wake-word mode.
  * @property bufferSizeSamples Number of short samples per audio read chunk.
  */
@@ -29,9 +34,9 @@ data class VoskConfig(
     val modelPath: String,
     val sampleRate: Float = 16000f,
     val endpointerMode: String = "SHORT",
+    val preSpeechStartMaxMs: Float = 500f,
     val postSpeechSilenceMs: Float = 1200f,
-    val preSpeechPadMs: Float = 500f,
-    val maxDurationMs: Float = 30000f,
+    val maxUtteranceMs: Float = 30000f,
     val wakeWord: String = "Max",
     val bufferSizeSamples: Int = 4000
 ) {
@@ -45,14 +50,17 @@ data class VoskConfig(
         require(endpointerMode == "SHORT" || endpointerMode == "LONG") {
             "endpointerMode must be 'SHORT' or 'LONG', got '$endpointerMode'"
         }
-        require(postSpeechSilenceMs in 100f..60000f) {
-            "postSpeechSilenceMs=$postSpeechSilenceMs must be in [100, 60000] ms"
+        require(preSpeechStartMaxMs >= 0f) {
+            "preSpeechStartMaxMs=$preSpeechStartMaxMs must be >= 0"
         }
-        require(preSpeechPadMs in 0f..10000f) {
-            "preSpeechPadMs=$preSpeechPadMs must be in [0, 10000] ms"
+        require(postSpeechSilenceMs >= 0f) {
+            "postSpeechSilenceMs=$postSpeechSilenceMs must be >= 0"
         }
-        require(maxDurationMs in 1000f..120000f) {
-            "maxDurationMs=$maxDurationMs must be in [1000, 120000] ms"
+        require(maxUtteranceMs >= 0f && maxUtteranceMs <= 60000f) {
+            "maxUtteranceMs=$maxUtteranceMs must be in [0, 60000] ms"
+        }
+        require(maxUtteranceMs >= postSpeechSilenceMs) {
+            "maxUtteranceMs=$maxUtteranceMs must be >= postSpeechSilenceMs=$postSpeechSilenceMs"
         }
         require(bufferSizeSamples in 1024..16000) {
             "bufferSizeSamples=$bufferSizeSamples must be in [1024, 16000]"
@@ -69,9 +77,9 @@ data class VoskConfig(
          *   "modelPath": "/path/to/vosk/model",
          *   "sampleRate": 16000,
          *   "endpointerMode": "SHORT",
+         *   "preSpeechStartMaxMs": 500,
          *   "postSpeechSilenceMs": 1200,
-         *   "preSpeechPadMs": 500,
-         *   "maxDurationMs": 30000,
+         *   "maxUtteranceMs": 30000,
          *   "wakeWord": "Max",
          *   "bufferSizeSamples": 4000
          * }
@@ -88,3 +96,4 @@ data class VoskConfig(
         }
     }
 }
+

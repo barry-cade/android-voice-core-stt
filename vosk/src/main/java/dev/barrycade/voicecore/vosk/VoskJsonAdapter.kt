@@ -12,9 +12,9 @@ package dev.barrycade.voicecore.vosk
  *   "modelPath": "/path/to/vosk/model",
  *   "sampleRate": 16000,
  *   "endpointerMode": "SHORT",
+ *   "preSpeechStartMaxMs": 500,
  *   "postSpeechSilenceMs": 1200,
- *   "preSpeechPadMs": 500,
- *   "maxDurationMs": 30000,
+ *   "maxUtteranceMs": 30000,
  *   "wakeWord": "Max",
  *   "bufferSizeSamples": 4000
  * }
@@ -43,9 +43,9 @@ internal object VoskJsonAdapter {
 
         val sampleRate = resolveFloat(json, "sampleRate") ?: 16000f
         val endpointerMode = resolveString(json, "endpointerMode") ?: "SHORT"
-        val postSpeechSilenceMs = resolveFloat(json, "postSpeechSilenceMs") ?: 1.2f
-        val preSpeechPadMs = resolveFloat(json, "preSpeechPadMs") ?: 0.5f
-        val maxDurationMs = resolveFloat(json, "maxDurationMs") ?: 30.0f
+        val preSpeechStartMaxMs = resolveFloat(json, "preSpeechStartMaxMs") ?: 500f
+        val postSpeechSilenceMs = resolveFloat(json, "postSpeechSilenceMs") ?: 1200f
+        val maxUtteranceMs = resolveFloat(json, "maxUtteranceMs") ?: 30000f
         val wakeWord = resolveString(json, "wakeWord") ?: "Max"
         val bufferSizeSamples = resolveInt(json, "bufferSizeSamples") ?: 4000
 
@@ -53,9 +53,9 @@ internal object VoskJsonAdapter {
             modelPath = modelPath,
             sampleRate = sampleRate,
             endpointerMode = endpointerMode,
+            preSpeechStartMaxMs = preSpeechStartMaxMs,
             postSpeechSilenceMs = postSpeechSilenceMs,
-            preSpeechPadMs = preSpeechPadMs,
-            maxDurationMs = maxDurationMs,
+            maxUtteranceMs = maxUtteranceMs,
             wakeWord = wakeWord,
             bufferSizeSamples = bufferSizeSamples
         )
@@ -75,11 +75,11 @@ internal object VoskJsonAdapter {
         sb.append(',')
         appendJsonString(sb, "endpointerMode", config.endpointerMode)
         sb.append(',')
+        appendJsonFloat(sb, "preSpeechStartMaxMs", config.preSpeechStartMaxMs)
+        sb.append(',')
         appendJsonFloat(sb, "postSpeechSilenceMs", config.postSpeechSilenceMs)
         sb.append(',')
-        appendJsonFloat(sb, "preSpeechPadMs", config.preSpeechPadMs)
-        sb.append(',')
-        appendJsonFloat(sb, "maxDurationMs", config.maxDurationMs)
+        appendJsonFloat(sb, "maxUtteranceMs", config.maxUtteranceMs)
         sb.append(',')
         appendJsonString(sb, "wakeWord", config.wakeWord)
         sb.append(',')

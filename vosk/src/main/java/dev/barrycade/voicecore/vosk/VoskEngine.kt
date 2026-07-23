@@ -29,10 +29,15 @@ class VoskEngine(config: VoskConfig) {
             recognizer.setEndpointerMode(endpointerMode)
             // Vosk's setEndpointerDelays expects float seconds.
             // Convert from milliseconds (config convention) to seconds.
+            // Parameters: t_start_max, t_end, t_max
+            // (vosk-android 0.3.75 API — 3 parameters)
+            // The 5 logged values (rule1-5) are internally derived:
+            //   rule1 = t_start_max, rule2 = t_end,
+            //   rule3 = t_end*1.5, rule4 = t_end*2, rule5 = t_max
             recognizer.setEndpointerDelays(
+                config.preSpeechStartMaxMs / 1000f,
                 config.postSpeechSilenceMs / 1000f,
-                config.preSpeechPadMs / 1000f,
-                config.maxDurationMs / 1000f
+                config.maxUtteranceMs / 1000f
             )
         } catch (e: IOException) {
             throw RuntimeException("Failed to create Vosk recognizer", e)
