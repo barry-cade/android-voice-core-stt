@@ -16,6 +16,8 @@ import androidx.core.content.ContextCompat
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.AudioTrack
+import android.media.AudioAttributes
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.vosk.VoskConfig
 import dev.barrycade.voicecore.vosk.VoskEngine
@@ -26,6 +28,8 @@ import dev.barrycade.voicecore.vosk.VoskMode
 import dev.barrycade.voicecore.vosk.VoskSessionManager
 import dev.barrycade.voicecore.wuw.WakeWordSessionManager
 import dev.barrycade.voicecore.wuw.WakeWordListener
+import dev.barrycade.voicecore.wuw.TemplateStore
+import dev.barrycade.voicecore.wuw.MfccExtractor
 import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
@@ -47,8 +51,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var txtVoskOutput: TextView
     private lateinit var txtVoskFinal: TextView
     private lateinit var txtVoskMode: TextView
-    private lateinit var txtVoskStatus: TextView
-    private lateinit var txtWhisperStatus: TextView
     private lateinit var txtVoskWakeWord: TextView
     private lateinit var txtVoskConfigDisplay: TextView
     private lateinit var txtDiagnostics: TextView
@@ -82,16 +84,22 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnModeWuw: Button
     private lateinit var panelWuw: View
     private lateinit var txtWuwStatus: TextView
-    private lateinit var txtWuwTemplate: TextView
     private lateinit var txtWuwOutput: TextView
     private lateinit var txtWuwDetection: TextView
     private lateinit var txtWuwThreshold: TextView
     private lateinit var btnWuwRecord: Button
-    private lateinit var btnWuwStart: Button
-    private lateinit var btnWuwStop: Button
+    private lateinit var btnWuwPlay: Button
+    private lateinit var btnWuwMatch: Button
+    private lateinit var btnWuwDelete: Button
     private lateinit var seekWuwThreshold: SeekBar
+    private lateinit var radioWuwTemplates: RadioGroup
     private var wuwSessionManager: WakeWordSessionManager? = null
+    private var wuwTemplateStore: TemplateStore? = null
     private var isRecordingWuwTemplate: Boolean = false
+    private var isPlayingWuwTemplate: Boolean = false
+    private var selectedWuwTemplate: String? = null
+    /** Cached raw PCM for the selected template (for playback). */
+    private var selectedWuwPcm: ShortArray? = null
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -165,8 +173,6 @@ class MainActivity : ComponentActivity() {
         txtVoskOutput = findViewById(R.id.txtVoskOutput)
         txtVoskFinal = findViewById(R.id.txtVoskFinal)
         txtVoskMode = findViewById(R.id.txtVoskMode)
-        txtVoskStatus = findViewById(R.id.txtVoskStatus)
-        txtWhisperStatus = findViewById(R.id.txtWhisperStatus)
         txtVoskWakeWord = findViewById(R.id.txtVoskWakeWord)
         txtVoskConfigDisplay = findViewById(R.id.txtVoskConfigDisplay)
         txtDiagnostics = findViewById(R.id.txtDiagnostics)
@@ -176,14 +182,15 @@ class MainActivity : ComponentActivity() {
         btnModeWuw = findViewById(R.id.btnModeWuw)
         panelWuw = findViewById(R.id.panelWuw)
         txtWuwStatus = findViewById(R.id.txtWuwStatus)
-        txtWuwTemplate = findViewById(R.id.txtWuwTemplate)
         txtWuwOutput = findViewById(R.id.txtWuwOutput)
         txtWuwDetection = findViewById(R.id.txtWuwDetection)
         txtWuwThreshold = findViewById(R.id.txtWuwThreshold)
         btnWuwRecord = findViewById(R.id.btnWuwRecord)
-        btnWuwStart = findViewById(R.id.btnWuwStart)
-        btnWuwStop = findViewById(R.id.btnWuwStop)
+        btnWuwPlay = findViewById(R.id.btnWuwPlay)
+        btnWuwMatch = findViewById(R.id.btnWuwMatch)
+        btnWuwDelete = findViewById(R.id.btnWuwDelete)
         seekWuwThreshold = findViewById(R.id.seekWuwThreshold)
+        radioWuwTemplates = findViewById(R.id.radioWuwTemplates)
 
         // Register the JSON message listener before loadModel.
         // Required for auto-silence results — when the UtteranceAccumulator
@@ -272,7 +279,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        btnWuwStart.setOnClickListener {
+        btnWuwPlay.setOnClickListener {
+            playSelectedWuwTemplate()
+        }
+
+        btnWuwMatch.setOnClickListener {
             if (hasRecordAudioPermission()) {
                 startWuwListening()
             } else {
@@ -280,8 +291,25 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        btnWuwStop.setOnClickListener {
-            stopWuwListening()
+        btnWuwDelete.setOnClickListener {
+            deleteSelectedWuwTemplate()
+        }
+
+        radioWuwTemplates.setOnCheckedChangeListener { _, checkedId ->
+            val radioButton = findViewById<android.widget.RadioButton>(checkedId)
+            if (radioButton != null) {
+                selectedWuwTemplate = radioButton.text.toString()
+                selectedWuwPcm = null
+                btnWuwPlay.isEnabled = true
+                btnWuwMatch.isEnabled = true
+                btnWuwDelete.isEnabled = true
+            } else {
+                selectedWuwTemplate = null
+                selectedWuwPcm = null
+                btnWuwPlay.isEnabled = false
+                btnWuwMatch.isEnabled = false
+                btnWuwDelete.isEnabled = false
+            }
         }
 
         seekWuwThreshold.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -294,6 +322,10 @@ class MainActivity : ComponentActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
+
+        // Initialise the WUW template store.
+        wuwTemplateStore = TemplateStore(this)
+        refreshWuwTemplateList()
 
         requestPermissionLauncher = registerForActivityResult(
             RequestPermission()
@@ -646,16 +678,12 @@ class MainActivity : ComponentActivity() {
             when (newMode) {
                 VoskMode.HOTWORD -> {
                     txtVoskMode.text = "Mode: HOTWORD"
-                    txtVoskStatus.text = getString(R.string.vosk_status_active)
-                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
                     radioVoskMode.isEnabled = false
                     btnVoskStart.isEnabled = false
                     btnVoskStop.isEnabled = true
                 }
                 VoskMode.COMMAND -> {
                     txtVoskMode.text = "Mode: COMMAND"
-                    txtVoskStatus.text = getString(R.string.vosk_status_active)
-                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
                     radioVoskMode.isEnabled = false
                     btnVoskStart.isEnabled = false
                     btnVoskStop.isEnabled = true
@@ -663,8 +691,6 @@ class MainActivity : ComponentActivity() {
                 VoskMode.IDLE -> {
                     txtVoskMode.visibility = View.GONE
                     txtVoskWakeWord.visibility = View.GONE
-                    txtVoskStatus.text = getString(R.string.vosk_status_idle)
-                    txtVoskStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
                     radioVoskMode.isEnabled = true
                     btnVoskStart.isEnabled = true
                     btnVoskStop.isEnabled = false
@@ -856,35 +882,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUi() {
-        if (isRecording) {
-            btnStart.isEnabled = false
-            btnStop.isEnabled = true
-            btnClear.isEnabled = false
-            radioGroupStrategy.isEnabled = false
-            for (i in 0 until radioGroupStrategy.childCount) {
-                radioGroupStrategy.getChildAt(i).isEnabled = false
-            }
-            txtWhisperStatus.text = getString(R.string.vosk_status_active)
-            txtWhisperStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
-        } else {
-            btnStart.isEnabled = true
-            btnStop.isEnabled = false
-            btnClear.isEnabled = isWhisperContentAvailable()
-            radioGroupStrategy.isEnabled = true
-            for (i in 0 until radioGroupStrategy.childCount) {
-                radioGroupStrategy.getChildAt(i).isEnabled = true
-            }
-            txtWhisperStatus.text = getString(R.string.vosk_status_idle)
-            txtWhisperStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
-        }
+        val showStart = !isRecording
+        btnStart.visibility = if (showStart) View.VISIBLE else View.GONE
 
-        btnStart.visibility = View.VISIBLE
-        btnStop.visibility = View.VISIBLE
-    }
+        val showStop = activeStopType == "MANUAL"
+        btnStop.visibility = if (showStop) View.VISIBLE else View.GONE
 
-    private fun isWhisperContentAvailable(): Boolean {
-        val text = txtOutput.text.toString()
-        return text.isNotEmpty() && text != "Say something..." && text != "Microphone permission is required"
+        btnClear.isEnabled = true
     }
 
     private fun updateVoskClearButton() {
@@ -922,25 +926,144 @@ class MainActivity : ComponentActivity() {
     // ── WUW methods ──────────────────────────────────────────────────────────
 
     /**
+     * Refresh the template list RadioGroup from the TemplateStore.
+     */
+    private fun refreshWuwTemplateList() {
+        val store = wuwTemplateStore ?: return
+        val templates = store.listTemplates()
+
+        radioWuwTemplates.removeAllViews()
+
+        if (templates.isEmpty()) {
+            val emptyHint = android.widget.RadioButton(this)
+            emptyHint.text = "No templates saved. Record one first."
+            emptyHint.isEnabled = false
+            emptyHint.setTextColor(0xFF4A148C.toInt())
+            emptyHint.textSize = 11f
+            radioWuwTemplates.addView(emptyHint)
+            btnWuwPlay.isEnabled = false
+            btnWuwMatch.isEnabled = false
+            btnWuwDelete.isEnabled = false
+            selectedWuwTemplate = null
+        } else {
+            for (t in templates) {
+                val radio = android.widget.RadioButton(this)
+                radio.text = t.name
+                radio.textSize = 12f
+                radioWuwTemplates.addView(radio)
+            }
+            // Select the first one by default.
+            val firstRadio = radioWuwTemplates.getChildAt(0)
+            if (firstRadio is android.widget.RadioButton) {
+                firstRadio.isChecked = true
+                selectedWuwTemplate = firstRadio.text.toString()
+                btnWuwPlay.isEnabled = true
+                btnWuwMatch.isEnabled = true
+                btnWuwDelete.isEnabled = true
+            }
+        }
+    }
+
+    /**
+     * Delete the currently selected template.
+     */
+    private fun deleteSelectedWuwTemplate() {
+        val name = selectedWuwTemplate ?: return
+        val store = wuwTemplateStore ?: return
+
+        store.deleteTemplate(name)
+        selectedWuwTemplate = null
+        refreshWuwTemplateList()
+        txtWuwOutput.text = "Deleted template '$name'."
+    }
+
+    /**
+     * Trim leading and trailing silence from PCM data.
+     *
+     * Uses a simple energy-based VAD: samples below [silenceThreshold]
+     * (relative to max amplitude) are considered silence.
+     * Trims from the start until energy exceeds the threshold,
+     * and from the end after the last energy exceedance.
+     *
+     * @param pcm Raw PCM samples (16-bit signed).
+     * @param frameSize Samples per frame for energy calculation.
+     * @param silenceThreshold Fraction of max amplitude treated as silence.
+     * @return Trimmed PCM.
+     */
+    private fun trimSilence(
+        pcm: ShortArray,
+        frameSize: Int = 160,       // 10ms at 16kHz
+        silenceThreshold: Float = 0.02f
+    ): ShortArray {
+        if (pcm.isEmpty()) return pcm
+
+        val numFrames = pcm.size / frameSize
+        if (numFrames < 3) return pcm
+
+        // Compute RMS energy per frame.
+        val energies = FloatArray(numFrames) { f ->
+            var sumSq = 0f
+            val start = f * frameSize
+            val end = minOf(start + frameSize, pcm.size)
+            for (i in start until end) {
+                val norm = pcm[i] / 32768f
+                sumSq += norm * norm
+            }
+            kotlin.math.sqrt(sumSq / (end - start).toFloat())
+        }
+
+        val maxEnergy = energies.maxOrNull() ?: return pcm
+        if (maxEnergy < 1e-6f) return pcm
+
+        val threshold = maxEnergy * silenceThreshold
+
+        // Find first and last frames above threshold.
+        var firstActive = -1
+        var lastActive = -1
+        for (i in energies.indices) {
+            if (energies[i] >= threshold) {
+                if (firstActive < 0) firstActive = i
+                lastActive = i
+            }
+        }
+
+        if (firstActive < 0 || lastActive < 0) {
+            // All silence — return empty.
+            return ShortArray(0)
+        }
+
+        val trimStart = firstActive * frameSize
+        val trimEnd = minOf((lastActive + 1) * frameSize, pcm.size)
+
+        return pcm.copyOfRange(trimStart, trimEnd)
+    }
+
+    /**
      * Start recording audio to save as a wake-word template.
      *
-     * Captures PCM for a fixed duration, converts to MFCC, and saves
-     * via the session manager. Once saved, the template can be used
-     * for live matching.
+     * Captures PCM for 4 seconds, trims leading/trailing silence,
+     * extracts MFCC, and saves as a named template.
      */
     private fun startWuwTemplateRecording() {
         if (isRecordingWuwTemplate) return
 
         isRecordingWuwTemplate = true
         btnWuwRecord.isEnabled = false
-        txtWuwOutput.text = "Recording template... speak your wake word."
+        btnWuwPlay.isEnabled = false
+        txtWuwDetection.visibility = View.GONE
+        txtWuwOutput.text = "Recording for 4 seconds... speak your wake word."
 
-        val sessionManager = WakeWordSessionManager(this)
+        val store = wuwTemplateStore ?: run {
+            txtWuwOutput.text = "Template store not initialised."
+            isRecordingWuwTemplate = false
+            btnWuwRecord.isEnabled = true
+            btnWuwPlay.isEnabled = true
+            return
+        }
 
-        // Capture in a background thread for a fixed duration.
         Thread({
             val sampleRate = 16000
-            val durationMs = 2000
+            val durationMs = 4000
             val bufferSize = sampleRate * durationMs / 1000
             val minBufferBytes = AudioRecord.getMinBufferSize(
                 sampleRate,
@@ -962,6 +1085,7 @@ class MainActivity : ComponentActivity() {
                     txtWuwOutput.text = "Record failed: ${e.message}"
                     isRecordingWuwTemplate = false
                     btnWuwRecord.isEnabled = true
+                    btnWuwPlay.isEnabled = true
                 }
                 return@Thread
             }
@@ -972,45 +1096,104 @@ class MainActivity : ComponentActivity() {
                     txtWuwOutput.text = "AudioRecord not initialised."
                     isRecordingWuwTemplate = false
                     btnWuwRecord.isEnabled = true
+                    btnWuwPlay.isEnabled = true
                 }
                 return@Thread
             }
 
-            audioRecord.startRecording()
+            // Update UI to show progress.
+            postToUi { txtWuwOutput.text = "Recording... 0%" }
 
+            audioRecord.startRecording()
             val pcmBuffer = ShortArray(bufferSize)
             var totalRead = 0
-            while (totalRead < bufferSize) {
+            var lastProgress = 0
+
+            while (totalRead < bufferSize && isRecordingWuwTemplate) {
                 val read = audioRecord.read(pcmBuffer, totalRead, bufferSize - totalRead)
-                if (read > 0) totalRead += read
+                if (read > 0) {
+                    totalRead += read
+                    val progress = (totalRead * 100) / bufferSize
+                    if (progress > lastProgress + 10) {
+                        lastProgress = progress
+                        val p = progress
+                        postToUi { txtWuwOutput.text = "Recording... $p%" }
+                    }
+                }
             }
 
             audioRecord.stop()
             audioRecord.release()
 
-            val pcm = if (totalRead < pcmBuffer.size) {
+            if (!isRecordingWuwTemplate) {
+                postToUi {
+                    txtWuwOutput.text = "Recording cancelled."
+                    isRecordingWuwTemplate = false
+                    btnWuwRecord.isEnabled = true
+                    btnWuwPlay.isEnabled = true
+                }
+                return@Thread
+            }
+
+            val rawPcm = if (totalRead < pcmBuffer.size) {
                 pcmBuffer.copyOf(totalRead)
             } else {
                 pcmBuffer
             }
 
-            // Save template via the session manager.
-            sessionManager.saveTemplate(pcm)
-            sessionManager.destroy()
+            // Trim silence.
+            postToUi { txtWuwOutput.text = "Trimming silence..." }
+            val trimmedPcm = trimSilence(rawPcm)
 
-            val hasTemplate = sessionManager.hasTemplate()
+            if (trimmedPcm.size < sampleRate / 2) {
+                // Less than 0.5s of speech — likely nothing was said.
+                postToUi {
+                    txtWuwOutput.text = "Too little speech detected. Try again with more audio."
+                    isRecordingWuwTemplate = false
+                    btnWuwRecord.isEnabled = true
+                    btnWuwPlay.isEnabled = true
+                }
+                return@Thread
+            }
+
+            // Extract MFCC and save.
+            postToUi { txtWuwOutput.text = "Extracting features..." }
+            val mfccExtractor = MfccExtractor()
+            val mfccFrames = mfccExtractor.extract(trimmedPcm)
+
+            if (mfccFrames.isEmpty()) {
+                postToUi {
+                    txtWuwOutput.text = "Feature extraction failed. Try again."
+                    isRecordingWuwTemplate = false
+                    btnWuwRecord.isEnabled = true
+                    btnWuwPlay.isEnabled = true
+                }
+                return@Thread
+            }
+
+            // Generate a unique name.
+            // Use a timestamp-based name for uniqueness.
+            val timestamp = java.text.SimpleDateFormat("MMdd_HHmmss", java.util.Locale.US)
+                .format(java.util.Date())
+            val baseName = "ww_$timestamp"
+            val name = store.uniqueName(baseName)
+
+            store.saveTemplate(name, mfccFrames)
+            val rawSecs = "%.1f".format(rawPcm.size / sampleRate.toFloat())
+            val speechSecs = "%.1f".format(trimmedPcm.size / sampleRate.toFloat())
 
             postToUi {
                 isRecordingWuwTemplate = false
                 btnWuwRecord.isEnabled = true
-
-                if (hasTemplate) {
-                    txtWuwTemplate.text = "Template saved (${pcm.size} samples)."
-                    txtWuwOutput.text = "Template recorded. Tap Start to listen."
-                } else {
-                    txtWuwOutput.text = "Template recording failed — no speech detected."
+                btnWuwPlay.isEnabled = true
+                refreshWuwTemplateList()
+                txtWuwOutput.text = buildString {
+                    appendLine("Template saved: '$name'")
+                    appendLine("  Raw: ${rawSecs}s, Speech: ${speechSecs}s")
+                    appendLine("  Frames: ${mfccFrames.size} x ${mfccFrames[0].size} coeffs")
                 }
             }
+            store.saveTemplate(name, mfccFrames, trimmedPcm)
         }, "WuwRecordThread").start()
     }
 
@@ -1022,32 +1205,60 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Start listening for the wake word.
-     *
-     * Creates a [WakeWordSessionManager], loads the saved template,
-     * and begins continuous capture. On detection the listener fires.
+     * Start listening for the wake word using the selected template.
      */
     private fun startWuwListening() {
         if (wuwSessionManager?.isListening == true) return
+
+        val templateName = selectedWuwTemplate
+        if (templateName == null) {
+            txtWuwOutput.text = "No template selected. Select one from the list."
+            return
+        }
+
+        val store = wuwTemplateStore
+        if (store == null) {
+            txtWuwOutput.text = "Template store not initialised."
+            return
+        }
+
+        if (!store.hasTemplate(templateName)) {
+            txtWuwOutput.text = "Template '$templateName' not found."
+            refreshWuwTemplateList()
+            return
+        }
 
         val manager = WakeWordSessionManager(
             context = this,
             threshold = seekWuwThreshold.progress / 100f
         )
 
-        // Check for template.
-        if (!manager.hasTemplate()) {
-            txtWuwOutput.text = "No template saved. Tap Record first."
+        // Load the template and set it on the engine.
+        val template = store.loadTemplate(templateName)
+        if (template.isEmpty()) {
+            txtWuwOutput.text = "Failed to load template '$templateName'."
             manager.destroy()
             return
+        }
+
+        manager.setTemplateDirectly(template)
+
+        manager.similarityListener = { similarity ->
+            val target = seekWuwThreshold.progress / 100f
+            postToUi {
+                txtWuwOutput.text = String.format(
+                    java.util.Locale.US,
+                    "Listening using '%s'\nCurrent: %.2f | Target: %.2f",
+                    templateName, similarity, target
+                )
+            }
         }
 
         manager.wakeWordListener = WakeWordListener {
             postToUi {
                 txtWuwDetection.visibility = View.VISIBLE
                 txtWuwDetection.text = "[WAKE WORD DETECTED]"
-                txtWuwOutput.text = "Wake word detected!"
-                // Auto-stop after detection for testing.
+                txtWuwOutput.text = "Wake word detected from '$templateName'!"
                 stopWuwListening()
             }
         }
@@ -1060,9 +1271,9 @@ class MainActivity : ComponentActivity() {
         }
 
         wuwSessionManager = manager
-        manager.startListening()
+        manager.startListening(templateName)
         updateWuwUiListening()
-        txtWuwOutput.text = "Listening for wake word..."
+        txtWuwOutput.text = "Listening for wake word using '$templateName'..."
         txtWuwDetection.visibility = View.GONE
     }
 
@@ -1077,19 +1288,90 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateWuwUiListening() {
-        txtWuwStatus.text = "Status: ACTIVE"
+        txtWuwStatus.text = getString(R.string.vosk_status_active)
         txtWuwStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
         btnWuwRecord.isEnabled = false
-        btnWuwStart.isEnabled = false
-        btnWuwStop.isEnabled = true
+        btnWuwPlay.isEnabled = false
+        btnWuwMatch.isEnabled = false
+        btnWuwDelete.isEnabled = false
     }
 
     private fun updateWuwUiStopped() {
-        txtWuwStatus.text = "Status: IDLE"
+        txtWuwStatus.text = getString(R.string.vosk_status_idle)
         txtWuwStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
         btnWuwRecord.isEnabled = true
-        btnWuwStart.isEnabled = true
-        btnWuwStop.isEnabled = false
+        btnWuwPlay.isEnabled = selectedWuwTemplate != null
+        btnWuwMatch.isEnabled = selectedWuwTemplate != null
+        btnWuwDelete.isEnabled = selectedWuwTemplate != null
+    }
+
+    /**
+     * Play back the raw PCM of the selected template via AudioTrack.
+     */
+    private fun playSelectedWuwTemplate() {
+        if (isPlayingWuwTemplate) return
+
+        val templateName = selectedWuwTemplate
+        if (templateName == null) {
+            txtWuwOutput.text = "No template selected."
+            return
+        }
+
+        val store = wuwTemplateStore ?: return
+        val pcm = store.loadPcm(templateName)
+        if (pcm == null) {
+            txtWuwOutput.text = "No audio saved for template '$templateName'."
+            return
+        }
+
+        txtWuwOutput.text = "Playing template '$templateName'..."
+
+        val sampleRate = 16000
+        isPlayingWuwTemplate = true
+        btnWuwPlay.isEnabled = false
+
+        Thread({
+            val minBufferBytes = AudioTrack.getMinBufferSize(
+                sampleRate,
+                android.media.AudioFormat.CHANNEL_OUT_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    android.media.AudioFormat.Builder()
+                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(maxOf(minBufferBytes, pcm.size * 2))
+                .build()
+
+            audioTrack.play()
+            audioTrack.write(pcm, 0, pcm.size)
+
+            // Wait until the audio is actually finished playing before releasing resources.
+            // HEAD position is in frames (1 short = 1 frame for mono).
+            while (audioTrack.playbackHeadPosition < pcm.size && isPlayingWuwTemplate) {
+                Thread.sleep(50)
+            }
+
+            audioTrack.stop()
+            audioTrack.release()
+
+            postToUi {
+                isPlayingWuwTemplate = false
+                btnWuwPlay.isEnabled = true
+                txtWuwOutput.text = "Playback finished for '$templateName'."
+            }
+        }, "WuwPlayThread").start()
     }
 
     private fun getModelPath(): String {

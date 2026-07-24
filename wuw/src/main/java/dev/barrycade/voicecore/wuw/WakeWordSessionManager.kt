@@ -34,6 +34,9 @@ class WakeWordSessionManager(
     /** Callback for wake-word detection events. Delivered on capture thread. */
     var wakeWordListener: WakeWordListener? = null
 
+    /** Callback for every similarity score update. Delivered on capture thread. */
+    var similarityListener: ((Float) -> Unit)? = null
+
     /**
      * Callback for error events. Delivered on capture thread.
      * Receives a human-readable description.
@@ -64,18 +67,25 @@ class WakeWordSessionManager(
     /**
      * Start listening for the wake word.
      *
-     * Loads the stored template (if available), starts the capture thread,
+     * Loads the stored template by name, starts the capture thread,
      * and feeds PCM frames into the engine for continuous matching.
      *
-     * @throws IllegalStateException if already listening or template not found.
+     * @param templateName Name of the template to use. If null,
+     *                     loads the first available template.
      */
-    fun startListening() {
+    fun startListening(templateName: String? = null) {
         if (active.get()) {
             throw IllegalStateException("Wake word session already active")
         }
 
-        // Load template from storage.
-        val template = templateStore.loadTemplate()
+        val template = if (templateName != null) {
+            templateStore.loadTemplate(templateName)
+        } else {
+            val templates = templateStore.listTemplates()
+            if (templates.isEmpty()) emptyList()
+            else templateStore.loadTemplate(templates.first().name)
+        }
+
         if (template.isEmpty()) {
             val listener = errorListener
             if (listener != null) {
@@ -86,6 +96,7 @@ class WakeWordSessionManager(
 
         wakeWordEngine.setTemplate(template)
         wakeWordEngine.setListener(createEngineListener())
+        wakeWordEngine.similarityListener = similarityListener
         active.set(true)
         isListening = true
 
@@ -118,37 +129,57 @@ class WakeWordSessionManager(
         stopListening()
         wakeWordEngine.destroy()
         wakeWordListener = null
+        similarityListener = null
         errorListener = null
     }
 
     /**
-     * Save a PCM recording as the wake-word template.
+     * Save a PCM recording as a named wake-word template.
      *
-     * Convenience method that extracts MFCC from the PCM and saves
-     * via [TemplateStore].
+     * Extracts MFCC from the PCM and saves via [TemplateStore].
      *
      * @param pcm PCM samples (16 kHz, mono, 16-bit).
+     * @param name Template name. If null, generated from the current timestamp.
+     * @return The name the template was saved under.
      */
-    fun saveTemplate(pcm: ShortArray) {
+    fun saveTemplate(pcm: ShortArray, name: String? = null): String {
         val mfccFrames = mfccExtractor.extract(pcm)
-        if (mfccFrames.isEmpty()) {
-            return
-        }
-        templateStore.saveTemplate(mfccFrames)
+        if (mfccFrames.isEmpty()) return ""
+
+        val templateName = name ?: "ww_${System.currentTimeMillis()}"
+        val safeName = templateStore.uniqueName(templateName)
+        templateStore.saveTemplate(safeName, mfccFrames)
+        return safeName
     }
 
     /**
-     * Check whether a stored template exists.
+     * Set a template on the engine directly (from pre-extracted MFCC frames).
+     * Does NOT persist to storage. Used when the caller has already loaded
+     * a template and wants to inject it without a save/load cycle.
      */
-    fun hasTemplate(): Boolean {
-        return templateStore.hasTemplate()
+    fun setTemplateDirectly(mfccFrames: List<FloatArray>) {
+        wakeWordEngine.setTemplate(mfccFrames)
     }
 
     /**
-     * Delete any stored template.
+     * Check whether any template exists with the given name.
      */
-    fun deleteTemplate() {
-        templateStore.deleteTemplate()
+    fun hasTemplate(name: String): Boolean {
+        return templateStore.hasTemplate(name)
+    }
+
+    /**
+     * Delete a named template.
+     */
+    fun deleteTemplate(name: String): Boolean {
+        return templateStore.deleteTemplate(name)
+    }
+
+    /**
+     * List all saved templates.
+     */
+    fun listTemplates(): List<TemplateStore.TemplateInfo> {
+        return templateStore.listTemplates()
     }
 
     /**

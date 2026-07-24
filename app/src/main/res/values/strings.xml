@@ -15,4 +15,8 @@
     <string name="vosk_status_active">Status: ACTIVE</string>
     <string name="wuw">WUW</string>
     <string name="wuw_record">Record</string>
+    <string name="wuw_play">Play</string>
+    <string name="wuw_match">Match</string>
+    <string name="wuw_delete">Delete</string>
+    <string name="wuw_saved_templates">Saved Templates</string>
 </resources>

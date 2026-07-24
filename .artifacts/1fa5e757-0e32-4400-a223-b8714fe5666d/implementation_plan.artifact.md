@@ -1,36 +1,38 @@
-# Implementation Plan - VOSK Final Result Box Refinement
+# Implementation Plan - WUW Match Feedback Improvements
 
-This plan details the UI changes to the VOSK panel to align the "Final Result" display with the "Partial" feedback box styling, while using the "Active Config" color scheme.
+This plan addresses the lack of visual feedback during the WUW "Match" mode. Currently, the UI only updates if a successful match occurs, leaving the user unsure if the system is actually hearing them or how close they are to the threshold.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> This is a pure UI refinement in the `:app` module. No changes to the underlying STT or VOSK logic are necessary.
+> **Library Impact**: This requires adding a "similarity update" callback to the `:wuw` module components (`WakeWordEngine` and `WakeWordSessionManager`). This is a non-breaking additive change.
 
 ## Proposed Changes
 
-### [Component] VOSK UI Layout
+### [Component] Wake-Word Engine (:wuw)
 
-#### [MODIFY] [activity_main.xml](file:///C:/Users/home-/git/android-voice-core-stt/app/src/main/res/layout/activity_main.xml)
-- **Reorder Views**: Move `txtVoskFinal` to be below `txtVoskOutput`.
-- **Apply Styling to `txtVoskFinal`**:
-    - **Background**: `#FFF9C4` (Yellow, matching the Whisper Config box).
-    - **Text Color**: `#33691E` (Dark Green, matching the Whisper Config box).
-    - **Font**: `monospace` (Matching the Partial box).
-    - **Size**: `11sp` (Matching the Partial box).
-    - **Padding**: `8dp`.
-    - **Margin Top**: `8dp` (To separate it from the Partial box).
-- **Placeholder Text**: Update the initial text to a placeholder like "Final: (awaiting result...)" instead of the current hint.
+#### [MODIFY] [WakeWordEngine.kt](file:///C:/Users/home-/git/android-voice-core-stt/wuw/src/main/java/dev/barrycade/voicecore/wuw/WakeWordEngine.kt)
+- Add a new functional interface `SimilarityListener` (or use a lambda) to report the computed similarity score.
+- Update `processPcm` to invoke this listener every time a DTW distance is calculated, regardless of whether it meets the threshold.
+
+#### [MODIFY] [WakeWordSessionManager.kt](file:///C:/Users/home-/git/android-voice-core-stt/wuw/src/main/java/dev/barrycade/voicecore/wuw/WakeWordSessionManager.kt)
+- Add an `onSimilarityUpdate: ((Float) -> Unit)?` property to the manager.
+- Wire this property down to the `WakeWordEngine`.
+
+---
+
+### [Component] Demo App (:app)
 
 #### [MODIFY] [MainActivity.kt](file:///C:/Users/home-/git/android-voice-core-stt/app/src/main/java/dev/barrycade/voicecore/MainActivity.kt)
-- Ensure the `VoskFinalListener` updates the text in a format consistent with the "Live" box (e.g., prefixing with "Final: ").
+- **Live Score Tracking**: Update `startWuwListening` to register a similarity update listener.
+- **UI Feedback**:
+    - Update `txtWuwOutput` to display the "Live Score" (e.g., `Current: 0.45 | Target: 0.70`).
+    - This provides immediate visual proof that the system is processing audio and shows the user how close their speech is to the saved template.
 
 ## Verification Plan
 
 ### Manual Verification
-1. **Visual Check**: Open the VOSK tab and verify that:
-    - The "Live" box (blue) is at the top.
-    - The "Final" box (yellow) is below it.
-    - Both boxes use the same monospace font and small text size.
-2. **Functional Check**: Perform a VOSK session and verify that results are correctly routed to the new yellow box with the "Final: " prefix.
-3. **Clear Check**: Verify that the "CLEAR" button wipes both boxes and resets the placeholder.
+1. **Match Mode**: Select a template and press "Match."
+2. **Visual Proof**: Speak and confirm that the "Current Score" in the output box fluctuates in real-time.
+3. **Threshold Calibration**: Adjust the threshold slider and observe how it affects the "Target" value and the ease of triggering a match.
+4. **Detection**: Confirm that the `[WAKE WORD DETECTED]` message still appears correctly when the live score exceeds the threshold.

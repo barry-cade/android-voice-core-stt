@@ -41,6 +41,9 @@ class WakeWordEngine(
     /** Callback fired on wake-word detection. */
     var listener: WakeWordListener? = null
 
+    /** Callback fired for every similarity score calculation. */
+    var similarityListener: ((Float) -> Unit)? = null
+
     /** Reference MFCC template. Null until set via [setTemplate]. */
     private var template: List<FloatArray>? = null
 
@@ -142,6 +145,8 @@ class WakeWordEngine(
         // Map average distance to similarity in [0, 1].
         // distance=0 → similarity=1.0, distance grows → similarity drops.
         val similarity = 1f / (1f + avgDistance)
+
+        similarityListener?.invoke(similarity)
 
         if (similarity >= threshold) {
             listener?.onWakeWordDetected()

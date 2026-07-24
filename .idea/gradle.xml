@@ -12,6 +12,7 @@
             <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/stt" />
             <option value="$PROJECT_DIR$/vosk" />
+            <option value="$PROJECT_DIR$/wuw" />
           </set>
         </option>
       </GradleProjectSettings>
