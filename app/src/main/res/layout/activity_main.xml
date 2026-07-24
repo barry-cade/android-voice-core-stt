@@ -25,6 +25,13 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/vosk" />
+
+        <Button
+            android:id="@+id/btnModeWuw"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/wuw" />
     </LinearLayout>
 
     <!-- Whisper panel -->
@@ -319,6 +326,145 @@
                     android:typeface="monospace"
                     android:visibility="gone"
                     android:text="" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- WUW panel -->
+    <LinearLayout
+        android:id="@+id/panelWuw"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/txtWuwStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Status: IDLE"
+            android:textColor="#757575"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:gravity="end"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wake Word Mode"
+            android:textStyle="bold" />
+
+        <!-- Template status -->
+        <TextView
+            android:id="@+id/txtWuwTemplate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:layout_marginTop="4dp"
+            android:background="#F3E5F5"
+            android:textColor="#4A148C"
+            android:textSize="11sp"
+            android:typeface="monospace"
+            android:text="No template saved. Record one first." />
+
+        <!-- WUW Action Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:layout_marginTop="12dp">
+
+            <Button
+                android:id="@+id/btnWuwRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/wuw_record" />
+
+            <Button
+                android:id="@+id/btnWuwStart"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="@string/start" />
+
+            <Button
+                android:id="@+id/btnWuwStop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="@string/stop"
+                android:enabled="false" />
+        </LinearLayout>
+
+        <!-- Threshold slider -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Threshold"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/txtWuwThreshold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.70"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginEnd="8dp" />
+
+            <SeekBar
+                android:id="@+id/seekWuwThreshold"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="100"
+                android:progress="70" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="16dp"
+            android:fillViewport="true">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/txtWuwOutput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="8dp"
+                    android:background="#E8EAF6"
+                    android:textColor="#1A237E"
+                    android:textSize="11sp"
+                    android:typeface="monospace"
+                    android:text="Tap Record to capture a wake word, then Start to listen." />
+
+                <TextView
+                    android:id="@+id/txtWuwDetection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:padding="8dp"
+                    android:background="#E8F5E9"
+                    android:textColor="#2E7D32"
+                    android:textSize="11sp"
+                    android:typeface="monospace"
+                    android:text=""
+                    android:visibility="gone" />
             </LinearLayout>
         </ScrollView>
     </LinearLayout>

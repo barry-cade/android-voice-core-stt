@@ -7,11 +7,15 @@ import android.view.View
 import android.widget.Button
 import android.widget.RadioGroup
 import android.widget.TextView
+import android.widget.SeekBar
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.ActivityResultLauncher
 import android.app.AlertDialog
 import androidx.core.content.ContextCompat
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import dev.barrycade.voicecore.stt.SpeechToText
 import dev.barrycade.voicecore.vosk.VoskConfig
 import dev.barrycade.voicecore.vosk.VoskEngine
@@ -20,6 +24,8 @@ import dev.barrycade.voicecore.vosk.VoskPartialListener
 import dev.barrycade.voicecore.vosk.VoskHotWordListener
 import dev.barrycade.voicecore.vosk.VoskMode
 import dev.barrycade.voicecore.vosk.VoskSessionManager
+import dev.barrycade.voicecore.wuw.WakeWordSessionManager
+import dev.barrycade.voicecore.wuw.WakeWordListener
 import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
@@ -73,6 +79,19 @@ class MainActivity : ComponentActivity() {
      * a session ends).
      */
     private var voskReady: Boolean = false
+    private lateinit var btnModeWuw: Button
+    private lateinit var panelWuw: View
+    private lateinit var txtWuwStatus: TextView
+    private lateinit var txtWuwTemplate: TextView
+    private lateinit var txtWuwOutput: TextView
+    private lateinit var txtWuwDetection: TextView
+    private lateinit var txtWuwThreshold: TextView
+    private lateinit var btnWuwRecord: Button
+    private lateinit var btnWuwStart: Button
+    private lateinit var btnWuwStop: Button
+    private lateinit var seekWuwThreshold: SeekBar
+    private var wuwSessionManager: WakeWordSessionManager? = null
+    private var isRecordingWuwTemplate: Boolean = false
 
     private fun postToUi(action: () -> Unit) {
         runOnUiThread(action)
@@ -154,6 +173,17 @@ class MainActivity : ComponentActivity() {
         txtConfigDisplay = findViewById(R.id.txtConfigDisplay)
         txtErrorBanner = findViewById(R.id.txtErrorBanner)
         radioGroupStrategy = findViewById(R.id.radioGroupStrategy)
+        btnModeWuw = findViewById(R.id.btnModeWuw)
+        panelWuw = findViewById(R.id.panelWuw)
+        txtWuwStatus = findViewById(R.id.txtWuwStatus)
+        txtWuwTemplate = findViewById(R.id.txtWuwTemplate)
+        txtWuwOutput = findViewById(R.id.txtWuwOutput)
+        txtWuwDetection = findViewById(R.id.txtWuwDetection)
+        txtWuwThreshold = findViewById(R.id.txtWuwThreshold)
+        btnWuwRecord = findViewById(R.id.btnWuwRecord)
+        btnWuwStart = findViewById(R.id.btnWuwStart)
+        btnWuwStop = findViewById(R.id.btnWuwStop)
+        seekWuwThreshold = findViewById(R.id.seekWuwThreshold)
 
         // Register the JSON message listener before loadModel.
         // Required for auto-silence results — when the UtteranceAccumulator
@@ -171,6 +201,7 @@ class MainActivity : ComponentActivity() {
         // Initial state: Whisper visible, Whisper button disabled.
         btnModeWhisper.setOnClickListener { switchToMode("whisper") }
         btnModeVosk.setOnClickListener { switchToMode("vosk") }
+        btnModeWuw.setOnClickListener { switchToMode("wuw") }
         switchToMode("whisper")
 
         radioGroupStrategy.setOnCheckedChangeListener { _, checkedId ->
@@ -230,6 +261,39 @@ class MainActivity : ComponentActivity() {
             txtVoskFinal.text = getString(R.string.vosk_final_hint)
             updateVoskClearButton()
         }
+
+        // ── WUW button handlers ──────────────────────────────────────────────
+
+        btnWuwRecord.setOnClickListener {
+            if (hasRecordAudioPermission()) {
+                startWuwTemplateRecording()
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        btnWuwStart.setOnClickListener {
+            if (hasRecordAudioPermission()) {
+                startWuwListening()
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        btnWuwStop.setOnClickListener {
+            stopWuwListening()
+        }
+
+        seekWuwThreshold.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val threshold = progress / 100f
+                txtWuwThreshold.text = String.format("%.2f", threshold)
+                wuwSessionManager?.setThreshold(threshold)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
 
         requestPermissionLauncher = registerForActivityResult(
             RequestPermission()
@@ -833,24 +897,199 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun switchToMode(mode: String) {
-        val isWhisper = mode == "whisper"
+        // Teardown whichever module is active before switching.
+        if (voskSessionManager?.mode != VoskMode.IDLE) {
+            stopVoskTest()
+        }
+        if (isRecording) {
+            stopRecording()
+        }
+        stopWuwListening()
+        stopWuwTemplateRecording()
 
-        if (isWhisper) {
-            // Teardown Vosk when switching to Whisper
-            if (voskSessionManager?.mode != VoskMode.IDLE) {
-                stopVoskTest()
+        val showWhisper = mode == "whisper"
+        val showVosk = mode == "vosk"
+        val showWuw = mode == "wuw"
+
+        panelWhisper.visibility = if (showWhisper) View.VISIBLE else View.GONE
+        panelVosk.visibility = if (showVosk) View.VISIBLE else View.GONE
+        panelWuw.visibility = if (showWuw) View.VISIBLE else View.GONE
+        btnModeWhisper.isEnabled = !showWhisper
+        btnModeVosk.isEnabled = !showVosk
+        btnModeWuw.isEnabled = !showWuw
+    }
+
+    // ── WUW methods ──────────────────────────────────────────────────────────
+
+    /**
+     * Start recording audio to save as a wake-word template.
+     *
+     * Captures PCM for a fixed duration, converts to MFCC, and saves
+     * via the session manager. Once saved, the template can be used
+     * for live matching.
+     */
+    private fun startWuwTemplateRecording() {
+        if (isRecordingWuwTemplate) return
+
+        isRecordingWuwTemplate = true
+        btnWuwRecord.isEnabled = false
+        txtWuwOutput.text = "Recording template... speak your wake word."
+
+        val sessionManager = WakeWordSessionManager(this)
+
+        // Capture in a background thread for a fixed duration.
+        Thread({
+            val sampleRate = 16000
+            val durationMs = 2000
+            val bufferSize = sampleRate * durationMs / 1000
+            val minBufferBytes = AudioRecord.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufferBytes = maxOf(minBufferBytes, bufferSize * 2)
+
+            val audioRecord = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferBytes
+                )
+            } catch (e: Exception) {
+                postToUi {
+                    txtWuwOutput.text = "Record failed: ${e.message}"
+                    isRecordingWuwTemplate = false
+                    btnWuwRecord.isEnabled = true
+                }
+                return@Thread
             }
-        } else {
-            // Teardown Whisper when switching to Vosk
-            if (isRecording) {
-                stopRecording()
+
+            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord.release()
+                postToUi {
+                    txtWuwOutput.text = "AudioRecord not initialised."
+                    isRecordingWuwTemplate = false
+                    btnWuwRecord.isEnabled = true
+                }
+                return@Thread
+            }
+
+            audioRecord.startRecording()
+
+            val pcmBuffer = ShortArray(bufferSize)
+            var totalRead = 0
+            while (totalRead < bufferSize) {
+                val read = audioRecord.read(pcmBuffer, totalRead, bufferSize - totalRead)
+                if (read > 0) totalRead += read
+            }
+
+            audioRecord.stop()
+            audioRecord.release()
+
+            val pcm = if (totalRead < pcmBuffer.size) {
+                pcmBuffer.copyOf(totalRead)
+            } else {
+                pcmBuffer
+            }
+
+            // Save template via the session manager.
+            sessionManager.saveTemplate(pcm)
+            sessionManager.destroy()
+
+            val hasTemplate = sessionManager.hasTemplate()
+
+            postToUi {
+                isRecordingWuwTemplate = false
+                btnWuwRecord.isEnabled = true
+
+                if (hasTemplate) {
+                    txtWuwTemplate.text = "Template saved (${pcm.size} samples)."
+                    txtWuwOutput.text = "Template recorded. Tap Start to listen."
+                } else {
+                    txtWuwOutput.text = "Template recording failed — no speech detected."
+                }
+            }
+        }, "WuwRecordThread").start()
+    }
+
+    /**
+     * Stop template recording if in progress.
+     */
+    private fun stopWuwTemplateRecording() {
+        isRecordingWuwTemplate = false
+    }
+
+    /**
+     * Start listening for the wake word.
+     *
+     * Creates a [WakeWordSessionManager], loads the saved template,
+     * and begins continuous capture. On detection the listener fires.
+     */
+    private fun startWuwListening() {
+        if (wuwSessionManager?.isListening == true) return
+
+        val manager = WakeWordSessionManager(
+            context = this,
+            threshold = seekWuwThreshold.progress / 100f
+        )
+
+        // Check for template.
+        if (!manager.hasTemplate()) {
+            txtWuwOutput.text = "No template saved. Tap Record first."
+            manager.destroy()
+            return
+        }
+
+        manager.wakeWordListener = WakeWordListener {
+            postToUi {
+                txtWuwDetection.visibility = View.VISIBLE
+                txtWuwDetection.text = "[WAKE WORD DETECTED]"
+                txtWuwOutput.text = "Wake word detected!"
+                // Auto-stop after detection for testing.
+                stopWuwListening()
             }
         }
 
-        panelWhisper.visibility = if (isWhisper) View.VISIBLE else View.GONE
-        panelVosk.visibility = if (isWhisper) View.GONE else View.VISIBLE
-        btnModeWhisper.isEnabled = !isWhisper
-        btnModeVosk.isEnabled = isWhisper
+        manager.errorListener = { message ->
+            postToUi {
+                txtWuwOutput.text = "Error: $message"
+                updateWuwUiStopped()
+            }
+        }
+
+        wuwSessionManager = manager
+        manager.startListening()
+        updateWuwUiListening()
+        txtWuwOutput.text = "Listening for wake word..."
+        txtWuwDetection.visibility = View.GONE
+    }
+
+    /**
+     * Stop listening for the wake word.
+     */
+    private fun stopWuwListening() {
+        wuwSessionManager?.stopListening()
+        wuwSessionManager?.destroy()
+        wuwSessionManager = null
+        updateWuwUiStopped()
+    }
+
+    private fun updateWuwUiListening() {
+        txtWuwStatus.text = "Status: ACTIVE"
+        txtWuwStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark))
+        btnWuwRecord.isEnabled = false
+        btnWuwStart.isEnabled = false
+        btnWuwStop.isEnabled = true
+    }
+
+    private fun updateWuwUiStopped() {
+        txtWuwStatus.text = "Status: IDLE"
+        txtWuwStatus.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
+        btnWuwRecord.isEnabled = true
+        btnWuwStart.isEnabled = true
+        btnWuwStop.isEnabled = false
     }
 
     private fun getModelPath(): String {

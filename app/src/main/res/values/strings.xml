@@ -13,4 +13,6 @@
     <string name="vosk_final_hint">Final: (awaiting result...)</string>
     <string name="vosk_status_idle">Status: IDLE</string>
     <string name="vosk_status_active">Status: ACTIVE</string>
+    <string name="wuw">WUW</string>
+    <string name="wuw_record">Record</string>
 </resources>
