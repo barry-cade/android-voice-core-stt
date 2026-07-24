@@ -1,6 +1,0 @@
-- `[x]` Implement Live Similarity Score for WUW Match mode
-    - `[x]` Update `WakeWordEngine.kt` to report similarity scores
-    - `[x]` Update `WakeWordSessionManager.kt` to expose similarity listener
-    - `[x]` Update `MainActivity.kt` to display live scores and target threshold
-- `[x]` Verify real-time feedback on device
-- `[x]` Create final walkthrough
