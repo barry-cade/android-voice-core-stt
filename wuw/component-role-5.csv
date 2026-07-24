@@ -1,0 +1,6 @@
+﻿Component,Role
+WakeWordSessionManager,"Orchestrates listening, matching, and mode transitions"
+WakeWordEngine,Runs PCM → MFCC → similarity → threshold
+MFCC,Converts PCM frames into feature vectors
+TemplateStore,Holds the reference wake‑word MFCC template(s)
+Foreground Service,Keeps continuous low‑power listening alive
