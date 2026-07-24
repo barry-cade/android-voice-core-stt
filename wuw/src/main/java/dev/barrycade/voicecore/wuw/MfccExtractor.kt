@@ -1,12 +1,12 @@
-package dev.barrycade.voicecore.wuw
+﻿package dev.barrycade.voicecore.wuw
 
 import kotlin.math.pow
 
 /**
  * Extracts MFCC feature vectors from raw PCM audio.
  *
- * Pipeline: pre-emphasis → frame blocking → Hamming window → FFT →
- * mel filterbank → log energy → DCT → MFCC coefficients.
+ * Pipeline: pre-emphasis â†’ frame blocking â†’ Hamming window â†’ FFT â†’
+ * mel filterbank â†’ log energy â†’ DCT â†’ MFCC coefficients.
  *
  * Designed for 16 kHz mono PCM input. Each call to [extract] converts
  * a buffer of PCM samples into a list of MFCC frames, where each frame
@@ -58,16 +58,20 @@ class MfccExtractor(
     /** Pre-computed DCT matrix: [numCoefficients] x [numFilters]. */
     private val dctMatrix: Array<FloatArray> = computeDctMatrix()
 
-    /** Pre-computed DFT Cosine/Sine tables for speed. */
-    private val cosTable = FloatArray(fftSize * (fftSize / 2 + 1)) { i ->
-        val k = i / fftSize
-        val n = i % fftSize
-        kotlin.math.cos(-2f * kotlin.math.PI.toFloat() * k * n / fftSize)
-    }
-    private val sinTable = FloatArray(fftSize * (fftSize / 2 + 1)) { i ->
-        val k = i / fftSize
-        val n = i % fftSize
-        kotlin.math.sin(-2f * kotlin.math.PI.toFloat() * k * n / fftSize)
+    // ── FFT twiddle factors ─────────────────────────────────────────────
+    /** Pre-computed cos(2πk/N) for k = 0 .. N/2 - 1 */
+    private val twiddleCos: FloatArray
+    /** Pre-computed sin(2πk/N) for k = 0 .. N/2 - 1 */
+    private val twiddleSin: FloatArray
+
+    init {
+        val half = fftSize / 2
+        twiddleCos = FloatArray(half) { k ->
+            kotlin.math.cos(2f * kotlin.math.PI.toFloat() * k / fftSize)
+        }
+        twiddleSin = FloatArray(half) { k ->
+            kotlin.math.sin(2f * kotlin.math.PI.toFloat() * k / fftSize)
+        }
     }
 
     /**
@@ -199,7 +203,7 @@ class MfccExtractor(
         return dot / denom
     }
 
-    // ── Private helpers ──────────────────────────────────────────────────────
+    // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private fun applyPreEmphasis(samples: FloatArray): FloatArray {
         if (preEmphasisAlpha <= 0f) {
@@ -214,19 +218,59 @@ class MfccExtractor(
     }
 
     private fun computePowerSpectrum(frame: FloatArray): FloatArray {
+        val real = FloatArray(fftSize)
+        val imag = FloatArray(fftSize)
+        System.arraycopy(frame, 0, real, 0, frame.size)
+        fft(real, imag)
         val power = FloatArray(fftSize / 2 + 1)
         for (k in power.indices) {
-            var real = 0f
-            var imag = 0f
-            val offset = k * fftSize
-            for (n in frame.indices) {
-                val tableIdx = offset + n
-                real += frame[n] * cosTable[tableIdx]
-                imag += frame[n] * sinTable[tableIdx]
-            }
-            power[k] = (real * real + imag * imag) / fftSize
+            power[k] = (real[k] * real[k] + imag[k] * imag[k]) / fftSize
         }
         return power
+    }
+
+    private fun fft(real: FloatArray, imag: FloatArray) {
+        val n = fftSize
+        var j = 0
+        for (i in 1 until n) {
+            var bit = n shr 1
+            while (j and bit != 0) {
+                j = j xor bit
+                bit = bit shr 1
+            }
+            j = j xor bit
+            if (i < j) {
+                val tmpRe = real[i]
+                real[i] = real[j]
+                real[j] = tmpRe
+                val tmpIm = imag[i]
+                imag[i] = imag[j]
+                imag[j] = tmpIm
+            }
+        }
+        var len = 2
+        while (len <= n) {
+            val halfLen = len / 2
+            val twiddleStep = n / len
+            var i = 0
+            while (i < n) {
+                for (k in 0 until halfLen) {
+                    val tIdx = k * twiddleStep
+                    val wRe = twiddleCos[tIdx]
+                    val wIm = -twiddleSin[tIdx]
+                    val i1 = i + k
+                    val i2 = i1 + halfLen
+                    val tRe = real[i2] * wRe - imag[i2] * wIm
+                    val tIm = real[i2] * wIm + imag[i2] * wRe
+                    real[i2] = real[i1] - tRe
+                    imag[i2] = imag[i1] - tIm
+                    real[i1] = real[i1] + tRe
+                    imag[i1] = imag[i1] + tIm
+                }
+                i += len
+            }
+            len = len shl 1
+        }
     }
 
     /**
@@ -344,3 +388,5 @@ class MfccExtractor(
         }
     }
 }
+
+
