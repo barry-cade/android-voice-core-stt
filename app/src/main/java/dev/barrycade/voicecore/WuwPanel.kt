@@ -58,10 +58,14 @@ class WuwPanel(private val activity: MainActivity) {
         }
 
         btnWuwMatch.setOnClickListener {
-            if (activity.hasRecordAudioPermission()) {
-                startWuwListening()
+            if (wuwSessionManager?.isListening == true) {
+                stopWuwListening()
             } else {
-                activity.requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                if (activity.hasRecordAudioPermission()) {
+                    startWuwListening()
+                } else {
+                    activity.requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             }
         }
 
@@ -358,7 +362,8 @@ class WuwPanel(private val activity: MainActivity) {
         txtWuwStatus.setTextColor(ContextCompat.getColor(activity, android.R.color.holo_red_dark))
         btnWuwRecord.isEnabled = false
         btnWuwPlay.isEnabled = false
-        btnWuwMatch.isEnabled = false
+        btnWuwMatch.isEnabled = true
+        btnWuwMatch.text = "Stop"
         btnWuwDelete.isEnabled = false
         setViewEnabled(radioWuwTemplates, false)
         seekWuwThreshold.isEnabled = false
@@ -370,8 +375,10 @@ class WuwPanel(private val activity: MainActivity) {
         txtWuwStatus.text = activity.getString(R.string.vosk_status_idle)
         txtWuwStatus.setTextColor(ContextCompat.getColor(activity, android.R.color.darker_gray))
         btnWuwRecord.isEnabled = true
+        btnWuwRecord.text = "Record"
         btnWuwPlay.isEnabled = selectedWuwTemplate != null
         btnWuwMatch.isEnabled = selectedWuwTemplate != null
+        btnWuwMatch.text = "Match"
         btnWuwDelete.isEnabled = selectedWuwTemplate != null
         setViewEnabled(radioWuwTemplates, true)
         seekWuwThreshold.isEnabled = true
