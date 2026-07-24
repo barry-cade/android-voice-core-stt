@@ -32,6 +32,11 @@
             android:name=".audio.AudioTestService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <service
+            android:name="dev.barrycade.voicecore.wuw.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

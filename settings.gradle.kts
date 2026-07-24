@@ -26,3 +26,5 @@ rootProject.name = "android-voice-core"
 include(":app")
 include(":stt")
 include(":vosk")
+include(":wuw")
+
