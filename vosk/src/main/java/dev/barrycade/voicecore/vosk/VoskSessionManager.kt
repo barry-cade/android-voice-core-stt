@@ -115,6 +115,13 @@ class VoskSessionManager(
     @Volatile
     private var autoSwitchedToCommand: Boolean = false
 
+    /**
+     * If true, the session was started manually (single-shot command).
+     * It should return to IDLE after one utterance.
+     */
+    @Volatile
+    private var isManualSession: Boolean = false
+
     // ── Derived values from config ───────────────────────────────────────────
 
     private val sampleRate: Int = config.sampleRate.toInt()
@@ -138,6 +145,7 @@ class VoskSessionManager(
         if (active.get()) {
             throw IllegalStateException("Vosk session already active in mode: $mode")
         }
+        isManualSession = false
         mode = VoskMode.HOTWORD
         postModeChange(VoskMode.HOTWORD)
         startCapture()
@@ -157,6 +165,7 @@ class VoskSessionManager(
         if (active.get()) {
             throw IllegalStateException("Vosk session already active in mode: $mode")
         }
+        isManualSession = true
         mode = VoskMode.COMMAND
         postModeChange(VoskMode.COMMAND)
         startCapture()
@@ -169,6 +178,7 @@ class VoskSessionManager(
      */
     fun stop() {
         active.set(false)
+        isManualSession = false
         mode = VoskMode.IDLE
         postModeChange(VoskMode.IDLE)
         // Thread will exit its loop and terminate naturally.
@@ -209,6 +219,10 @@ class VoskSessionManager(
                 keepGoing = runHotWordInnerLoop(audioRecord)
             } else if (mode == VoskMode.COMMAND) {
                 keepGoing = runCommandInnerLoop(audioRecord)
+                if (isManualSession && keepGoing) {
+                    // Manual command finished — force exit via cleanup block.
+                    keepGoing = false
+                }
             }
 
             audioRecord.stop()
@@ -216,13 +230,15 @@ class VoskSessionManager(
 
             if (!keepGoing) {
                 // Command mode completed one utterance or stop was requested.
-                if (!active.get()) {
-                    // Explicit stop — exit completely.
+                if (!active.get() || isManualSession) {
+                    // Explicit stop or finished a single-shot manual session — exit.
+                    active.set(false)
                     mode = VoskMode.IDLE
+                    postModeChange(VoskMode.IDLE)
                     return
                 }
 
-                // Auto-switch back to hot-word mode.
+                // Auto-switch back to hot-word mode (from hot-word detection path).
                 mode = VoskMode.HOTWORD
                 autoSwitchedToCommand = false
                 postModeChange(VoskMode.HOTWORD)
@@ -294,8 +310,17 @@ class VoskSessionManager(
      */
     private fun runCommandInnerLoop(audioRecord: AudioRecord): Boolean {
         val shortBuffer = ShortArray(bufferSizeSamples)
+        val startTime = System.currentTimeMillis()
+        val maxDuration = config.maxUtteranceMs.toLong()
 
         while (active.get() && mode == VoskMode.COMMAND) {
+            // Safety watchdog: force endpoint if session exceeds max duration
+            if (System.currentTimeMillis() - startTime > maxDuration) {
+                val finalText = voskEngine.finalResult()
+                postFinal(finalText)
+                return true
+            }
+
             val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
             if (readCount <= 0) continue
 
