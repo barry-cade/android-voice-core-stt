@@ -58,6 +58,18 @@ class MfccExtractor(
     /** Pre-computed DCT matrix: [numCoefficients] x [numFilters]. */
     private val dctMatrix: Array<FloatArray> = computeDctMatrix()
 
+    /** Pre-computed DFT Cosine/Sine tables for speed. */
+    private val cosTable = FloatArray(fftSize * (fftSize / 2 + 1)) { i ->
+        val k = i / fftSize
+        val n = i % fftSize
+        kotlin.math.cos(-2f * kotlin.math.PI.toFloat() * k * n / fftSize)
+    }
+    private val sinTable = FloatArray(fftSize * (fftSize / 2 + 1)) { i ->
+        val k = i / fftSize
+        val n = i % fftSize
+        kotlin.math.sin(-2f * kotlin.math.PI.toFloat() * k * n / fftSize)
+    }
+
     /**
      * Extract MFCC frames from a PCM buffer.
      *
@@ -202,25 +214,47 @@ class MfccExtractor(
     }
 
     private fun computePowerSpectrum(frame: FloatArray): FloatArray {
-        // Zero-pad to FFT size.
-        val fftReal = FloatArray(fftSize) { if (it < frame.size) frame[it] else 0f }
-        val fftImag = FloatArray(fftSize) { 0f }
-
-        // Simple DFT (for correctness — can be optimised to FFT later).
-        // For a production system, replace with a real FFT implementation.
         val power = FloatArray(fftSize / 2 + 1)
         for (k in power.indices) {
             var real = 0f
             var imag = 0f
-            for (n in fftReal.indices) {
-                val angle = -2f * kotlin.math.PI.toFloat() * k * n / fftSize
-                real += fftReal[n] * kotlin.math.cos(angle)
-                imag += fftReal[n] * kotlin.math.sin(angle)
+            val offset = k * fftSize
+            for (n in frame.indices) {
+                val tableIdx = offset + n
+                real += frame[n] * cosTable[tableIdx]
+                imag += frame[n] * sinTable[tableIdx]
             }
             power[k] = (real * real + imag * imag) / fftSize
         }
-
         return power
+    }
+
+    /**
+     * Normalize MFCC frames using zero-mean unit-variance normalization.
+     * This makes matching more robust to volume differences.
+     */
+    fun normalizeFrames(frames: List<FloatArray>): List<FloatArray> {
+        if (frames.isEmpty()) return frames
+        val numCoeffs = frames[0].size
+        val normalized = frames.map { it.copyOf() }
+
+        for (c in 0 until numCoeffs) {
+            var sum = 0f
+            for (f in frames.indices) sum += frames[f][c]
+            val mean = sum / frames.size
+
+            var sumSqDiff = 0f
+            for (f in frames.indices) {
+                val diff = frames[f][c] - mean
+                sumSqDiff += diff * diff
+            }
+            val stdDev = kotlin.math.sqrt(sumSqDiff / frames.size).coerceAtLeast(1e-6f)
+
+            for (f in normalized.indices) {
+                normalized[f][c] = (normalized[f][c] - mean) / stdDev
+            }
+        }
+        return normalized
     }
 
     private fun computeMelFilterbank(): Array<FloatArray> {

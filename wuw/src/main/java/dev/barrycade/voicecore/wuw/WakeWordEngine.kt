@@ -47,8 +47,10 @@ class WakeWordEngine(
     /** Reference MFCC template. Null until set via [setTemplate]. */
     private var template: List<FloatArray>? = null
 
-    /** Rolling PCM buffer. */
-    private val pcmBuffer = mutableListOf<Short>()
+    /** Fixed-size sliding PCM buffer (2 seconds @ 16kHz). */
+    private val maxBufferSize = 32000
+    private var pcmBuffer = ShortArray(maxBufferSize)
+    private var currentBufferSize = 0
 
     /** Number of processed frames since last reset. Used for periodic checks. */
     private var processedFrames: Int = 0
@@ -58,11 +60,12 @@ class WakeWordEngine(
 
     /**
      * Set the reference MFCC template for matching.
+     * Normalizes the template frames for volume-invariant matching.
      *
      * @param mfccFrames Reference wake-word MFCC frames.
      */
     fun setTemplate(mfccFrames: List<FloatArray>) {
-        template = mfccFrames
+        template = mfccExtractor.normalizeFrames(mfccFrames)
     }
 
     /**
@@ -86,83 +89,74 @@ class WakeWordEngine(
     }
 
     /**
-     * Process incoming PCM samples.
-     *
-     * Accumulates samples and periodically runs MFCC extraction + DTW matching
-     * against the reference template. Fires [WakeWordListener.onWakeWordDetected]
-     * if similarity meets the threshold.
+     * Process incoming PCM samples using a sliding window.
      *
      * @param pcm Short array of PCM samples (16 kHz, mono).
      */
     fun processPcm(pcm: ShortArray) {
-        val templ = template
-        if (templ == null) {
-            return
+        val templ = template ?: return
+
+        // Manage sliding window: shift old samples if new ones won't fit
+        if (currentBufferSize + pcm.size > maxBufferSize) {
+            val keep = maxBufferSize - pcm.size
+            if (keep > 0) {
+                System.arraycopy(pcmBuffer, currentBufferSize - keep, pcmBuffer, 0, keep)
+                currentBufferSize = keep
+            } else {
+                currentBufferSize = 0
+            }
         }
 
-        // Accumulate.
-        for (sample in pcm) {
-            pcmBuffer.add(sample)
-        }
+        // Add new samples
+        System.arraycopy(pcm, 0, pcmBuffer, currentBufferSize, pcm.size)
+        currentBufferSize += pcm.size
 
         processedFrames += 1
-        if (processedFrames < checkIntervalFrames) {
-            return
-        }
+        if (processedFrames < checkIntervalFrames) return
         processedFrames = 0
 
-        // Ensure we have enough audio for at least minFramesForMatch frames.
-        val requiredSamples = mfccExtractor.frameSize + (minFramesForMatch - 1) * mfccExtractor.frameStride
-        if (pcmBuffer.size < requiredSamples) {
-            return
-        }
+        // Ensure enough audio for extraction
+        if (currentBufferSize < mfccExtractor.frameSize) return
 
-        // Convert rolling buffer to ShortArray for extraction.
-        val pcmArray = ShortArray(pcmBuffer.size) { pcmBuffer[it] }
+        // Extract and Normalize MFCC from the sliding window
+        val windowPcm = pcmBuffer.copyOfRange(0, currentBufferSize)
+        val rawLiveFrames = mfccExtractor.extract(windowPcm)
+        if (rawLiveFrames.size < minFramesForMatch) return
 
-        // Extract MFCC from the buffer.
-        val liveFrames = mfccExtractor.extract(pcmArray)
-
-        if (liveFrames.size < minFramesForMatch) {
-            return
-        }
-
-        // Use only the most recent frames, up to maxFramesForMatch.
-        val recentFrames = if (liveFrames.size > maxFramesForMatch) {
-            liveFrames.subList(liveFrames.size - maxFramesForMatch, liveFrames.size)
+        // Take only the most recent frames
+        val recentRawFrames = if (rawLiveFrames.size > maxFramesForMatch) {
+            rawLiveFrames.subList(rawLiveFrames.size - maxFramesForMatch, rawLiveFrames.size)
         } else {
-            liveFrames
+            rawLiveFrames
         }
 
-        // Compute DTW distance.
-        val distance = mfccExtractor.dtwDistance(templ, recentFrames)
+        val liveFrames = mfccExtractor.normalizeFrames(recentRawFrames)
 
-        // Convert distance to similarity score.
-        // Lower DTW distance = better match.
-        // Normalise by number of frames to make it length-invariant.
-        val avgDistance = distance / maxOf(templ.size, recentFrames.size).toFloat()
+        // Compute DTW distance
+        val distance = mfccExtractor.dtwDistance(templ, liveFrames)
 
-        // Map average distance to similarity in [0, 1].
-        // distance=0 → similarity=1.0, distance grows → similarity drops.
-        val similarity = 1f / (1f + avgDistance)
+        // Normalize distance by path length
+        val avgDistance = distance / maxOf(templ.size, liveFrames.size).toFloat()
+
+        // Exponential mapping for better visual feedback: similarity = e^(-k * d)
+        // k=0.5 provides a good spread for normalized Euclidean distances.
+        val similarity = kotlin.math.exp(-0.5f * avgDistance)
 
         similarityListener?.invoke(similarity)
 
         if (similarity >= threshold) {
             listener?.onWakeWordDetected()
-            // Clear buffer after detection to avoid re-triggering.
-            pcmBuffer.clear()
+            reset() // Clear buffer to prevent double triggers
         }
     }
 
     /**
      * Reset the engine state.
      *
-     * Clears the PCM rolling buffer and frame counter.
-     * Does NOT clear the template or listener.
+     * Clears the PCM sliding window and frame counter.
      */
     fun reset() {
-        pcmBuffer.clear()
+        currentBufferSize = 0
         processedFrames = 0
     }
 
@@ -170,12 +164,10 @@ class WakeWordEngine(
      * Release resources held by this engine.
      *
      * Clears the template, listener, and buffer.
-     * After calling this, the engine should not be reused.
      */
     fun destroy() {
-        pcmBuffer.clear()
+        reset()
         template = null
         listener = null
-        processedFrames = 0
     }
 }
