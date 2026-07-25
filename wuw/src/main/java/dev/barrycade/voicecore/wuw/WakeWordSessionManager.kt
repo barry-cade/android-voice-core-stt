@@ -8,6 +8,7 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 
 /**
  * Orchestrates wake-word listening, matching, and mode transitions.
@@ -17,19 +18,25 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Broadcast an intent (for loose coupling), or
  * - Fire a callback (for direct integration).
  *
+ * Features a simple VAD-based auto-stop: if the microphone detects sustained
+ * silence (RMS below threshold) for [silenceTimeoutMs] after any speech
+ * activity, the session auto-stops and fires [silenceAutoStopListener]
+ * with the peak similarity observed during the session.
+ *
  * Lifecycle:
  * 1. Create with [Context] and optional configuration.
  * 2. Call [startListening] to begin capture.
  * 3. On detection, the engine fires [WakeWordListener.onWakeWordDetected].
- * 4. Call [stopListening] to end the session.
- * 5. Call [destroy] to release all resources.
+ * 4. On silence timeout, [silenceAutoStopListener] fires with peak similarity.
+ * 5. Call [stopListening] to end the session early.
+ * 6. Call [destroy] to release all resources.
  */
 class WakeWordSessionManager(
     private val context: Context,
-    /** Optional intent action to broadcast on wake-word detection. */
     private val onDetectionAction: String? = null,
-    /** Similarity threshold passed to the engine. */
-    threshold: Float = 0.7f
+    threshold: Float = 0.7f,
+    /** How long (ms) of sustained silence before auto-stopping. 0 = disabled. */
+    private val silenceTimeoutMs: Long = 2000
 ) {
     /** Callback for wake-word detection events. Delivered on capture thread. */
     var wakeWordListener: WakeWordListener? = null
@@ -39,15 +46,18 @@ class WakeWordSessionManager(
 
     /**
      * Callback for PCM buffer snapshots for waveform visualization.
-     * Delivered on the capture thread. Receives a copy of the engine's
-     * current PCNeM sliding window.
+     * Delivered on the main thread.
      */
     var pcmListener: ((ShortArray) -> Unit)? = null
 
     /**
-     * Callback for error events. Delivered on capture thread.
-     * Receives a human-readable description.
+     * Fired when the session auto-stops due to sustained silence after speech.
+     * [peakSimilarity] is the highest similarity observed during the session.
+     * Delivered on the main thread.
      */
+    var silenceAutoStopListener: ((Float) -> Unit)? = null
+
+    /** Callback for error events. Delivered on capture thread. */
     var errorListener: ((String) -> Unit)? = null
 
     /** True while the capture loop is running. */
@@ -58,6 +68,12 @@ class WakeWordSessionManager(
     private val active = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var captureThread: Thread? = null
+
+    /** VAD state: set to true when wake word detected or auto-stop fires. */
+    private var hasFiredAutoStop: Boolean = false
+
+    /** Peak similarity observed during the current session. */
+    private var peakSimilarity: Float = 0f
 
     private val mfccExtractor = MfccExtractor()
     private val templateStore = TemplateStore(context)
@@ -73,12 +89,6 @@ class WakeWordSessionManager(
 
     /**
      * Start listening for the wake word.
-     *
-     * Loads the stored template by name, starts the capture thread,
-     * and feeds PCM frames into the engine for continuous matching.
-     *
-     * @param templateName Name of the template to use. If null,
-     *                     loads the first available template.
      */
     fun startListening(templateName: String? = null) {
         if (active.get()) {
@@ -101,9 +111,19 @@ class WakeWordSessionManager(
             return
         }
 
+        hasFiredAutoStop = false
+        peakSimilarity = 0f
         wakeWordEngine.setTemplate(template)
         wakeWordEngine.setListener(createEngineListener())
-        wakeWordEngine.similarityListener = similarityListener
+
+        // Wrap the external similarity listener to track peak
+        val externalSimilarityListener = similarityListener
+        wakeWordEngine.similarityListener = { similarity ->
+            if (similarity > peakSimilarity) {
+                peakSimilarity = similarity
+            }
+            externalSimilarityListener?.invoke(similarity)
+        }
         active.set(true)
         isListening = true
 
@@ -115,8 +135,6 @@ class WakeWordSessionManager(
 
     /**
      * Stop listening for the wake word.
-     *
-     * Safe to call when not listening (no-op).
      */
     fun stopListening() {
         active.set(false)
@@ -127,9 +145,6 @@ class WakeWordSessionManager(
 
     /**
      * Release all resources held by this manager.
-     *
-     * Stops listening, clears the engine, and nulls out references.
-     * After calling this, the manager must not be reused.
      */
     fun destroy() {
         stopListening()
@@ -137,33 +152,17 @@ class WakeWordSessionManager(
         wakeWordListener = null
         similarityListener = null
         errorListener = null
+        silenceAutoStopListener = null
     }
 
-    /**
-     * Get the underlying [WakeWordEngine] for parameter tuning (calibration).
-     * The engine is live while listening; field changes take effect immediately.
-     */
     fun getEngine(): WakeWordEngine {
         return wakeWordEngine
     }
 
-    /**
-     * Get the underlying [MfccExtractor] for parameter tuning (calibration).
-     * All configuration is set at construction time.
-     */
     fun getMfccExtractor(): MfccExtractor {
         return mfccExtractor
     }
 
-    /**
-     * Save a PCM recording as a named wake-word template.
-     *
-     * Extracts MFCC from the PCM and saves via [TemplateStore].
-     *
-     * @param pcm PCM samples (16 kHz, mono, 16-bit).
-     * @param name Template name. If null, generated from the current timestamp.
-     * @return The name the template was saved under.
-     */
     fun saveTemplate(pcm: ShortArray, name: String? = null): String {
         val mfccFrames = mfccExtractor.extract(pcm)
         if (mfccFrames.isEmpty()) return ""
@@ -174,50 +173,44 @@ class WakeWordSessionManager(
         return safeName
     }
 
-    /**
-     * Set a template on the engine directly (from pre-extracted MFCC frames).
-     * Does NOT persist to storage. Used when the caller has already loaded
-     * a template and wants to inject it without a save/load cycle.
-     */
     fun setTemplateDirectly(mfccFrames: List<FloatArray>) {
         wakeWordEngine.setTemplate(mfccFrames)
     }
 
-    /**
-     * Check whether any template exists with the given name.
-     */
     fun hasTemplate(name: String): Boolean {
         return templateStore.hasTemplate(name)
     }
 
-    /**
-     * Delete a named template.
-     */
     fun deleteTemplate(name: String): Boolean {
         return templateStore.deleteTemplate(name)
     }
 
-    /**
-     * List all saved templates.
-     */
     fun listTemplates(): List<TemplateStore.TemplateInfo> {
         return templateStore.listTemplates()
     }
 
-    /**
-     * Set the similarity threshold on the engine.
-     *
-     * @param value Threshold in [0, 1]. Higher = stricter.
-     */
     fun setThreshold(value: Float) {
         wakeWordEngine.setThreshold(value)
     }
 
     // ── Internal capture loop ────────────────────────────────────────────────
 
+    /**
+     * Simple VAD: returns the RMS energy of a PCM buffer.
+     * High RMS = speech present, low RMS = silence.
+     */
+    private fun computeRms(pcm: ShortArray): Float {
+        if (pcm.isEmpty()) return 0f
+        var sumSq = 0.0
+        for (s in pcm) {
+            val norm = s / 32768.0
+            sumSq += norm * norm
+        }
+        return kotlin.math.sqrt(sumSq / pcm.size).toFloat()
+    }
+
     private fun runCaptureLoop() {
         val audioRecord = createAudioRecord()
-
         if (audioRecord == null) {
             active.set(false)
             isListening = false
@@ -226,13 +219,19 @@ class WakeWordSessionManager(
 
         val shortBuffer = ShortArray(bufferSizeSamples)
 
+        // VAD state
+        val useVad = silenceTimeoutMs > 0
+        var lastSpeechTimeMs = System.currentTimeMillis()
+        var hasEverHadSpeech = false
+
+        val rmsThreshold = 0.015f  // RMS below this = silence (tune empirically)
+
         while (active.get()) {
             if (Thread.currentThread().isInterrupted) {
                 break
             }
 
             val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
-
             if (readCount <= 0) {
                 continue
             }
@@ -243,14 +242,40 @@ class WakeWordSessionManager(
                 shortBuffer
             }
 
+            // Compute similarity from the engine (called inside processPcm)
             wakeWordEngine.processPcm(pcmChunk)
 
-            // Grab PCM snapshot for waveform visualization (every chunk)
+            // Grab PCM snapshot for waveform visualization
             val pcmlistener = pcmListener
             if (pcmlistener != null) {
                 val snapshot = wakeWordEngine.getPcmSnapshot()
                 if (snapshot.isNotEmpty()) {
                     mainHandler.post { pcmlistener(snapshot) }
+                }
+            }
+
+            // VAD auto-stop logic
+            if (useVad && !hasFiredAutoStop) {
+                val rms = computeRms(pcmChunk)
+                val now = System.currentTimeMillis()
+
+                if (rms >= rmsThreshold) {
+                    // Speech detected
+                    hasEverHadSpeech = true
+                    lastSpeechTimeMs = now
+                }
+
+                if (hasEverHadSpeech && (now - lastSpeechTimeMs) >= silenceTimeoutMs) {
+                    // Sustained silence after speech — auto-stop
+                    hasFiredAutoStop = true
+                    active.set(false)
+                    isListening = false
+
+                    val peak = peakSimilarity
+                    mainHandler.post {
+                        silenceAutoStopListener?.invoke(peak)
+                    }
+                    break
                 }
             }
         }
@@ -297,6 +322,9 @@ class WakeWordSessionManager(
 
         return object : WakeWordListener {
             override fun onWakeWordDetected() {
+                // Wake word detected — don't auto-stop
+                hasFiredAutoStop = true
+
                 mainHandler.post {
                     wakeWordListener?.onWakeWordDetected()
                 }

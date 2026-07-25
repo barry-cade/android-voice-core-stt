@@ -523,6 +523,21 @@ class WuwPanel(private val activity: MainActivity) {
                 stopWuwListening()
             }
         }
+        // Auto-stop when silence detected after utterance
+        manager.silenceAutoStopListener = { peakSimilarity ->
+            activity.runOnUiThread {
+                wuwSessionManager = null
+                val target = seekWuwThreshold.progress / 100f
+                txtWuwOutput.text = String.format(Locale.US,
+                    "Silence detected. Peak similarity: %.2f (target: %.2f). %s",
+                    peakSimilarity, target,
+                    if (peakSimilarity >= target) "Close to threshold!" else "Try again with clearer speech.")
+                txtWuwDetection.text = if (peakSimilarity >= target) "[ALMOST — try lowering threshold]" else ""
+                txtWuwDetection.visibility = if (peakSimilarity >= target * 0.8f) View.VISIBLE else View.GONE
+                updateWuwUiStopped()
+            }
+        }
+
         manager.errorListener = { message ->
             activity.runOnUiThread {
                 txtWuwOutput.text = "Error: $message"
