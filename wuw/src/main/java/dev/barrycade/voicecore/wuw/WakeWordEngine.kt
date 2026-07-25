@@ -56,7 +56,20 @@ class WakeWordEngine(
     private var processedFrames: Int = 0
 
     /** Check every N frames to avoid excessive computation. */
-    private val checkIntervalFrames: Int = 5
+    @Volatile
+    var checkIntervalFrames: Int = 5
+
+    /** K constant for exponential similarity mapping: similarity = e^(-k * avgDistance). */
+    @Volatile
+    var similarityK: Float = 0.5f
+
+    /**
+     * Delegated access to MFCC pre-emphasis alpha.
+     * Changing this affects both recording and live matching.
+     */
+    var preEmphasisAlpha: Float
+        get() = mfccExtractor.preEmphasisAlpha
+        set(value) { mfccExtractor.preEmphasisAlpha = value }
 
     /**
      * Set the reference MFCC template for matching.
@@ -140,7 +153,7 @@ class WakeWordEngine(
 
         // Exponential mapping for better visual feedback: similarity = e^(-k * d)
         // k=0.5 provides a good spread for normalized Euclidean distances.
-        val similarity = kotlin.math.exp(-0.5f * avgDistance)
+        val similarity = kotlin.math.exp(-similarityK * avgDistance)
 
         similarityListener?.invoke(similarity)
 

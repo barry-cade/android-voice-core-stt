@@ -38,7 +38,7 @@ class MfccExtractor(
     val highFreq: Float = 8000f,
 
     /** Pre-emphasis alpha coefficient. 0.0 disables pre-emphasis. */
-    val preEmphasisAlpha: Float = 0.97f
+    var preEmphasisAlpha: Float = 0.97f
 ) {
     /** Frame size in samples. */
     val frameSize: Int = (sampleRate * frameDurationMs / 1000f).toInt()
@@ -255,6 +255,8 @@ class MfccExtractor(
             var i = 0
             while (i < n) {
                 for (k in 0 until halfLen) {
+                    // tIdx range: k in [0, halfLen), twiddleStep = n/len
+                    // max tIdx = (halfLen-1)*(n/len) = n/2 - n/(2*len) < n/2 => safe
                     val tIdx = k * twiddleStep
                     val wRe = twiddleCos[tIdx]
                     val wIm = -twiddleSin[tIdx]
@@ -315,7 +317,7 @@ class MfccExtractor(
 
         // Map centre frequencies to FFT bin indices.
         val binIndices = IntArray(centreFreqs.size) { i ->
-            (centreFreqs[i] / sampleRate * 2 * fftSize).toInt().coerceIn(0, numBins - 1)
+            ((fftSize + 1) * centreFreqs[i] / sampleRate).toInt().coerceIn(0, numBins - 1)
         }
 
         val filterbank = Array(numFilters) { FloatArray(numBins) }

@@ -19,4 +19,11 @@
     <string name="wuw_match">Match</string>
     <string name="wuw_delete">Delete</string>
     <string name="wuw_saved_templates">Saved Templates</string>
+    <string name="wuw_calibration">Calibration</string>
+    <string name="wuw_rec_duration">Rec Duration</string>
+    <string name="wuw_min_frames">Min Frames</string>
+    <string name="wuw_max_frames">Max Frames</string>
+    <string name="wuw_check_interval">Check Interval</string>
+    <string name="wuw_similarity_k">Similarity K</string>
+    <string name="wuw_pre_emphasis">Pre-Emphasis</string>
 </resources>
