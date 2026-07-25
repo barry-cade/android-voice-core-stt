@@ -102,6 +102,22 @@ class WakeWordEngine(
     }
 
     /**
+     * Apply multiple calibration parameters at once from the UI.
+     * Fields that are not relevant (e.g., threshold is set separately) are unchanged.
+     */
+    fun applyCalibration(
+        minFrames: Int,
+        maxFrames: Int,
+        checkInterval: Int,
+        similarityKValue: Float
+    ) {
+        minFramesForMatch = minFrames
+        maxFramesForMatch = maxFrames
+        checkIntervalFrames = checkInterval
+        similarityK = similarityKValue
+    }
+
+    /**
      * Process incoming PCM samples using a sliding window.
      *
      * @param pcm Short array of PCM samples (16 kHz, mono).

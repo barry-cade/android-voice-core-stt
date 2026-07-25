@@ -100,10 +100,8 @@ class WakeWordSessionManager(
         active.set(true)
         isListening = true
 
-        val thread = Thread({
-            runCaptureLoop()
-        }, "WuwCaptureThread")
-
+        val captureRunnable = Runnable { runCaptureLoop() }
+        val thread = Thread(captureRunnable, "WuwCaptureThread")
         captureThread = thread
         thread.start()
     }
@@ -117,6 +115,7 @@ class WakeWordSessionManager(
         active.set(false)
         isListening = false
         wakeWordEngine.reset()
+        captureThread?.interrupt()
     }
 
     /**
@@ -131,6 +130,22 @@ class WakeWordSessionManager(
         wakeWordListener = null
         similarityListener = null
         errorListener = null
+    }
+
+    /**
+     * Get the underlying [WakeWordEngine] for parameter tuning (calibration).
+     * The engine is live while listening; field changes take effect immediately.
+     */
+    fun getEngine(): WakeWordEngine {
+        return wakeWordEngine
+    }
+
+    /**
+     * Get the underlying [MfccExtractor] for parameter tuning (calibration).
+     * All configuration is set at construction time.
+     */
+    fun getMfccExtractor(): MfccExtractor {
+        return mfccExtractor
     }
 
     /**
@@ -205,6 +220,10 @@ class WakeWordSessionManager(
         val shortBuffer = ShortArray(bufferSizeSamples)
 
         while (active.get()) {
+            if (Thread.currentThread().isInterrupted) {
+                break
+            }
+
             val readCount = audioRecord.read(shortBuffer, 0, shortBuffer.size)
 
             if (readCount <= 0) {
@@ -258,17 +277,18 @@ class WakeWordSessionManager(
     }
 
     private fun createEngineListener(): WakeWordListener {
-        return WakeWordListener {
-            // Dispatch to main handler.
-            mainHandler.post {
-                wakeWordListener?.onWakeWordDetected()
-            }
+        val detectionAction = onDetectionAction
 
-            // Broadcast action if configured.
-            val action = onDetectionAction
-            if (action != null) {
-                val intent = Intent(action)
-                context.sendBroadcast(intent)
+        return object : WakeWordListener {
+            override fun onWakeWordDetected() {
+                mainHandler.post {
+                    wakeWordListener?.onWakeWordDetected()
+                }
+
+                if (detectionAction != null) {
+                    val intent = Intent(detectionAction)
+                    context.sendBroadcast(intent)
+                }
             }
         }
     }

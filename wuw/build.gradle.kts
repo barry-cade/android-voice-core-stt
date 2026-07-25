@@ -18,6 +18,5 @@ android {
 }
 
 dependencies {
-    implementation(project(":vosk"))
     implementation(libs.androidx.core.ktx)
 }

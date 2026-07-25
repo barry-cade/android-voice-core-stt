@@ -20,13 +20,13 @@ class MfccExtractor(
     val sampleRate: Int = 16000,
 
     /** Number of MFCC coefficients per frame. */
-    val numCoefficients: Int = 13,
+    var numCoefficients: Int = 13,
 
     /** Frame length in milliseconds. */
-    val frameDurationMs: Int = 25,
+    var frameDurationMs: Int = 25,
 
     /** Frame stride (hop) in milliseconds. */
-    val frameStrideMs: Int = 10,
+    var frameStrideMs: Int = 10,
 
     /** Number of mel filterbank channels. */
     val numFilters: Int = 26,
@@ -40,38 +40,53 @@ class MfccExtractor(
     /** Pre-emphasis alpha coefficient. 0.0 disables pre-emphasis. */
     var preEmphasisAlpha: Float = 0.97f
 ) {
-    /** Frame size in samples. */
-    val frameSize: Int = (sampleRate * frameDurationMs / 1000f).toInt()
+    /** Frame size in samples. Updated via [rebuildDerived]. */
+    var frameSize: Int = (sampleRate * frameDurationMs / 1000f).toInt()
+        private set
 
-    /** Frame stride in samples. */
-    val frameStride: Int = (sampleRate * frameStrideMs / 1000f).toInt()
+    /** Frame stride in samples. Updated via [rebuildDerived]. */
+    var frameStride: Int = (sampleRate * frameStrideMs / 1000f).toInt()
+        private set
 
-    /** FFT size (next power of two >= frameSize). */
-    val fftSize: Int = nextPowerOfTwo(frameSize)
+    /** FFT size (next power of two >= frameSize). Updated via [rebuildDerived]. */
+    private var fftSize: Int = nextPowerOfTwo(frameSize)
 
-    /** Pre-computed Hamming window. */
-    private val hammingWindow: FloatArray = computeHammingWindow(frameSize)
+    /** Pre-computed Hamming window. Updated via [rebuildDerived]. */
+    private var hammingWindow: FloatArray = computeHammingWindow(frameSize)
 
-    /** Pre-computed mel filterbank: [numFilters] x [fftSize/2 + 1]. */
-    private val melFilterbank: Array<FloatArray> = computeMelFilterbank()
+    /** Pre-computed mel filterbank. Updated via [rebuildDerived]. */
+    private var melFilterbank: Array<FloatArray> = computeMelFilterbank()
 
-    /** Pre-computed DCT matrix: [numCoefficients] x [numFilters]. */
-    private val dctMatrix: Array<FloatArray> = computeDctMatrix()
+    /** Pre-computed DCT matrix. Updated via [rebuildDerived]. */
+    private var dctMatrix: Array<FloatArray> = computeDctMatrix()
 
-    // ── FFT twiddle factors ─────────────────────────────────────────────
-    /** Pre-computed cos(2πk/N) for k = 0 .. N/2 - 1 */
-    private val twiddleCos: FloatArray
-    /** Pre-computed sin(2πk/N) for k = 0 .. N/2 - 1 */
-    private val twiddleSin: FloatArray
+    /** Pre-computed cos(2πk/N). Updated via [rebuildDerived]. */
+    private var twiddleCos: FloatArray = FloatArray(fftSize / 2) { k ->
+        kotlin.math.cos(2f * kotlin.math.PI.toFloat() * k / fftSize)
+    }
 
-    init {
-        val half = fftSize / 2
-        twiddleCos = FloatArray(half) { k ->
+    /** Pre-computed sin(2πk/N). Updated via [rebuildDerived]. */
+    private var twiddleSin: FloatArray = FloatArray(fftSize / 2) { k ->
+        kotlin.math.sin(2f * kotlin.math.PI.toFloat() * k / fftSize)
+    }
+
+    /**
+     * Recompute all derived dimensions and pre-computed tables.
+     * Must be called after changing frameDurationMs, frameStrideMs, or numCoefficients.
+     */
+    fun rebuildDerived() {
+        frameSize = (sampleRate * frameDurationMs / 1000f).toInt()
+        frameStride = (sampleRate * frameStrideMs / 1000f).toInt()
+        fftSize = nextPowerOfTwo(frameSize)
+        hammingWindow = computeHammingWindow(frameSize)
+        twiddleCos = FloatArray(fftSize / 2) { k ->
             kotlin.math.cos(2f * kotlin.math.PI.toFloat() * k / fftSize)
         }
-        twiddleSin = FloatArray(half) { k ->
+        twiddleSin = FloatArray(fftSize / 2) { k ->
             kotlin.math.sin(2f * kotlin.math.PI.toFloat() * k / fftSize)
         }
+        melFilterbank = computeMelFilterbank()
+        dctMatrix = computeDctMatrix()
     }
 
     /**
