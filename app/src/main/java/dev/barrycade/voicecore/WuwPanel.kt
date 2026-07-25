@@ -43,6 +43,7 @@ class WuwPanel(private val activity: MainActivity) {
     private val panelWuwCalibration = activity.findViewById<View>(R.id.panelWuwCalibration)
     private val seekWuwRecDuration = activity.findViewById<SeekBar>(R.id.seekWuwRecDuration)
     private val txtWuwRecDuration = activity.findViewById<TextView>(R.id.txtWuwRecDuration)
+    private var currentWuwRecDurationMs: Int = 4000
     private val seekWuwMinFrames = activity.findViewById<SeekBar>(R.id.seekWuwMinFrames)
     private val txtWuwMinFrames = activity.findViewById<TextView>(R.id.txtWuwMinFrames)
     private val seekWuwMaxFrames = activity.findViewById<SeekBar>(R.id.seekWuwMaxFrames)
@@ -128,7 +129,8 @@ class WuwPanel(private val activity: MainActivity) {
         // Rec duration (0-14 -> 1000-8000 step 500)
         seekWuwRecDuration.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                txtWuwRecDuration.text = "${1000 + progress * 500}"
+                currentWuwRecDurationMs = 1000 + progress * 500
+                txtWuwRecDuration.text = "$currentWuwRecDurationMs"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
@@ -348,7 +350,7 @@ class WuwPanel(private val activity: MainActivity) {
 
         Thread({
             val sampleRate = 16000
-            val durationMs = 4000
+            val durationMs = currentWuwRecDurationMs
             val bufferSize = sampleRate * durationMs / 1000
             val minBufferBytes = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val bufferBytes = maxOf(minBufferBytes, bufferSize * 2)
@@ -408,7 +410,7 @@ class WuwPanel(private val activity: MainActivity) {
                 return@Thread
             }
             activity.runOnUiThread { txtWuwOutput.text = "Extracting features..." }
-            val mfccExtractor = MfccExtractor()
+            val mfccExtractor = wuwSessionManager?.getMfccExtractor() ?: MfccExtractor()
             val mfccFrames = mfccExtractor.extract(trimmedPcm)
             if (mfccFrames.isEmpty()) {
                 activity.runOnUiThread { txtWuwOutput.text = "Feature extraction failed." }

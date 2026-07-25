@@ -120,6 +120,16 @@ class WakeWordEngine(
     /**
      * Process incoming PCM samples using a sliding window.
      *
+     * Matches the live audio against the template using an asymmetric pipeline:
+     * 1. Accumulate PCM into a sliding buffer.
+     * 2. Periodically convert the buffer to MFCC features.
+     * 3. Trim silence from the live audio frames (same as template recording).
+     * 4. Compute DTW distance between live MFCC and template MFCC.
+     * 5. Fire callback if similarity >= threshold.
+     *
+     * The silence trimming ensures fair matching: the template was recorded with
+     * silence trimmed, so live audio must also be silence-trimmed before comparison.
+     *
      * @param pcm Short array of PCM samples (16 kHz, mono).
      */
     fun processPcm(pcm: ShortArray) {
@@ -147,9 +157,13 @@ class WakeWordEngine(
         // Ensure enough audio for extraction
         if (currentBufferSize < mfccExtractor.frameSize) return
 
-        // Extract and Normalize MFCC from the sliding window
+        // Trim silence from the live buffer (same as template recording pipeline)
         val windowPcm = pcmBuffer.copyOfRange(0, currentBufferSize)
-        val rawLiveFrames = mfccExtractor.extract(windowPcm)
+        val trimmedLivePcm = mfccExtractor.trimSilence(windowPcm)
+        if (trimmedLivePcm.size < mfccExtractor.frameSize) return
+
+        // Extract MFCC from the silence-trimmed live audio
+        val rawLiveFrames = mfccExtractor.extract(trimmedLivePcm)
         if (rawLiveFrames.size < minFramesForMatch) return
 
         // Take only the most recent frames

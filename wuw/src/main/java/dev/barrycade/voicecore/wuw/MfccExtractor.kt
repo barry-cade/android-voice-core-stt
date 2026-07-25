@@ -1,6 +1,7 @@
 ﻿package dev.barrycade.voicecore.wuw
 
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 /**
  * Extracts MFCC feature vectors from raw PCM audio.
@@ -152,6 +153,55 @@ class MfccExtractor(
     }
 
     /**
+     * Trim leading and trailing silence from PCM audio using RMS energy.
+     *
+     * Splits the PCM into [frameSize]-sample frames, computes RMS energy for
+     * each, discards frames below [silenceThreshold] * peak energy.
+     *
+     * @param pcm Raw PCM samples.
+     * @param silenceThreshold Fraction of peak RMS to use as cutoff (default 0.02 = 2%).
+     * @return Trimmed PCM with silence removed from both ends.
+     *         Returns the original buffer if no silence is detected.
+     */
+    fun trimSilence(pcm: ShortArray, silenceThreshold: Float = 0.02f): ShortArray {
+        if (pcm.isEmpty()) return pcm
+
+        val numFrames = pcm.size / frameSize
+        if (numFrames < 3) return pcm
+
+        val energies = FloatArray(numFrames) { f ->
+            var sumSq = 0f
+            val start = f * frameSize
+            val end = minOf(start + frameSize, pcm.size)
+            for (i in start until end) {
+                val norm = pcm[i] / 32768f
+                sumSq += norm * norm
+            }
+            sqrt(sumSq / (end - start).toFloat())
+        }
+
+        val maxEnergy = energies.maxOrNull() ?: return pcm
+        if (maxEnergy < 1e-6f) return pcm
+
+        val cutoff = maxEnergy * silenceThreshold
+        var firstActive = -1
+        var lastActive = -1
+
+        for (i in energies.indices) {
+            if (energies[i] >= cutoff) {
+                if (firstActive < 0) firstActive = i
+                lastActive = i
+            }
+        }
+
+        if (firstActive < 0 || lastActive < 0) return ShortArray(0)
+
+        val trimStart = firstActive * frameSize
+        val trimEnd = minOf((lastActive + 1) * frameSize, pcm.size)
+        return pcm.copyOfRange(trimStart, trimEnd)
+    }
+
+    /**
      * Compute DTW distance between a reference MFCC sequence and a test MFCC sequence.
      *
      * Uses Euclidean distance as the local cost metric and a standard
@@ -211,7 +261,7 @@ class MfccExtractor(
             normA += a[i] * a[i]
             normB += b[i] * b[i]
         }
-        val denom = kotlin.math.sqrt(normA) * kotlin.math.sqrt(normB)
+        val denom = sqrt(normA) * sqrt(normB)
         if (denom < 1e-10f) {
             return 0f
         }
@@ -270,8 +320,6 @@ class MfccExtractor(
             var i = 0
             while (i < n) {
                 for (k in 0 until halfLen) {
-                    // tIdx range: k in [0, halfLen), twiddleStep = n/len
-                    // max tIdx = (halfLen-1)*(n/len) = n/2 - n/(2*len) < n/2 => safe
                     val tIdx = k * twiddleStep
                     val wRe = twiddleCos[tIdx]
                     val wIm = -twiddleSin[tIdx]
@@ -309,7 +357,7 @@ class MfccExtractor(
                 val diff = frames[f][c] - mean
                 sumSqDiff += diff * diff
             }
-            val stdDev = kotlin.math.sqrt(sumSqDiff / frames.size).coerceAtLeast(1e-6f)
+            val stdDev = sqrt(sumSqDiff / frames.size).coerceAtLeast(1e-6f)
 
             for (f in normalized.indices) {
                 normalized[f][c] = (normalized[f][c] - mean) / stdDev
@@ -323,14 +371,12 @@ class MfccExtractor(
         val melLow = freqToMel(lowFreq)
         val melHigh = freqToMel(highFreq)
 
-        // Centre frequencies of mel filters in Hz.
         val centreFreqs = FloatArray(numFilters + 2)
         for (i in centreFreqs.indices) {
             val mel = melLow + (melHigh - melLow) * i / (numFilters + 1)
             centreFreqs[i] = melToFreq(mel)
         }
 
-        // Map centre frequencies to FFT bin indices.
         val binIndices = IntArray(centreFreqs.size) { i ->
             ((fftSize + 1) * centreFreqs[i] / sampleRate).toInt().coerceIn(0, numBins - 1)
         }
@@ -342,12 +388,10 @@ class MfccExtractor(
             val centreBin = binIndices[m + 1]
             val endBin = binIndices[m + 2]
 
-            // Rising slope.
             for (k in startBin until centreBin) {
                 filterbank[m][k] = (k - startBin).toFloat() / (centreBin - startBin)
             }
 
-            // Falling slope.
             for (k in centreBin until endBin) {
                 filterbank[m][k] = (endBin - k).toFloat() / (endBin - centreBin)
             }
@@ -374,7 +418,7 @@ class MfccExtractor(
             val diff = a[i] - b[i]
             sum += diff * diff
         }
-        return kotlin.math.sqrt(sum)
+        return sqrt(sum)
     }
 
     companion object {
@@ -405,5 +449,3 @@ class MfccExtractor(
         }
     }
 }
-
-
