@@ -38,6 +38,13 @@ class WakeWordSessionManager(
     var similarityListener: ((Float) -> Unit)? = null
 
     /**
+     * Callback for PCM buffer snapshots for waveform visualization.
+     * Delivered on the capture thread. Receives a copy of the engine's
+     * current PCNeM sliding window.
+     */
+    var pcmListener: ((ShortArray) -> Unit)? = null
+
+    /**
      * Callback for error events. Delivered on capture thread.
      * Receives a human-readable description.
      */
@@ -237,6 +244,15 @@ class WakeWordSessionManager(
             }
 
             wakeWordEngine.processPcm(pcmChunk)
+
+            // Grab PCM snapshot for waveform visualization (every chunk)
+            val pcmlistener = pcmListener
+            if (pcmlistener != null) {
+                val snapshot = wakeWordEngine.getPcmSnapshot()
+                if (snapshot.isNotEmpty()) {
+                    mainHandler.post { pcmlistener(snapshot) }
+                }
+            }
         }
 
         audioRecord.stop()

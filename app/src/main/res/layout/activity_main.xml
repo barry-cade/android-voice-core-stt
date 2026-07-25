@@ -798,6 +798,29 @@
             android:progress="0"
             android:visibility="gone" />
 
+        <!-- Live waveform visualization -->
+        <dev.barrycade.voicecore.WuwWaveformView
+            android:id="@+id/viewWuwWaveform"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:layout_marginTop="4dp"
+            android:background="#1A1A2E"
+            android:visibility="gone" />
+
+        <!-- Similarity history summary -->
+        <TextView
+            android:id="@+id/txtWuwSimilarityHistory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:padding="4dp"
+            android:background="#FFECB3"
+            android:textColor="#4E342E"
+            android:textSize="10sp"
+            android:typeface="monospace"
+            android:visibility="gone"
+            android:text="" />
+
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"

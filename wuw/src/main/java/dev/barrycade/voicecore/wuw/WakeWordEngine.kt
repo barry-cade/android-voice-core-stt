@@ -55,6 +55,14 @@ class WakeWordEngine(
     /** Number of processed frames since last reset. Used for periodic checks. */
     private var processedFrames: Int = 0
 
+    /**
+     * Snapshot of the current PCM buffer for waveform visualization.
+     * Returns a copy of the current sliding window (safe for UI thread display).
+     */
+    fun getPcmSnapshot(): ShortArray {
+        return pcmBuffer.copyOfRange(0, currentBufferSize)
+    }
+
     /** Check every N frames to avoid excessive computation. */
     @Volatile
     var checkIntervalFrames: Int = 5

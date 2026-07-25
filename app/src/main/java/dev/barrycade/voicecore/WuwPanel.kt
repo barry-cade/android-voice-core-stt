@@ -37,6 +37,31 @@ class WuwPanel(private val activity: MainActivity) {
     private val seekWuwThreshold: SeekBar = activity.findViewById(R.id.seekWuwThreshold)
     private val radioWuwTemplates: RadioGroup = activity.findViewById(R.id.radioWuwTemplates)
     private val progressWuwSimilarity: ProgressBar = activity.findViewById(R.id.progressWuwSimilarity)
+    private val viewWuwWaveform: WuwWaveformView = activity.findViewById(R.id.viewWuwWaveform)
+    private val txtWuwSimilarityHistory: TextView = activity.findViewById(R.id.txtWuwSimilarityHistory)
+
+    // Rolling similarity history (max 20 entries)
+    private val similarityHistory = mutableListOf<Float>()
+
+    /** Add a value to the rolling history, capped at 20. */
+    private fun addSimilarity(value: Float) {
+        similarityHistory.add(value)
+        if (similarityHistory.size > 20) {
+            similarityHistory.removeAt(0)
+        }
+    }
+
+    /** Format the history summary text. */
+    private fun formatSimilarityHistory(): String {
+        val history = similarityHistory
+        if (history.isEmpty()) return ""
+        val min = history.minOrNull() ?: 0f
+        val max = history.maxOrNull() ?: 0f
+        val avg = history.average().toFloat()
+        val last = history.last()
+        return String.format(Locale.US, "Last: %.2f | Min: %.2f | Avg: %.2f | Max: %.2f | Samples: %d",
+            last, min, avg, max, history.size)
+    }
 
     // Calibration UI
     private val chkWuwCalibration = activity.findViewById<CheckBox>(R.id.chkWuwCalibration)
@@ -470,11 +495,24 @@ class WuwPanel(private val activity: MainActivity) {
             return
         }
         manager.setTemplateDirectly(template)
+
+        // Reset similarity history for new listening session
+        similarityHistory.clear()
+
         manager.similarityListener = { similarity ->
             val target = seekWuwThreshold.progress / 100f
             activity.runOnUiThread {
+                addSimilarity(similarity)
                 progressWuwSimilarity.progress = (similarity * 100).toInt()
+                txtWuwSimilarityHistory.text = formatSimilarityHistory()
                 txtWuwOutput.text = String.format(Locale.US, "Listening using '%s'\nCurrent: %.2f | Target: %.2f", templateName, similarity, target)
+            }
+        }
+
+        // Pipe PCM data to the waveform view
+        manager.pcmListener = { pcm ->
+            activity.runOnUiThread {
+                viewWuwWaveform.pcmSamples = pcm
             }
         }
         manager.wakeWordListener = WakeWordListener {
@@ -517,6 +555,9 @@ class WuwPanel(private val activity: MainActivity) {
         seekWuwThreshold.isEnabled = false
         progressWuwSimilarity.visibility = View.VISIBLE
         progressWuwSimilarity.progress = 0
+        viewWuwWaveform.visibility = View.VISIBLE
+        txtWuwSimilarityHistory.visibility = View.VISIBLE
+        txtWuwSimilarityHistory.text = ""
     }
 
     fun updateWuwUiStopped() {
@@ -530,6 +571,8 @@ class WuwPanel(private val activity: MainActivity) {
         btnWuwDelete.isEnabled = selectedWuwTemplate != null
         setViewEnabled(radioWuwTemplates, true)
         seekWuwThreshold.isEnabled = true
+        viewWuwWaveform.visibility = View.GONE
+        txtWuwSimilarityHistory.visibility = View.GONE
         progressWuwSimilarity.visibility = View.GONE
     }
 
