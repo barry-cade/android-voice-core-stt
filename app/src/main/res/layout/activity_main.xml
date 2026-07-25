@@ -357,6 +357,23 @@
                 android:orientation="vertical" />
         </ScrollView>
 
+        <!-- Template waveform preview -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Template Waveform"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp" />
+
+        <dev.barrycade.voicecore.WuwWaveformView
+            android:id="@+id/viewWuwTemplateWaveform"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="2dp"
+            android:background="#1A1A2E"
+            android:visibility="visible" />
+
         <!-- WUW Action Buttons -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -798,16 +815,16 @@
             android:progress="0"
             android:visibility="gone" />
 
-        <!-- Live waveform visualization -->
+        <!-- Live waveform visualization (always visible) -->
         <dev.barrycade.voicecore.WuwWaveformView
             android:id="@+id/viewWuwWaveform"
             android:layout_width="match_parent"
             android:layout_height="60dp"
             android:layout_marginTop="4dp"
             android:background="#1A1A2E"
-            android:visibility="gone" />
+            android:visibility="visible" />
 
-        <!-- Similarity history summary -->
+        <!-- Similarity history summary (always visible) -->
         <TextView
             android:id="@+id/txtWuwSimilarityHistory"
             android:layout_width="match_parent"
@@ -818,7 +835,7 @@
             android:textColor="#4E342E"
             android:textSize="10sp"
             android:typeface="monospace"
-            android:visibility="gone"
+            android:visibility="visible"
             android:text="" />
 
         <ScrollView

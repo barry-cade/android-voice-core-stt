@@ -38,6 +38,7 @@ class WuwPanel(private val activity: MainActivity) {
     private val radioWuwTemplates: RadioGroup = activity.findViewById(R.id.radioWuwTemplates)
     private val progressWuwSimilarity: ProgressBar = activity.findViewById(R.id.progressWuwSimilarity)
     private val viewWuwWaveform: WuwWaveformView = activity.findViewById(R.id.viewWuwWaveform)
+    private val viewWuwTemplateWaveform: WuwWaveformView = activity.findViewById(R.id.viewWuwTemplateWaveform)
     private val txtWuwSimilarityHistory: TextView = activity.findViewById(R.id.txtWuwSimilarityHistory)
 
     // Rolling similarity history (max 20 entries)
@@ -92,6 +93,22 @@ class WuwPanel(private val activity: MainActivity) {
     private var isPlayingWuwTemplate: Boolean = false
     private var selectedWuwTemplate: String? = null
 
+    /** Load the selected template's PCM and display it on the template waveform view. */
+    private fun updateTemplateWaveform() {
+        val name = selectedWuwTemplate
+        val store = wuwTemplateStore
+        if (name == null || store == null) {
+            viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
+            return
+        }
+        val pcm = store.loadPcm(name)
+        if (pcm != null && pcm.isNotEmpty()) {
+            viewWuwTemplateWaveform.pcmSamples = pcm
+        } else {
+            viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
+        }
+    }
+
     init {
         btnWuwRecord.setOnClickListener {
             if (activity.hasRecordAudioPermission()) {
@@ -128,11 +145,13 @@ class WuwPanel(private val activity: MainActivity) {
                 btnWuwPlay.isEnabled = true
                 btnWuwMatch.isEnabled = true
                 btnWuwDelete.isEnabled = true
+                updateTemplateWaveform()
             } else {
                 selectedWuwTemplate = null
                 btnWuwPlay.isEnabled = false
                 btnWuwMatch.isEnabled = false
                 btnWuwDelete.isEnabled = false
+                viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
             }
         }
 
@@ -570,9 +589,6 @@ class WuwPanel(private val activity: MainActivity) {
         seekWuwThreshold.isEnabled = false
         progressWuwSimilarity.visibility = View.VISIBLE
         progressWuwSimilarity.progress = 0
-        viewWuwWaveform.visibility = View.VISIBLE
-        txtWuwSimilarityHistory.visibility = View.VISIBLE
-        txtWuwSimilarityHistory.text = ""
     }
 
     fun updateWuwUiStopped() {
@@ -586,8 +602,6 @@ class WuwPanel(private val activity: MainActivity) {
         btnWuwDelete.isEnabled = selectedWuwTemplate != null
         setViewEnabled(radioWuwTemplates, true)
         seekWuwThreshold.isEnabled = true
-        viewWuwWaveform.visibility = View.GONE
-        txtWuwSimilarityHistory.visibility = View.GONE
         progressWuwSimilarity.visibility = View.GONE
     }
 

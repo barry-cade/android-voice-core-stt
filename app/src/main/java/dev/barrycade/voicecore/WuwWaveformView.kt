@@ -34,7 +34,7 @@ class WuwWaveformView(
     private var peakSmoothing: Float = 0.3f
 
     private val waveformPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(180, 74, 20, 140) // Purple 800
+        color = Color.argb(200, 255, 105, 180) // Hot pink
         style = Paint.Style.FILL
     }
 
