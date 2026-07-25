@@ -26,4 +26,8 @@
     <string name="wuw_check_interval">Check Interval</string>
     <string name="wuw_similarity_k">Similarity K</string>
     <string name="wuw_pre_emphasis">Pre-Emphasis</string>
+    <string name="wuw_num_coeffs">MFCC Coeffs</string>
+    <string name="wuw_frame_duration">Frame Duration</string>
+    <string name="wuw_frame_stride">Frame Stride</string>
+    <string name="wuw_show_calibration">Show Calibration</string>
 </resources>

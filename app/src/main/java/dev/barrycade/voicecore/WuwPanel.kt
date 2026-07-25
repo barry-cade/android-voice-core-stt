@@ -9,6 +9,7 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.RadioButton
@@ -36,6 +37,27 @@ class WuwPanel(private val activity: MainActivity) {
     private val seekWuwThreshold: SeekBar = activity.findViewById(R.id.seekWuwThreshold)
     private val radioWuwTemplates: RadioGroup = activity.findViewById(R.id.radioWuwTemplates)
     private val progressWuwSimilarity: ProgressBar = activity.findViewById(R.id.progressWuwSimilarity)
+
+    // Calibration UI
+    private val chkWuwCalibration = activity.findViewById<CheckBox>(R.id.chkWuwCalibration)
+    private val panelWuwCalibration = activity.findViewById<View>(R.id.panelWuwCalibration)
+    private val seekWuwRecDuration = activity.findViewById<SeekBar>(R.id.seekWuwRecDuration)
+    private val txtWuwRecDuration = activity.findViewById<TextView>(R.id.txtWuwRecDuration)
+    private val seekWuwMinFrames = activity.findViewById<SeekBar>(R.id.seekWuwMinFrames)
+    private val txtWuwMinFrames = activity.findViewById<TextView>(R.id.txtWuwMinFrames)
+    private val seekWuwMaxFrames = activity.findViewById<SeekBar>(R.id.seekWuwMaxFrames)
+    private val txtWuwMaxFrames = activity.findViewById<TextView>(R.id.txtWuwMaxFrames)
+    private val seekWuwCheckInterval = activity.findViewById<SeekBar>(R.id.seekWuwCheckInterval)
+    private val txtWuwCheckInterval = activity.findViewById<TextView>(R.id.txtWuwCheckInterval)
+    private val seekWuwSimilarityK = activity.findViewById<SeekBar>(R.id.seekWuwSimilarityK)
+    private val txtWuwSimilarityK = activity.findViewById<TextView>(R.id.txtWuwSimilarityK)
+    private val seekWuwPreEmphasis = activity.findViewById<SeekBar>(R.id.seekWuwPreEmphasis)
+    private val txtWuwPreEmphasis = activity.findViewById<TextView>(R.id.txtWuwPreEmphasis)
+    private val radioWuwNumCoeffs = activity.findViewById<RadioGroup>(R.id.radioWuwNumCoeffs)
+    private val seekWuwFrameDuration = activity.findViewById<SeekBar>(R.id.seekWuwFrameDuration)
+    private val txtWuwFrameDuration = activity.findViewById<TextView>(R.id.txtWuwFrameDuration)
+    private val seekWuwFrameStride = activity.findViewById<SeekBar>(R.id.seekWuwFrameStride)
+    private val txtWuwFrameStride = activity.findViewById<TextView>(R.id.txtWuwFrameStride)
 
     var wuwSessionManager: WakeWordSessionManager? = null
         private set
@@ -96,6 +118,130 @@ class WuwPanel(private val activity: MainActivity) {
             }
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+
+        // Calibration toggle
+        chkWuwCalibration.setOnCheckedChangeListener { _, isChecked ->
+            panelWuwCalibration.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+
+        // Rec duration (0-14 -> 1000-8000 step 500)
+        seekWuwRecDuration.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwRecDuration.text = "${1000 + progress * 500}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+        })
+
+        // Min frames (0-27 -> 3-30)
+        seekWuwMinFrames.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwMinFrames.text = "${3 + progress}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                wuwSessionManager?.getEngine()?.let { engine ->
+                    engine.minFramesForMatch = txtWuwMinFrames.text.toString().toInt()
+                }
+            }
+        })
+
+        // Max frames (0-100 -> 20-120)
+        seekWuwMaxFrames.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwMaxFrames.text = "${20 + progress}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                wuwSessionManager?.getEngine()?.let { engine ->
+                    engine.maxFramesForMatch = txtWuwMaxFrames.text.toString().toInt()
+                }
+            }
+        })
+
+        // Check interval (0-19 -> 1-20)
+        seekWuwCheckInterval.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwCheckInterval.text = "${1 + progress}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                wuwSessionManager?.getEngine()?.let { engine ->
+                    engine.checkIntervalFrames = txtWuwCheckInterval.text.toString().toInt()
+                }
+            }
+        })
+
+        // Similarity K (0-19 -> 0.1-2.0 step 0.1)
+        seekWuwSimilarityK.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwSimilarityK.text = String.format("%.1f", 0.1f + progress * 0.1f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                wuwSessionManager?.getEngine()?.let { engine ->
+                    engine.similarityK = 0.1f + seekWuwSimilarityK.progress * 0.1f
+                }
+            }
+        })
+
+        // Pre-emphasis (0-99 -> 0.00-0.99 step 0.01)
+        seekWuwPreEmphasis.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwPreEmphasis.text = String.format("%.2f", progress / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val alpha = seekWuwPreEmphasis.progress / 100f
+                wuwSessionManager?.getMfccExtractor()?.let { extractor ->
+                    extractor.preEmphasisAlpha = alpha
+                }
+            }
+        })
+
+        // MFCC coefficients radio group
+        radioWuwNumCoeffs.setOnCheckedChangeListener { _, checkedId ->
+            val coeffs = when (checkedId) {
+                R.id.radioWuwCoeff8 -> 8
+                R.id.radioWuwCoeff13 -> 13
+                R.id.radioWuwCoeff20 -> 20
+                else -> 13
+            }
+            wuwSessionManager?.getMfccExtractor()?.let { extractor ->
+                extractor.numCoefficients = coeffs
+                extractor.rebuildDerived()
+            }
+        }
+
+        // Frame duration (0-7 -> 15-50 step 5)
+        seekWuwFrameDuration.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwFrameDuration.text = "${15 + progress * 5}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val durationMs = 15 + seekWuwFrameDuration.progress * 5
+                wuwSessionManager?.getMfccExtractor()?.let { extractor ->
+                    extractor.frameDurationMs = durationMs
+                    extractor.rebuildDerived()
+                }
+            }
+        })
+
+        // Frame stride (0-3 -> 5-20 step 5)
+        seekWuwFrameStride.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                txtWuwFrameStride.text = "${5 + progress * 5}"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val strideMs = 5 + seekWuwFrameStride.progress * 5
+                wuwSessionManager?.getMfccExtractor()?.let { extractor ->
+                    extractor.frameStrideMs = strideMs
+                    extractor.rebuildDerived()
+                }
+            }
         })
 
         wuwTemplateStore = TemplateStore(activity)
