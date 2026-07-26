@@ -42,8 +42,8 @@ class WuwPanel(private val activity: MainActivity) {
     private val seekWuwThreshold: SeekBar = activity.findViewById(R.id.seekWuwThreshold)
     private val radioWuwTemplates: RadioGroup = activity.findViewById(R.id.radioWuwTemplates)
     private val progressWuwSimilarity: ProgressBar = activity.findViewById(R.id.progressWuwSimilarity)
-    private val viewWuwWaveform: WuwWaveformView = activity.findViewById(R.id.viewWuwWaveform)
-    private val viewWuwTemplateWaveform: WuwWaveformView = activity.findViewById(R.id.viewWuwTemplateWaveform)
+    private val viewWuwLiveHeatmap: MfccHeatmapView = activity.findViewById(R.id.viewWuwLiveHeatmap)
+    private val viewWuwTemplateHeatmap: MfccHeatmapView = activity.findViewById(R.id.viewWuwTemplateHeatmap)
     private val txtWuwSimilarityHistory: TextView = activity.findViewById(R.id.txtWuwSimilarityHistory)
 
     // Rolling similarity history (max 20 entries)
@@ -112,25 +112,22 @@ class WuwPanel(private val activity: MainActivity) {
         return maxOf(rms, 0.01f)
     }
 
-    /** Load the selected template's PCM and display it on the template waveform view. */
+    /** Load the selected template's MFCC frames and display on the template heatmap. */
     private fun updateTemplateWaveform() {
         val name = selectedWuwTemplate
         val store = wuwTemplateStore
         if (name == null || store == null) {
-            viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
+            viewWuwTemplateHeatmap.frames = emptyList()
+            viewWuwTemplateHeatmap.invalidate()
             return
         }
-        val pcm = store.loadPcm(name)
-        if (pcm != null && pcm.isNotEmpty()) {
-            viewWuwTemplateWaveform.pcmSamples = pcm
-            // Use fixed-pixel mode for scrolling, 4 samples per pixel
-            viewWuwTemplateWaveform.useFixedPixelMode = true
-            viewWuwTemplateWaveform.fixedSamplesPerPixel = 4
-            // Lock the scale for visual comparison
-            val peak = computeRmsPeak(pcm)
-            viewWuwTemplateWaveform.fixedPeak = peak
+        val mfccFrames = store.loadTemplate(name)
+        if (mfccFrames.isNotEmpty()) {
+            viewWuwTemplateHeatmap.frames = mfccFrames
+            viewWuwTemplateHeatmap.invalidate()
         } else {
-            viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
+            viewWuwTemplateHeatmap.frames = emptyList()
+            viewWuwTemplateHeatmap.invalidate()
         }
     }
 
@@ -196,7 +193,8 @@ class WuwPanel(private val activity: MainActivity) {
                 btnWuwPlay.isEnabled = false
                 btnWuwMatch.isEnabled = false
                 btnWuwDelete.isEnabled = false
-                viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
+                viewWuwTemplateHeatmap.frames = emptyList()
+                viewWuwTemplateHeatmap.invalidate()
             }
         }
 
@@ -581,10 +579,11 @@ class WuwPanel(private val activity: MainActivity) {
             }
         }
 
-        // Pipe PCM data to the waveform view
-        manager.pcmListener = { pcm ->
+        // Pipe MFCC frames to live heatmap
+        manager.mfccListener = { frames ->
             activity.runOnUiThread {
-                viewWuwWaveform.pcmSamples = pcm
+                viewWuwLiveHeatmap.frames = frames
+                viewWuwLiveHeatmap.invalidate()
             }
         }
         manager.wakeWordListener = WakeWordListener {
