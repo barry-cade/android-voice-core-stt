@@ -194,7 +194,7 @@ class MfccExtractor(
             }
         }
 
-        if (firstActive < 0 || lastActive < 0) return ShortArray(0)
+        if (firstActive < 0) return ShortArray(0)
 
         val trimStart = firstActive * frameSize
         val trimEnd = minOf((lastActive + 1) * frameSize, pcm.size)

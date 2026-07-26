@@ -93,6 +93,20 @@ class WuwPanel(private val activity: MainActivity) {
     private var isPlayingWuwTemplate: Boolean = false
     private var selectedWuwTemplate: String? = null
 
+    /**
+     * Compute the RMS peak amplitude of a PCM buffer for shared scaling.
+     */
+    private fun computeRmsPeak(pcm: ShortArray): Float {
+        if (pcm.isEmpty()) return 1f
+        var sumSq = 0.0
+        for (s in pcm) {
+            val norm = s / 32768.0
+            sumSq += norm * norm
+        }
+        val rms = kotlin.math.sqrt(sumSq / pcm.size).toFloat()
+        return maxOf(rms, 0.01f)
+    }
+
     /** Load the selected template's PCM and display it on the template waveform view. */
     private fun updateTemplateWaveform() {
         val name = selectedWuwTemplate
@@ -104,6 +118,12 @@ class WuwPanel(private val activity: MainActivity) {
         val pcm = store.loadPcm(name)
         if (pcm != null && pcm.isNotEmpty()) {
             viewWuwTemplateWaveform.pcmSamples = pcm
+            // Use fixed-pixel mode for scrolling, 4 samples per pixel
+            viewWuwTemplateWaveform.useFixedPixelMode = true
+            viewWuwTemplateWaveform.fixedSamplesPerPixel = 4
+            // Lock the scale for visual comparison
+            val peak = computeRmsPeak(pcm)
+            viewWuwTemplateWaveform.fixedPeak = peak
         } else {
             viewWuwTemplateWaveform.pcmSamples = ShortArray(0)
         }
