@@ -32,7 +32,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/wuw" />
-    </LinearLayout>
+</LinearLayout>
 
     <!-- Whisper panel -->
     <LinearLayout
@@ -887,6 +887,13 @@
             </LinearLayout>
         </ScrollView>
     </LinearLayout>
+
+    <Button
+        android:id="@+id/btnDumpMfcc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Dump MFCC"
+        android:layout_marginTop="8dp" />
 
 </LinearLayout>
 
