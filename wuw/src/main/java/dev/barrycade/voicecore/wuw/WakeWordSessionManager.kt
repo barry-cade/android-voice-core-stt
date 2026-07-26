@@ -50,6 +50,8 @@ class WakeWordSessionManager(
      */
     var pcmListener: ((ShortArray) -> Unit)? = null
 
+    var mfccListener: ((List<FloatArray>) -> Unit)? = null
+
     /**
      * Fired when the session auto-stops due to sustained silence after speech.
      * [peakSimilarity] is the highest similarity observed during the session.
@@ -123,6 +125,12 @@ class WakeWordSessionManager(
                 peakSimilarity = similarity
             }
             externalSimilarityListener?.invoke(similarity)
+        }
+        // Wire up MFCC frame forwarding
+        wakeWordEngine.mfccFrameListener = { frames ->
+            mainHandler.post {
+                mfccListener?.invoke(frames)
+            }
         }
         active.set(true)
         isListening = true
