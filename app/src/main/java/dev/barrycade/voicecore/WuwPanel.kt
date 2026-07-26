@@ -7,6 +7,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
@@ -25,6 +26,10 @@ import java.util.*
  * Manages the Wake Word (WUW) engine UI and lifecycle.
  */
 class WuwPanel(private val activity: MainActivity) {
+
+    private lateinit var btnDumpMfcc: Button
+    private var templateMfccFrames: List<FloatArray>? = null
+    private var liveMfccFrames: List<FloatArray>? = null
 
     private val txtWuwStatus: TextView = activity.findViewById(R.id.txtWuwStatus)
     private val txtWuwOutput: TextView = activity.findViewById(R.id.txtWuwOutput)
@@ -130,6 +135,26 @@ class WuwPanel(private val activity: MainActivity) {
     }
 
     init {
+        btnDumpMfcc = activity.findViewById(R.id.btnDumpMfcc)
+
+        btnDumpMfcc.setOnClickListener {
+            Log.i("WuwMfccDump", "=== MFCC DUMP ===")
+
+            templateMfccFrames?.let { frames ->
+                Log.i("WuwMfccDump", "Template frames: ${frames.size}")
+                frames.forEachIndexed { index, coeffs ->
+                    Log.i("WuwMfccDump", "T$index: ${coeffs.joinToString(",")}")
+                }
+            }
+
+            liveMfccFrames?.let { frames ->
+                Log.i("WuwMfccDump", "Live frames: ${frames.size}")
+                frames.forEachIndexed { index, coeffs ->
+                    Log.i("WuwMfccDump", "L$index: ${coeffs.joinToString(",")}")
+                }
+            }
+        }
+
         btnWuwRecord.setOnClickListener {
             if (activity.hasRecordAudioPermission()) {
                 startWuwTemplateRecording()
@@ -312,6 +337,14 @@ class WuwPanel(private val activity: MainActivity) {
 
         wuwTemplateStore = TemplateStore(activity)
         refreshWuwTemplateList()
+    }
+
+    fun setTemplateMfccFrames(frames: List<FloatArray>) {
+        templateMfccFrames = frames
+    }
+
+    fun setLiveMfccFrames(frames: List<FloatArray>) {
+        liveMfccFrames = frames
     }
 
     fun refreshWuwTemplateList() {
