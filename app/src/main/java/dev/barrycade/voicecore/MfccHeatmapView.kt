@@ -34,6 +34,20 @@ class MfccHeatmapView @JvmOverloads constructor(
     var globalMin: Float = -2f
     var globalMax: Float = 2f
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        if (frames.isNotEmpty()) {
+            val cols = frames.size
+            // Compute content width: 60px label area + 12px per column + padding
+            val labelWidth = 60f
+            val colWidth = 12f
+            val desiredWidth = (labelWidth + colWidth * cols).toInt() + 4
+            val width = MeasureSpec.makeMeasureSpec(desiredWidth, MeasureSpec.EXACTLY)
+            super.onMeasure(width, heightMeasureSpec)
+        } else {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (frames.isEmpty()) return

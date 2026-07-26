@@ -118,15 +118,18 @@ class WuwPanel(private val activity: MainActivity) {
         val store = wuwTemplateStore
         if (name == null || store == null) {
             viewWuwTemplateHeatmap.frames = emptyList()
+            viewWuwTemplateHeatmap.requestLayout()
             viewWuwTemplateHeatmap.invalidate()
             return
         }
         val mfccFrames = store.loadTemplate(name)
         if (mfccFrames.isNotEmpty()) {
             viewWuwTemplateHeatmap.frames = mfccFrames
+            viewWuwTemplateHeatmap.requestLayout()
             viewWuwTemplateHeatmap.invalidate()
         } else {
             viewWuwTemplateHeatmap.frames = emptyList()
+            viewWuwTemplateHeatmap.requestLayout()
             viewWuwTemplateHeatmap.invalidate()
         }
     }
@@ -194,6 +197,7 @@ class WuwPanel(private val activity: MainActivity) {
                 btnWuwMatch.isEnabled = false
                 btnWuwDelete.isEnabled = false
                 viewWuwTemplateHeatmap.frames = emptyList()
+                viewWuwTemplateHeatmap.requestLayout()
                 viewWuwTemplateHeatmap.invalidate()
             }
         }
@@ -583,6 +587,7 @@ class WuwPanel(private val activity: MainActivity) {
         manager.mfccListener = { frames ->
             activity.runOnUiThread {
                 viewWuwLiveHeatmap.frames = frames
+                viewWuwLiveHeatmap.requestLayout()
                 viewWuwLiveHeatmap.invalidate()
             }
         }
