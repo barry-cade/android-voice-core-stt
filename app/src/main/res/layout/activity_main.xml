@@ -821,14 +821,20 @@
             android:progress="0"
             android:visibility="gone" />
 
-        <!-- Live waveform visualization (always visible) -->
-        <dev.barrycade.voicecore.WuwWaveformView
-            android:id="@+id/viewWuwWaveform"
+        <!-- Live waveform visualization (always visible, horizontally scrollable) -->
+        <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="60dp"
             android:layout_marginTop="4dp"
-            android:background="#1A1A2E"
-            android:visibility="visible" />
+            android:scrollbars="horizontal">
+
+            <dev.barrycade.voicecore.WuwWaveformView
+                android:id="@+id/viewWuwWaveform"
+                android:layout_width="wrap_content"
+                android:layout_height="60dp"
+                android:background="#1A1A2E"
+                android:visibility="visible" />
+        </HorizontalScrollView>
 
         <!-- Similarity history summary (always visible) -->
         <TextView
