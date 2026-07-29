@@ -176,9 +176,6 @@ class WakeWordEngine(
         val rawLiveFrames = mfccExtractor.extract(trimmedLivePcm)
         if (rawLiveFrames.size < minFramesForMatch) return
 
-        // Notify listener with MFCC frames
-        mfccFrameListener?.invoke(rawLiveFrames)
-
         // Take only the most recent frames
         val recentRawFrames = if (rawLiveFrames.size > maxFramesForMatch) {
             rawLiveFrames.subList(rawLiveFrames.size - maxFramesForMatch, rawLiveFrames.size)
@@ -187,6 +184,9 @@ class WakeWordEngine(
         }
 
         val liveFrames = mfccExtractor.normalizeFrames(recentRawFrames)
+
+        // Notify listener with the normalized frames that will be compared
+        mfccFrameListener?.invoke(liveFrames)
 
         // Compute DTW distance
         val distance = mfccExtractor.dtwDistance(templ, liveFrames)

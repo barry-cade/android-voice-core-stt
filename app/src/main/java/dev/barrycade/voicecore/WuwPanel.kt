@@ -124,7 +124,8 @@ class WuwPanel(private val activity: MainActivity) {
         }
         val mfccFrames = store.loadTemplate(name)
         if (mfccFrames.isNotEmpty()) {
-            viewWuwTemplateHeatmap.frames = mfccFrames
+            val normalized = MfccExtractor().normalizeFrames(mfccFrames)
+            viewWuwTemplateHeatmap.frames = normalized
             viewWuwTemplateHeatmap.requestLayout()
             viewWuwTemplateHeatmap.invalidate()
         } else {
